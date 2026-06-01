@@ -123,13 +123,13 @@ async function main() {
   }
 
   // Admin user
-  const existingAdmin = await prisma.user.findUnique({ where: { email: 'admin@financebook.com' } })
+  const existingAdmin = await prisma.user.findUnique({ where: { email: 'admin@hisab.ai' } })
   if (!existingAdmin) {
     const hashed = await bcrypt.hash('admin123', 10)
     await prisma.user.create({
       data: {
         name: 'System Administrator',
-        email: 'admin@financebook.com',
+        email: 'admin@hisab.ai',
         password: hashed,
         role: 'ADMIN',
         isActive: true,
@@ -139,13 +139,13 @@ async function main() {
   }
 
   // Accountant user
-  const existingAccountant = await prisma.user.findUnique({ where: { email: 'accountant@financebook.com' } })
+  const existingAccountant = await prisma.user.findUnique({ where: { email: 'accountant@hisab.ai' } })
   if (!existingAccountant) {
     const hashed = await bcrypt.hash('accountant123', 10)
     await prisma.user.create({
       data: {
         name: 'Senior Accountant',
-        email: 'accountant@financebook.com',
+        email: 'accountant@hisab.ai',
         password: hashed,
         role: 'ACCOUNTANT',
         isActive: true,

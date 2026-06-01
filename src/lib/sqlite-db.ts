@@ -3,7 +3,7 @@ import os from 'os'
 import path from 'path'
 
 const bundledDbPath = path.join(process.cwd(), 'prisma', 'dev.db')
-const tmpDbPath = path.join(os.tmpdir(), 'financebook', 'dev.db')
+const tmpDbPath = path.join(os.tmpdir(), 'hisab-ai', 'dev.db')
 
 export function getSqliteDatabaseUrl() {
   if (process.env.VERCEL || process.env.NODE_ENV === 'production') {

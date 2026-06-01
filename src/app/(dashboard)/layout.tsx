@@ -10,6 +10,7 @@ import {
   Menu, X, List, Bell, ChevronDown, TrendingUp
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { DEMO_ADMIN_EMAIL, PRODUCT_NAME } from '@/lib/brand'
 
 const NAV = [
   {
@@ -109,7 +110,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
         {(!collapsed || mobile) && (
           <div className="overflow-hidden">
-            <div className="text-white font-bold text-sm leading-tight">QuickBook</div>
+            <div className="text-white font-bold text-sm leading-tight">{PRODUCT_NAME}</div>
             <div className="text-indigo-300 text-[10px] font-medium truncate max-w-[130px] leading-tight mt-0.5">
               NETKOM Co.
             </div>
@@ -293,7 +294,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-lg border border-slate-200 py-1 z-30 animate-scale-in">
                     <div className="px-4 py-2 border-b border-slate-100">
                       <p className="text-xs font-semibold text-slate-700">Admin User</p>
-                      <p className="text-xs text-slate-400">admin@financebook.com</p>
+                      <p className="text-xs text-slate-400">{DEMO_ADMIN_EMAIL}</p>
                     </div>
                     <a href="/settings" className="flex items-center gap-2 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">
                       <Settings size={14} /> Settings

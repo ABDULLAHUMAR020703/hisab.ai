@@ -3,10 +3,11 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Eye, EyeOff, TrendingUp, Lock, Mail } from 'lucide-react'
+import { DEMO_ADMIN_EMAIL, PRODUCT_NAME } from '@/lib/brand'
 
 export default function LoginPage() {
   const router = useRouter()
-  const [email, setEmail] = useState('admin@financebook.com')
+  const [email, setEmail] = useState(DEMO_ADMIN_EMAIL)
   const [password, setPassword] = useState('admin123')
   const [showPwd, setShowPwd] = useState(false)
   const [error, setError] = useState('')
@@ -61,7 +62,7 @@ export default function LoginPage() {
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg">
               <TrendingUp size={20} className="text-white" />
             </div>
-            <span className="text-white font-bold text-xl">QuickBook</span>
+            <span className="text-white font-bold text-xl">{PRODUCT_NAME}</span>
           </div>
 
           {/* Hero text */}
@@ -100,7 +101,7 @@ export default function LoginPage() {
 
           {/* Bottom */}
           <p className="text-slate-600 text-xs">
-            © 2025 QuickBook · NETKOM COMPANY FOR COMMUNICATION
+            © {new Date().getFullYear()} {PRODUCT_NAME} · NETKOM COMPANY FOR COMMUNICATION
           </p>
         </div>
       </div>
@@ -114,7 +115,7 @@ export default function LoginPage() {
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center">
               <TrendingUp size={20} className="text-white" />
             </div>
-            <span className="text-slate-900 font-bold text-xl">QuickBook</span>
+            <span className="text-slate-900 font-bold text-xl">{PRODUCT_NAME}</span>
           </div>
 
           <div className="mb-8">
@@ -197,7 +198,7 @@ export default function LoginPage() {
             <div className="space-y-1">
               <div className="flex justify-between text-xs">
                 <span className="text-slate-400">Email</span>
-                <span className="font-mono text-slate-700">admin@financebook.com</span>
+                <span className="font-mono text-slate-700">{DEMO_ADMIN_EMAIL}</span>
               </div>
               <div className="flex justify-between text-xs">
                 <span className="text-slate-400">Password</span>

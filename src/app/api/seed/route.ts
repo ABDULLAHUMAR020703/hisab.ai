@@ -106,13 +106,13 @@ export async function POST() {
     }
 
     // Admin user
-    const existingAdmin = await prisma.user.findUnique({ where: { email: 'admin@financebook.com' } })
+    const existingAdmin = await prisma.user.findUnique({ where: { email: 'admin@hisab.ai' } })
     if (!existingAdmin) {
       const hashed = await bcrypt.hash('admin123', 10)
       await prisma.user.create({
         data: {
           name: 'System Administrator',
-          email: 'admin@financebook.com',
+          email: 'admin@hisab.ai',
           password: hashed,
           role: 'ADMIN',
           isActive: true,

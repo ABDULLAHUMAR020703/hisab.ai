@@ -1,6 +1,6 @@
-# Quickbook
+# hisab.ai
 
-A full-featured small-business accounting web application inspired by QuickBooks-style workflows. Manage chart of accounts, sales and purchases, expenses, payroll, inventory, and financial reporting from a single dashboard.
+A full-featured small-business accounting web application. Manage chart of accounts, sales and purchases, expenses, payroll, inventory, and financial reporting from a single dashboard.
 
 Built with **Next.js 16**, **React 19**, **Prisma 7**, and **SQLite** — ideal for local development, demos, and small teams.
 
@@ -133,8 +133,8 @@ Open **[http://localhost:3000](http://localhost:3000)** in your browser.
 
 | Role | Email | Password |
 |------|--------|----------|
-| Admin | `admin@financebook.com` | `admin123` |
-| Accountant | `accountant@financebook.com` | `accountant123` |
+| Admin | `admin@hisab.ai` | `admin123` |
+| Accountant | `accountant@hisab.ai` | `accountant123` |
 
 > These accounts are for **development only**. Change or remove them before any public deployment.
 
@@ -160,7 +160,7 @@ You can also load sample data from the dashboard via **Load sample data** (calls
 ## Project structure
 
 ```
-Quickbook/
+hisab.ai/
 ├── prisma/
 │   ├── schema.prisma      # Data models
 │   └── seed.ts            # Database seed script

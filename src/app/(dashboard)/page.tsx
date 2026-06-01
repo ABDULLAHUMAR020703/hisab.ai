@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { PRODUCT_NAME } from '@/lib/brand'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar,
@@ -193,7 +194,7 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-xl font-bold text-slate-900">Financial Overview</h1>
           <p className="text-slate-500 text-sm mt-0.5">
-            Live summary of all activity across Quickbook · {new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+            Live summary of all activity across {PRODUCT_NAME} · {new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">

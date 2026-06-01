@@ -5,8 +5,8 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'QuickBook - NETKOM COMPANY FOR COMMUNICATION',
-  description: 'Financial Management Portal',
+  title: 'hisab.ai — NETKOM COMPANY FOR COMMUNICATION',
+  description: 'hisab.ai — financial management and accounting',
 }
 
 export default function RootLayout({
