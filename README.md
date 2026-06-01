@@ -4,7 +4,7 @@ A full-featured small-business accounting web application. Manage chart of accou
 
 Built with **Next.js 16**, **React 19**, **Prisma 7**, and **SQLite** — ideal for local development, demos, and small teams.
 
-**Repository:** [github.com/AbdulSamadSaleem1208/QuickBooks-style-workflows](https://github.com/AbdulSamadSaleem1208/QuickBooks-style-workflows)
+**Repository:** [github.com/ABDULLAHUMAR020703/hisab.ai](https://github.com/ABDULLAHUMAR020703/hisab.ai)
 
 ---
 
@@ -85,8 +85,8 @@ Built with **Next.js 16**, **React 19**, **Prisma 7**, and **SQLite** — ideal 
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/AbdulSamadSaleem1208/QuickBooks-style-workflows.git
-cd QuickBooks-style-workflows
+git clone https://github.com/ABDULLAHUMAR020703/hisab.ai.git
+cd hisab.ai
 npm install
 ```
 
