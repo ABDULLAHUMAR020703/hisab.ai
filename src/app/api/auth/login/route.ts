@@ -1,9 +1,18 @@
 import { prisma } from '@/lib/prisma'
+import { ensureDemoUsers } from '@/lib/demo-users'
 import bcrypt from 'bcryptjs'
 import { randomBytes } from 'crypto'
 
+function sessionCookie(token: string) {
+  const maxAge = 7 * 24 * 60 * 60
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
+  return `session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`
+}
+
 export async function POST(request: Request) {
   try {
+    await ensureDemoUsers(prisma)
+
     const { email, password } = await request.json()
 
     if (!email || !password) {
@@ -38,10 +47,7 @@ export async function POST(request: Request) {
     })
 
     const headers = new Headers(response.headers)
-    headers.set(
-      'Set-Cookie',
-      `session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${7 * 24 * 60 * 60}`
-    )
+    headers.set('Set-Cookie', sessionCookie(token))
 
     return new Response(response.body, { status: 200, headers })
   } catch (error) {

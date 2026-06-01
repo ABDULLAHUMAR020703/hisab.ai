@@ -2,14 +2,17 @@
   "name": "hisab-ai",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22 <25"
+  },
   "scripts": {
     "dev": "next dev",
-    "postinstall": "prisma generate",
+    "postinstall": "prisma generate && npm rebuild better-sqlite3",
     "build": "prisma generate && next build",
+    "db:seed": "npm rebuild better-sqlite3 && npx tsx prisma/seed.ts",
     "start": "next start",
     "lint": "eslint",
     "db:push": "prisma db push",
-    "db:seed": "npx tsx prisma/seed.ts",
     "db:studio": "prisma studio"
   },
   "dependencies": {
