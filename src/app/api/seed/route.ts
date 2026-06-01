@@ -1,6 +1,5 @@
 import { prisma } from '@/lib/prisma'
 import { seedDemoTransactions } from '@/lib/demo-seed'
-import bcrypt from 'bcryptjs'
 
 const COA_ACCOUNTS = [
   { accountNo: '10', name: 'ASSETS', fullName: 'Assets', parentNo: null, accountType: 'Asset', subType: 'Header' },
@@ -105,20 +104,8 @@ export async function POST() {
       })
     }
 
-    // Admin user
-    const existingAdmin = await prisma.user.findUnique({ where: { email: 'admin@hisab.ai' } })
-    if (!existingAdmin) {
-      const hashed = await bcrypt.hash('admin123', 10)
-      await prisma.user.create({
-        data: {
-          name: 'System Administrator',
-          email: 'admin@hisab.ai',
-          password: hashed,
-          role: 'ADMIN',
-          isActive: true,
-        },
-      })
-    }
+    const { ensureDemoUsers } = await import('@/lib/demo-users')
+    await ensureDemoUsers(prisma)
 
     // COA accounts
     let coaCreated = 0

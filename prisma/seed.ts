@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3'
-import bcrypt from 'bcryptjs'
 import { getSqliteDatabaseUrl } from '../src/lib/sqlite-db'
+import { ensureDemoUsers } from '../src/lib/demo-users'
 
 const adapter = new PrismaBetterSqlite3({ url: getSqliteDatabaseUrl() })
 const prisma = new PrismaClient({ adapter })
@@ -122,37 +122,7 @@ async function main() {
     console.log('Created company settings')
   }
 
-  // Admin user
-  const existingAdmin = await prisma.user.findUnique({ where: { email: 'admin@hisab.ai' } })
-  if (!existingAdmin) {
-    const hashed = await bcrypt.hash('admin123', 10)
-    await prisma.user.create({
-      data: {
-        name: 'System Administrator',
-        email: 'admin@hisab.ai',
-        password: hashed,
-        role: 'ADMIN',
-        isActive: true,
-      },
-    })
-    console.log('Created admin user')
-  }
-
-  // Accountant user
-  const existingAccountant = await prisma.user.findUnique({ where: { email: 'accountant@hisab.ai' } })
-  if (!existingAccountant) {
-    const hashed = await bcrypt.hash('accountant123', 10)
-    await prisma.user.create({
-      data: {
-        name: 'Senior Accountant',
-        email: 'accountant@hisab.ai',
-        password: hashed,
-        role: 'ACCOUNTANT',
-        isActive: true,
-      },
-    })
-    console.log('Created accountant user')
-  }
+  await ensureDemoUsers(prisma)
 
   // COA accounts
   let coaCreated = 0
