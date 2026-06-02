@@ -1,13 +1,14 @@
 ﻿'use client'
 
 import { useEffect, useState } from 'react'
-import { Plus, RefreshCw } from 'lucide-react'
+import { Plus, RefreshCw, Upload } from 'lucide-react'
 import { formatDate, formatCurrency, cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { Input, Select } from '@/components/ui/input'
 import { PageHeader, SearchBar, FilterBar } from '@/components/ui/page-header'
+import { CsvImportModal } from '@/components/ui/csv-import-modal'
 
 interface Account { id: string; accountNo: string; name: string }
 interface Expense {
@@ -26,6 +27,7 @@ export default function ExpensesPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [showImport, setShowImport] = useState(false)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -73,7 +75,12 @@ export default function ExpensesPage() {
         title="Expenses"
         subtitle={`${expenses.length} expenses · ${formatCurrency(totalAmt)} total · ${pending} pending`}
         breadcrumb={[{ label: 'Expenses' }, { label: 'Expenses' }]}
-        action={<Button onClick={() => { setForm({ date: new Date().toISOString().split('T')[0], description: '', category: 'Travel', lines: [{ ...EMPTY_LINE }] }); setShowModal(true) }}><Plus size={15} /> New Expense</Button>}
+        action={
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setShowImport(true)}><Upload size={14} /> Import CSV</Button>
+            <Button onClick={() => { setForm({ date: new Date().toISOString().split('T')[0], description: '', category: 'Travel', lines: [{ ...EMPTY_LINE }] }); setShowModal(true) }}><Plus size={15} /> New Expense</Button>
+          </div>
+        }
       />
 
       <FilterBar>
@@ -121,6 +128,8 @@ export default function ExpensesPage() {
           </table>
         </div>
       </div>
+
+      <CsvImportModal type="expenses" open={showImport} onClose={() => setShowImport(false)} onSuccess={load} />
 
       <Modal open={showModal} onClose={() => setShowModal(false)} title="New Expense" size="lg"
         footer={<><Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button><Button onClick={handleSave} loading={saving}>Save Expense</Button></>}

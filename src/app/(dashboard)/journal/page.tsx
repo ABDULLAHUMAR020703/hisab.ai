@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Plus, Search, Check, AlertCircle } from 'lucide-react'
+import { Plus, Search, Check, AlertCircle, Upload } from 'lucide-react'
 import { formatDate, formatCurrency } from '@/lib/utils'
+import { CsvImportModal } from '@/components/ui/csv-import-modal'
 
 interface Account { id: string; accountNo: string; name: string; accountType: string }
 interface CostCenter { id: string; code: string; name: string }
@@ -29,6 +30,7 @@ export default function JournalPage() {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [showImport, setShowImport] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [form, setForm] = useState({ date: new Date().toISOString().split('T')[0], description: '', reference: '', lines: [{ ...EMPTY_LINE }, { ...EMPTY_LINE }] })
@@ -97,9 +99,14 @@ export default function JournalPage() {
           <h1 className="text-2xl font-bold text-gray-900">Journal Entries</h1>
           <p className="text-gray-500 text-sm mt-0.5">{entries.length} entries</p>
         </div>
-        <button onClick={() => { setShowModal(true); setError('') }} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors">
-          <Plus size={16} /> New Entry
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowImport(true)} className="flex items-center gap-2 px-4 py-2 border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 rounded-lg text-sm font-medium transition-colors">
+            <Upload size={15} /> Import CSV
+          </button>
+          <button onClick={() => { setShowModal(true); setError('') }} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors">
+            <Plus size={16} /> New Entry
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-3 mb-4">
@@ -152,6 +159,8 @@ export default function JournalPage() {
           </table>
         </div>
       </div>
+
+      <CsvImportModal type="journal" open={showImport} onClose={() => setShowImport(false)} onSuccess={load} />
 
       {/* Modal */}
       {showModal && (

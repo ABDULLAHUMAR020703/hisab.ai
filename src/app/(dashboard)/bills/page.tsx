@@ -1,13 +1,15 @@
 ﻿'use client'
 
 import { useEffect, useState } from 'react'
-import { Plus, RefreshCw, DollarSign } from 'lucide-react'
+import { Plus, RefreshCw, DollarSign, Upload, FileUp } from 'lucide-react'
 import { formatDate, formatCurrency, cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { Input, Select, Textarea } from '@/components/ui/input'
 import { PageHeader, SearchBar, FilterBar } from '@/components/ui/page-header'
+import { CsvImportModal } from '@/components/ui/csv-import-modal'
+import { UploadDocumentModal } from '@/components/ui/upload-document-modal'
 
 interface Vendor { id: string; name: string }
 interface Account { id: string; accountNo: string; name: string }
@@ -28,6 +30,8 @@ export default function BillsPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [showImport, setShowImport] = useState(false)
+  const [showUpload, setShowUpload] = useState(false)
   const [showPayModal, setShowPayModal] = useState(false)
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null)
   const [saving, setSaving] = useState(false)
@@ -81,7 +85,13 @@ export default function BillsPage() {
         title="Bills"
         subtitle={`${bills.length} bills · ${formatCurrency(bills.reduce((s, b) => s + b.total, 0))} total`}
         breadcrumb={[{ label: 'Expenses' }, { label: 'Bills' }]}
-        action={<Button onClick={() => { setForm({ vendorId: '', date: new Date().toISOString().split('T')[0], dueDate: '', notes: '', reference: '', lines: [{ ...EMPTY_LINE }] }); setShowModal(true) }}><Plus size={15} /> New Bill</Button>}
+        action={
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setShowUpload(true)}><FileUp size={14} /> Upload Bill</Button>
+            <Button variant="outline" onClick={() => setShowImport(true)}><Upload size={14} /> Import CSV</Button>
+            <Button onClick={() => { setForm({ vendorId: '', date: new Date().toISOString().split('T')[0], dueDate: '', notes: '', reference: '', lines: [{ ...EMPTY_LINE }] }); setShowModal(true) }}><Plus size={15} /> New Bill</Button>
+          </div>
+        }
       />
 
       <FilterBar>
@@ -138,6 +148,9 @@ export default function BillsPage() {
           </table>
         </div>
       </div>
+
+      <CsvImportModal type="bills" open={showImport} onClose={() => setShowImport(false)} onSuccess={load} />
+      <UploadDocumentModal open={showUpload} onClose={() => setShowUpload(false)} title="Upload Bill Document" />
 
       <Modal open={showModal} onClose={() => setShowModal(false)} title="New Bill" subtitle="Record a vendor bill" size="xl"
         footer={<><Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button><Button onClick={handleSave} loading={saving}>Save Bill</Button></>}
