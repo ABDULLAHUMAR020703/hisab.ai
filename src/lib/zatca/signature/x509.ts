@@ -54,14 +54,20 @@ function parseWithNodeCrypto(certificatePem: string, bodyBase64: string): ZatcaC
   }
 }
 
+type ForgeEcPublicKey = forge.pki.PublicKey & {
+  publicKey?: forge.Bytes
+  q?: forge.Bytes
+}
+
 function extractPublicKeyBytes(cert: forge.pki.Certificate): Buffer {
-  const spki = cert.publicKey as forge.pki.ed25519.PublicKey & {
-    publicKey?: forge.Bytes
-    q?: forge.Bytes
-  }
+  const spki = cert.publicKey as ForgeEcPublicKey
 
   if (spki.publicKey) {
     return Buffer.from(spki.publicKey, 'binary')
+  }
+
+  if (spki.q) {
+    return Buffer.from(spki.q, 'binary')
   }
 
   const asn1 = forge.pki.publicKeyToAsn1(cert.publicKey)
