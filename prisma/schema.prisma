@@ -6,6 +6,36 @@ datasource db {
   provider = "sqlite"
 }
 
+enum InvoiceType {
+  STANDARD
+  SIMPLIFIED
+  CREDIT_NOTE
+  DEBIT_NOTE
+}
+
+enum ZatcaEnvironment {
+  SANDBOX
+  PRODUCTION
+}
+
+enum ZatcaOnboardingStatus {
+  NOT_STARTED
+  CSR_GENERATED
+  COMPLIANCE_ISSUED
+  PRODUCTION_ISSUED
+  FAILED
+}
+
+enum ZatcaInvoiceStatus {
+  DRAFT
+  PENDING
+  SUBMITTED
+  CLEARED
+  REPORTED
+  REJECTED
+  FAILED
+}
+
 model User {
   id            String    @id @default(cuid())
   name          String?
@@ -101,21 +131,25 @@ model JournalLine {
 }
 
 model Customer {
-  id           String   @id @default(cuid())
-  customerNo   String   @unique
-  name         String
-  email        String?
-  phone        String?
-  address      String?
-  city         String?
-  country      String?
-  taxId        String?
-  creditLimit  Float    @default(0)
-  paymentTerms Int      @default(30)
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  invoices     Invoice[]
+  id             String   @id @default(cuid())
+  customerNo     String   @unique
+  name           String
+  email          String?
+  phone          String?
+  address        String?
+  streetAddress  String?
+  buildingNumber String?
+  district       String?
+  city           String?
+  country        String?
+  postalCode     String?
+  taxId          String?
+  creditLimit    Float    @default(0)
+  paymentTerms   Int      @default(30)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  invoices       Invoice[]
 }
 
 model Vendor {
@@ -136,25 +170,41 @@ model Vendor {
 }
 
 model Invoice {
-  id          String    @id @default(cuid())
-  invoiceNo   String    @unique
-  customerId  String
-  date        DateTime
-  dueDate     DateTime
-  status      String    @default("DRAFT")
-  subtotal    Float     @default(0)
-  taxAmount   Float     @default(0)
-  total       Float     @default(0)
-  amountPaid  Float     @default(0)
-  balance     Float     @default(0)
-  notes       String?
-  terms       String?
-  isRecurring Boolean   @default(false)
-  recurringDay Int?
-  nextDueDate DateTime?
-  createdById String
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id                  String      @id @default(cuid())
+  invoiceNo           String      @unique
+  invoiceUUID         String?     @unique
+  invoiceHash         String?
+  previousInvoiceHash String?
+  invoiceType         InvoiceType @default(STANDARD)
+  customerId          String
+  date                DateTime
+  issueTime           String?
+  dueDate             DateTime
+  currency            String      @default("SAR")
+  status              String      @default("DRAFT")
+  subtotal            Float       @default(0)
+  taxAmount           Float       @default(0)
+  total               Float       @default(0)
+  amountPaid          Float       @default(0)
+  balance             Float       @default(0)
+  zatcaStatus           ZatcaInvoiceStatus @default(DRAFT)
+  clearanceStatus       String?
+  zatcaResponseCode     String?
+  zatcaResponseMessage  String?
+  zatcaFailureCode      String?
+  zatcaRequestId        String?
+  zatcaResponsePayload  String?
+  clearedInvoicePayload String?
+  signedXml             String?
+  zatcaSubmissionDate   DateTime?
+  notes               String?
+  terms               String?
+  isRecurring         Boolean     @default(false)
+  recurringDay        Int?
+  nextDueDate         DateTime?
+  createdById         String
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
 
   customer  Customer      @relation(fields: [customerId], references: [id])
   createdBy User          @relation(fields: [createdById], references: [id])
@@ -360,20 +410,66 @@ model Receipt {
 }
 
 model CompanySettings {
-  id              String   @id @default(cuid())
-  companyName     String   @default("NETKOM COMPANY FOR COMMUNICATION")
-  legalName       String?
-  taxId           String?
-  address         String?
-  city            String?
-  country         String   @default("Saudi Arabia")
-  phone           String?
-  email           String?
-  currency        String   @default("SAR")
-  fiscalYearStart String   @default("01-01")
-  zatcaEnabled    Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                     String           @id @default(cuid())
+  companyName            String           @default("NETKOM COMPANY FOR COMMUNICATION")
+  legalName              String?
+  taxId                  String?
+  commercialRegistration String?
+  address                String?
+  streetAddress          String?
+  buildingNumber         String?
+  district               String?
+  city                   String?
+  postalCode             String?
+  country                String           @default("Saudi Arabia")
+  phone                  String?
+  email                  String?
+  currency               String           @default("SAR")
+  fiscalYearStart        String           @default("01-01")
+  zatcaEnabled           Boolean          @default(false)
+  zatcaEnvironment       ZatcaEnvironment @default(SANDBOX)
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+}
+
+model ZatcaAuditLog {
+  id          String   @id @default(cuid())
+  action      String
+  result      String
+  message     String?
+  userId      String?
+  userName    String?
+  companyName String?
+  invoiceId   String?
+  metadata    String?
+  createdAt   DateTime @default(now())
+}
+
+model ZatcaSandboxTestRun {
+  id         String   @id @default(cuid())
+  scenario   String
+  passed     Boolean
+  steps      String
+  error      String?
+  durationMs Int?
+  createdAt  DateTime @default(now())
+}
+
+model ZatcaCredential {
+  id               String                @id @default(cuid())
+  environment      ZatcaEnvironment      @unique
+  csr              String?
+  privateKeyEnc    String?
+  certificate      String?
+  secretEnc        String?
+  complianceCsid        String?
+  productionCsid        String?
+  productionCertificate String?
+  onboardingStatus      ZatcaOnboardingStatus @default(NOT_STARTED)
+  lastError        String?
+  onboardedAt      DateTime?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
 }
 
 model Sequence {

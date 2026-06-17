@@ -56,6 +56,7 @@ const NAV = [
     items: [
       { label: 'Reports', href: '/reports', icon: BarChart3 },
       { label: 'Tax & ZATCA', href: '/tax', icon: Shield },
+      { label: 'ZATCA Monitor', href: '/zatca', icon: Shield },
     ]
   },
   {

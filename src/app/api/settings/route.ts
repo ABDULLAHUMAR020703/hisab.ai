@@ -28,25 +28,33 @@ export async function PUT(request: Request) {
     await requireAuth()
     const body = await request.json()
 
+    const data = {
+      companyName: body.companyName,
+      legalName: body.legalName,
+      taxId: body.taxId,
+      commercialRegistration: body.commercialRegistration,
+      address: body.address,
+      streetAddress: body.streetAddress,
+      buildingNumber: body.buildingNumber,
+      district: body.district,
+      city: body.city,
+      postalCode: body.postalCode,
+      country: body.country,
+      phone: body.phone,
+      email: body.email,
+      currency: body.currency,
+      fiscalYearStart: body.fiscalYearStart,
+      zatcaEnabled: body.zatcaEnabled,
+      zatcaEnvironment: body.zatcaEnvironment === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX',
+    } as const
+
     let settings = await prisma.companySettings.findFirst()
     if (!settings) {
-      settings = await prisma.companySettings.create({ data: body })
+      settings = await prisma.companySettings.create({ data })
     } else {
       settings = await prisma.companySettings.update({
         where: { id: settings.id },
-        data: {
-          companyName: body.companyName,
-          legalName: body.legalName,
-          taxId: body.taxId,
-          address: body.address,
-          city: body.city,
-          country: body.country,
-          phone: body.phone,
-          email: body.email,
-          currency: body.currency,
-          fiscalYearStart: body.fiscalYearStart,
-          zatcaEnabled: body.zatcaEnabled,
-        },
+        data,
       })
     }
 

@@ -1,6 +1,11 @@
+import { randomUUID } from 'crypto'
 import { PrismaClient } from '@prisma/client'
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3'
 import { getSqliteDatabaseUrl } from './sqlite-db'
+
+function formatIssueTime(date: Date): string {
+  return date.toTimeString().split(' ')[0]
+}
 
 function createPrisma() {
   const adapter = new PrismaBetterSqlite3({ url: getSqliteDatabaseUrl() })
@@ -106,8 +111,10 @@ export async function seedDemoTransactions(
     await prisma.invoice.create({
       data: {
         invoiceNo: await getNextSequence(prisma, 'INVOICE', 'INV-'),
+        invoiceUUID: randomUUID(),
         customerId: cust1.id,
         date: twoMonthsAgo,
+        issueTime: formatIssueTime(twoMonthsAgo),
         dueDate: overdue,
         status: 'OVERDUE',
         subtotal: 50000,
@@ -132,8 +139,10 @@ export async function seedDemoTransactions(
     await prisma.invoice.create({
       data: {
         invoiceNo: await getNextSequence(prisma, 'INVOICE', 'INV-'),
+        invoiceUUID: randomUUID(),
         customerId: cust2.id,
         date: lastMonth,
+        issueTime: formatIssueTime(lastMonth),
         dueDate: dueSoon,
         status: 'SENT',
         subtotal: 32000,
@@ -157,8 +166,10 @@ export async function seedDemoTransactions(
     const paidInv = await prisma.invoice.create({
       data: {
         invoiceNo: await getNextSequence(prisma, 'INVOICE', 'INV-'),
+        invoiceUUID: randomUUID(),
         customerId: cust1.id,
         date: lastMonth,
+        issueTime: formatIssueTime(lastMonth),
         dueDate: lastMonth,
         status: 'PAID',
         subtotal: 15000,

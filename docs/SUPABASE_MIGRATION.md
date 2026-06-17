@@ -110,14 +110,18 @@ The transaction tables start empty because the current local `dev.db` has no cus
 ## 6. Generate Prisma Client
 
 ```powershell
-npx prisma generate
+node scripts/prisma-generate.mjs
 ```
 
-The repo now uses:
+The repo uses dual database providers:
 
-- `prisma/schema.prisma` with `provider = "postgresql"`
-- `prisma.config.ts` with `DIRECT_URL`
-- `src/lib/prisma.ts` with `@prisma/adapter-pg`
+- **Local dev:** `prisma/schema.prisma` with `provider = "sqlite"` and `@prisma/adapter-better-sqlite3`
+- **Staging/production:** `prisma/schema.postgresql.prisma` with `provider = "postgresql"` and `@prisma/adapter-pg`
+
+`scripts/prisma-generate.mjs` selects the schema based on `DATABASE_URL`. See `.env.example`.
+
+- `src/lib/prisma.ts` — runtime adapter selection
+- `src/lib/database.ts` — provider detection helpers
 
 ## 7. Run The App
 

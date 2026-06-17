@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Plus, RefreshCw, Send, DollarSign, RotateCcw } from 'lucide-react'
+import { Plus, RefreshCw, Send, DollarSign, RotateCcw, Eye, Shield } from 'lucide-react'
 import { formatDate, formatCurrency, cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -15,6 +15,19 @@ interface InvoiceLine { description: string; quantity: number; unitPrice: number
 interface Invoice {
   id: string; invoiceNo: string; customer: { name: string }; date: string; dueDate: string
   total: number; balance: number; amountPaid: number; status: string; isRecurring: boolean
+  invoiceType?: string; zatcaStatus?: string
+}
+
+interface ZatcaInvoiceStatus {
+  invoiceId: string
+  invoiceNo: string
+  zatcaStatus: string
+  requestId: string | null
+  responseCode: string | null
+  responseMessage: string | null
+  clearanceStatus: string | null
+  submittedAt: string | null
+  canSubmit: boolean
 }
 
 const STATUSES = ['DRAFT', 'SENT', 'PAID', 'PARTIAL', 'OVERDUE']
@@ -29,7 +42,13 @@ export default function InvoicesPage() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [showPayModal, setShowPayModal] = useState(false)
+  const [showViewModal, setShowViewModal] = useState(false)
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null)
+  const [zatcaStatus, setZatcaStatus] = useState<ZatcaInvoiceStatus | null>(null)
+  const [submittingZatca, setSubmittingZatca] = useState(false)
+  const [zatcaMsg, setZatcaMsg] = useState<string | null>(null)
+  const [zatcaErr, setZatcaErr] = useState<string | null>(null)
+  const [qrPreview, setQrPreview] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   const [form, setForm] = useState({
@@ -96,6 +115,49 @@ export default function InvoicesPage() {
     setSelectedInvoice(inv)
     setPayForm(f => ({ ...f, amount: inv.balance }))
     setShowPayModal(true)
+  }
+
+  async function openView(inv: Invoice) {
+    setSelectedInvoice(inv)
+    setZatcaMsg(null)
+    setZatcaErr(null)
+    setQrPreview(null)
+    setShowViewModal(true)
+    const [statusRes, qrRes] = await Promise.all([
+      fetch(`/api/zatca/invoices/${inv.id}/status`),
+      fetch(`/api/zatca/invoices/${inv.id}/qr`),
+    ])
+    if (statusRes.ok) setZatcaStatus(await statusRes.json())
+    else setZatcaStatus(null)
+    if (qrRes.ok) {
+      const qr = await qrRes.json()
+      setQrPreview(qr.qrDataUrl ?? null)
+    }
+  }
+
+  function openArtifact(type: 'xml' | 'signed-xml' | 'qr') {
+    if (!selectedInvoice) return
+    const base = `/api/zatca/invoices/${selectedInvoice.id}`
+    const url = type === 'xml' ? `${base}/xml` : type === 'signed-xml' ? `${base}/signed-xml` : `${base}/qr`
+    window.open(url, '_blank')
+  }
+
+  async function handleZatcaSubmit() {
+    if (!selectedInvoice) return
+    setSubmittingZatca(true)
+    setZatcaMsg(null)
+    setZatcaErr(null)
+    const res = await fetch(`/api/zatca/invoices/${selectedInvoice.id}/submit`, { method: 'POST' })
+    const data = await res.json()
+    if (res.ok) {
+      setZatcaMsg(`Submitted via ${data.route} API — status: ${data.zatcaStatus}`)
+      const statusRes = await fetch(`/api/zatca/invoices/${selectedInvoice.id}/status`)
+      if (statusRes.ok) setZatcaStatus(await statusRes.json())
+      load()
+    } else {
+      setZatcaErr(data.error || 'Submission failed')
+    }
+    setSubmittingZatca(false)
   }
 
   const stats = {
@@ -190,9 +252,20 @@ export default function InvoicesPage() {
                       {inv.balance > 0 ? formatCurrency(inv.balance) : '—'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-center"><Badge status={inv.status} /></td>
+                  <td className="px-4 py-3 text-center">
+                    <div className="flex flex-col items-center gap-1">
+                      <Badge status={inv.status} />
+                      {inv.zatcaStatus && inv.zatcaStatus !== 'DRAFT' && (
+                        <span className="text-[10px] font-medium text-emerald-600">{inv.zatcaStatus}</span>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                      <button onClick={() => openView(inv)}
+                        className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 hover:text-slate-700 hover:bg-slate-100 px-2 py-1 rounded-lg transition-colors">
+                        <Eye size={10} /> View
+                      </button>
                       {inv.status === 'DRAFT' && (
                         <button onClick={() => handleSend(inv.id)}
                           className="flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-1 rounded-lg transition-colors">
@@ -330,6 +403,88 @@ export default function InvoicesPage() {
             </div>
           </div>
         </div>
+      </Modal>
+
+      {/* Invoice View + ZATCA Modal */}
+      <Modal
+        open={showViewModal}
+        onClose={() => setShowViewModal(false)}
+        title={selectedInvoice ? selectedInvoice.invoiceNo : 'Invoice'}
+        subtitle={selectedInvoice ? selectedInvoice.customer.name : ''}
+        size="md"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setShowViewModal(false)}>Close</Button>
+            {zatcaStatus?.canSubmit && (
+              <Button onClick={handleZatcaSubmit} loading={submittingZatca}>
+                <Shield size={14} /> Submit to ZATCA
+              </Button>
+            )}
+          </>
+        }
+      >
+        {selectedInvoice && (
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div><p className="text-xs text-slate-400">Date</p><p className="font-medium">{formatDate(selectedInvoice.date)}</p></div>
+              <div><p className="text-xs text-slate-400">Due</p><p className="font-medium">{formatDate(selectedInvoice.dueDate)}</p></div>
+              <div><p className="text-xs text-slate-400">Total</p><p className="font-semibold text-indigo-600">{formatCurrency(selectedInvoice.total)}</p></div>
+              <div><p className="text-xs text-slate-400">Balance</p><p className="font-medium">{formatCurrency(selectedInvoice.balance)}</p></div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Shield size={16} className="text-emerald-600" />
+                <h3 className="font-semibold text-slate-800">ZATCA E-Invoicing</h3>
+              </div>
+              {zatcaStatus ? (
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs text-slate-400">ZATCA Status</p>
+                    <p className="font-medium">{zatcaStatus.zatcaStatus}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400">Last Submission</p>
+                    <p className="font-medium">{zatcaStatus.submittedAt ? formatDate(zatcaStatus.submittedAt) : '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400">Request ID</p>
+                    <p className="font-mono text-xs break-all">{zatcaStatus.requestId ?? '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400">Clearance / Reporting</p>
+                    <p className="font-medium">{zatcaStatus.clearanceStatus ?? zatcaStatus.responseCode ?? '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400">Response Code</p>
+                    <p className="font-medium">{zatcaStatus.responseCode ?? '—'}</p>
+                  </div>
+                  {zatcaStatus.responseMessage && (
+                    <div className="col-span-2">
+                      <p className="text-xs text-slate-400">Response Message</p>
+                      <p className="text-sm text-slate-600">{zatcaStatus.responseMessage}</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500">Loading ZATCA status...</p>
+              )}
+              <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-200">
+                <Button variant="outline" size="sm" onClick={() => openArtifact('xml')}>View XML</Button>
+                <Button variant="outline" size="sm" onClick={() => openArtifact('signed-xml')}>View Signed XML</Button>
+                <Button variant="outline" size="sm" onClick={() => openArtifact('qr')}>View QR</Button>
+              </div>
+              {qrPreview && (
+                <div className="pt-2">
+                  <p className="text-xs text-slate-400 mb-2">QR Code</p>
+                  <img src={qrPreview} alt="ZATCA QR" className="w-32 h-32 border border-slate-200 rounded-lg" />
+                </div>
+              )}
+              {zatcaMsg && <p className="text-sm text-emerald-600">{zatcaMsg}</p>}
+              {zatcaErr && <p className="text-sm text-red-600">{zatcaErr}</p>}
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* Payment Modal */}

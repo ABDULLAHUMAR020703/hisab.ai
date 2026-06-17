@@ -1,6 +1,11 @@
-﻿import { requireAuth } from '@/lib/auth'
+﻿import { randomUUID } from 'crypto'
+import { requireAuth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { getNextSequence } from '@/lib/sequences'
+
+function formatIssueTime(date: Date): string {
+  return date.toTimeString().split(' ')[0]
+}
 
 export async function GET(request: Request) {
   try {
@@ -59,12 +64,15 @@ export async function POST(request: Request) {
 
     const total = subtotal + taxAmount
     const invoiceNo = await getNextSequence('INVOICE', 'INV-')
+    const issueDate = new Date(date)
 
     const invoice = await prisma.invoice.create({
       data: {
         invoiceNo,
+        invoiceUUID: randomUUID(),
         customerId,
-        date: new Date(date),
+        date: issueDate,
+        issueTime: formatIssueTime(issueDate),
         dueDate: new Date(dueDate),
         subtotal,
         taxAmount,
