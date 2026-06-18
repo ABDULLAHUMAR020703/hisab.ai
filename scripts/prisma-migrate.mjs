@@ -1,6 +1,6 @@
 /**
  * Apply pending Prisma migrations at build time (PostgreSQL on Vercel).
- * SQLite on Vercel is migrated at runtime — see src/lib/ensure-sqlite-migrated.ts
+ * SQLite on Vercel is synced at build time via scripts/prisma-sqlite-sync.mjs
  */
 import { execSync } from 'node:child_process'
 

@@ -4,7 +4,6 @@ import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3'
 import { PrismaPg } from '@prisma/adapter-pg'
 import pg from 'pg'
 import { getDatabaseUrl, isPostgresDatabase } from './database'
-import { ensureSqliteMigrated } from './ensure-sqlite-migrated'
 import { getSqliteDatabaseUrl } from './sqlite-db'
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient | undefined }
@@ -19,7 +18,6 @@ function createPrismaClient() {
   }
 
   const sqliteUrl = getSqliteDatabaseUrl()
-  ensureSqliteMigrated(sqliteUrl)
   const adapter = new PrismaBetterSqlite3({ url: sqliteUrl })
   return new PrismaClient({ adapter })
 }
