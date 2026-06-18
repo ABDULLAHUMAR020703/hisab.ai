@@ -20,4 +20,10 @@ Documentation for the **hisab.ai** small-business accounting platform.
 | [ZATCA_RELEASE_CHECKLIST.md](./ZATCA_RELEASE_CHECKLIST.md) | Deployment, backup, migration, and rollback checklist |
 | [SUPABASE_MIGRATION.md](./SUPABASE_MIGRATION.md) | Guide for migrating from SQLite to Supabase PostgreSQL |
 
+## QA & Testing
+
+| Document | Description |
+|----------|-------------|
+| [testing/README.md](./testing/README.md) | QA framework — test plans, cases, guides, and go-live checklist |
+
 For setup and day-to-day development, see the root [README.md](../README.md).

@@ -187,7 +187,7 @@ Full checklist: `docs/ZATCA_RELEASE_CHECKLIST.md`
 
 - All ZATCA logic lives in `src/lib/zatca/` with API routes under `src/app/api/zatca/`.
 - UI entry points: **Settings (Tax & ZATCA)**, **Invoices (view/submit)**, **ZATCA Monitor** (`/zatca`).
-- Mock tests do **not** prove live ZATCA acceptance; treat `ZATCA_SANDBOX_TEST_RESULTS.md` as pipeline verification only.
+- Mock tests do **not** prove live ZATCA acceptance; treat [ZATCA_SANDBOX_TEST_RESULTS.md](./ZATCA_SANDBOX_TEST_RESULTS.md) as pipeline verification only.
 
 ---
 

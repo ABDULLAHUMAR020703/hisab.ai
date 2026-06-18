@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Plus, RefreshCw, Send, DollarSign, RotateCcw, Eye, Shield } from 'lucide-react'
+import { Plus, RefreshCw, Send, DollarSign, RotateCcw, Eye, Shield, FileDown } from 'lucide-react'
 import { formatDate, formatCurrency, cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -135,6 +135,10 @@ export default function InvoicesPage() {
     }
   }
 
+  function downloadPdf(inv: Invoice) {
+    window.open(`/api/invoices/${inv.id}/pdf`, '_blank')
+  }
+
   function openArtifact(type: 'xml' | 'signed-xml' | 'qr') {
     if (!selectedInvoice) return
     const base = `/api/zatca/invoices/${selectedInvoice.id}`
@@ -265,6 +269,10 @@ export default function InvoicesPage() {
                       <button onClick={() => openView(inv)}
                         className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 hover:text-slate-700 hover:bg-slate-100 px-2 py-1 rounded-lg transition-colors">
                         <Eye size={10} /> View
+                      </button>
+                      <button onClick={() => downloadPdf(inv)}
+                        className="flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-2 py-1 rounded-lg transition-colors">
+                        <FileDown size={10} /> PDF
                       </button>
                       {inv.status === 'DRAFT' && (
                         <button onClick={() => handleSend(inv.id)}
@@ -414,6 +422,9 @@ export default function InvoicesPage() {
         size="md"
         footer={
           <>
+            <Button variant="outline" onClick={() => selectedInvoice && downloadPdf(selectedInvoice)}>
+              <FileDown size={14} /> Download PDF
+            </Button>
             <Button variant="outline" onClick={() => setShowViewModal(false)}>Close</Button>
             {zatcaStatus?.canSubmit && (
               <Button onClick={handleZatcaSubmit} loading={submittingZatca}>

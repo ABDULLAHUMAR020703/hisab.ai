@@ -1,0 +1,53 @@
+[
+  {
+    "id": "construction",
+    "label": "Al-Bina Construction Co.",
+    "companyName": "Al-Bina Construction Co.",
+    "legalName": "Al-Bina Construction Company LLC",
+    "taxId": "300000000000003",
+    "commercialRegistration": "1010123456",
+    "streetAddress": "King Fahd Road",
+    "buildingNumber": "4521",
+    "district": "Al Olaya",
+    "city": "Riyadh",
+    "postalCode": "12211",
+    "country": "Saudi Arabia",
+    "phone": "+966 11 234 5678",
+    "email": "finance@albina-construction.sa",
+    "industry": "Construction"
+  },
+  {
+    "id": "retail",
+    "label": "Riyadh Retail Group",
+    "companyName": "Riyadh Retail Group",
+    "legalName": "Riyadh Retail Group Trading EST",
+    "taxId": "300000000000004",
+    "commercialRegistration": "1010234567",
+    "streetAddress": "Prince Sultan Street",
+    "buildingNumber": "2100",
+    "district": "Al Malaz",
+    "city": "Riyadh",
+    "postalCode": "11564",
+    "country": "Saudi Arabia",
+    "phone": "+966 11 876 5432",
+    "email": "accounts@riyadhretail.sa",
+    "industry": "Retail"
+  },
+  {
+    "id": "technology",
+    "label": "Najd Technology Solutions",
+    "companyName": "Najd Technology Solutions",
+    "legalName": "Najd Technology Solutions LLC",
+    "taxId": "300000000000005",
+    "commercialRegistration": "1010345678",
+    "streetAddress": "King Abdullah Financial District",
+    "buildingNumber": "3301",
+    "district": "KAFD",
+    "city": "Riyadh",
+    "postalCode": "13519",
+    "country": "Saudi Arabia",
+    "phone": "+966 11 555 0199",
+    "email": "billing@najdtech.sa",
+    "industry": "Technology"
+  }
+]
