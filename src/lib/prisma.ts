@@ -7,7 +7,7 @@ import { getDatabaseUrl, isPostgresDatabase } from './database'
 import { ensureSqliteMigrated } from './ensure-sqlite-migrated'
 import { getSqliteDatabaseUrl } from './sqlite-db'
 
-const globalForPrisma = globalThis as unknown as { prisma: PrismaClient }
+const globalForPrisma = globalThis as unknown as { prisma: PrismaClient | undefined }
 
 function createPrismaClient() {
   const databaseUrl = getDatabaseUrl()
@@ -24,8 +24,23 @@ function createPrismaClient() {
   return new PrismaClient({ adapter })
 }
 
-export const prisma = globalForPrisma.prisma || createPrismaClient()
+function getPrismaClient(): PrismaClient {
+  if (!globalForPrisma.prisma) {
+    globalForPrisma.prisma = createPrismaClient()
+  }
+  return globalForPrisma.prisma
+}
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
+/** Lazy Prisma client — avoids DB access during Next.js build static analysis. */
+export const prisma = new Proxy({} as PrismaClient, {
+  get(_target, prop) {
+    const client = getPrismaClient()
+    const value = client[prop as keyof PrismaClient]
+    if (typeof value === 'function') {
+      return (value as (...args: unknown[]) => unknown).bind(client)
+    }
+    return value
+  },
+})
 
 export default prisma
