@@ -82,8 +82,9 @@ async function clearQaData(prisma: PrismaClient) {
   await prisma.vendor.deleteMany({ where: { email: { contains: '@qa.hisab.ai' } } })
 }
 
-export async function seedQaData(options: { force?: boolean } = {}): Promise<QaSeedResult> {
-  const prisma = createPrisma()
+export async function seedQaData(options: { force?: boolean; prisma?: PrismaClient } = {}): Promise<QaSeedResult> {
+  const ownsClient = !options.prisma
+  const prisma = options.prisma ?? createPrisma()
   const force = options.force ?? false
 
   try {
@@ -276,6 +277,7 @@ export async function seedQaData(options: { force?: boolean } = {}): Promise<QaS
           district: settings.district ?? 'Al Olaya',
           city: settings.city ?? 'Riyadh',
           postalCode: settings.postalCode ?? '12211',
+          zatcaEnabled: true,
         },
       })
     }
@@ -289,6 +291,6 @@ export async function seedQaData(options: { force?: boolean } = {}): Promise<QaS
       message: `QA seed complete: 50 customers, 100 inventory items, 100 invoices, 10 vendors. Marker: ${QA_MARKER}`,
     }
   } finally {
-    await prisma.$disconnect()
+    if (ownsClient) await prisma.$disconnect()
   }
 }

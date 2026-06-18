@@ -150,9 +150,17 @@ export default function DashboardPage() {
     setSeeding(true)
     setSeedMsg('')
     try {
-      const res = await fetch('/api/seed', { method: 'POST' })
+      const res = await fetch('/api/seed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force: false }),
+      })
       const d = await res.json()
-      setSeedMsg(d.message || d.error || 'Done')
+      if (!res.ok) {
+        setSeedMsg(d.error || 'Seed failed')
+        return
+      }
+      setSeedMsg(d.message || d.qa?.message || 'Done')
       await loadData()
     } finally {
       setSeeding(false)

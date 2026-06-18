@@ -1,5 +1,7 @@
 import { prisma } from '@/lib/prisma'
+import { ensureDemoCompanySettings } from '@/lib/seed/company-settings'
 import { seedDemoTransactions } from '@/lib/demo-seed'
+import { seedQaData } from '@/lib/qa-seed'
 
 const COA_ACCOUNTS = [
   { accountNo: '10', name: 'ASSETS', fullName: 'Assets', parentNo: null, accountType: 'Asset', subType: 'Header' },
@@ -87,23 +89,20 @@ const COA_ACCOUNTS = [
   { accountNo: '600602', name: 'INTEREST EXPENSE', fullName: 'Interest Expense', parentNo: '6006', accountType: 'Expense', subType: 'Expense' },
 ]
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
-    // Company settings
-    const existingSettings = await prisma.companySettings.findFirst()
-    if (!existingSettings) {
-      await prisma.companySettings.create({
-        data: {
-          companyName: 'NETKOM COMPANY FOR COMMUNICATION',
-          legalName: 'NETKOM COMPANY FOR COMMUNICATION LLC',
-          country: 'Saudi Arabia',
-          currency: 'SAR',
-          fiscalYearStart: '01-01',
-          zatcaEnabled: false,
-        },
-      })
+    let force = false
+    try {
+      const body = await request.json()
+      force = Boolean(body?.force)
+    } catch {
+      // Empty body is fine.
+    }
+    if (new URL(request.url).searchParams.get('force') === 'true') {
+      force = true
     }
 
+    await ensureDemoCompanySettings()
     const { ensureDemoUsers } = await import('@/lib/demo-users')
     await ensureDemoUsers(prisma)
 
@@ -170,17 +169,27 @@ export async function POST() {
       }
     }
 
-    const demoResult = await seedDemoTransactions(prisma)
-    const demoMsg =
-      demoResult === 'created'
-        ? ', demo transactions (customers, invoices, bills, expenses, payroll, inventory)'
-        : typeof demoResult === 'string' && demoResult !== 'skipped'
-          ? ` (${demoResult})`
-          : ''
+    const qaResult = await seedQaData({ prisma, force })
+    let demoMsg = ''
+    if (qaResult.status === 'created' || qaResult.status === 'reset') {
+      demoMsg = `, ${qaResult.invoices} invoices, ${qaResult.customers} customers, ${qaResult.inventory} inventory items, ${qaResult.vendors} vendors`
+    } else if (qaResult.status === 'skipped') {
+      demoMsg = ` (QA data already loaded: ${qaResult.invoices} invoices, ${qaResult.customers} customers)`
+    }
+
+    // Legacy demo transactions (bills, payroll, journal) when DB has no customers at all
+    const customerCount = await prisma.customer.count()
+    if (customerCount === 0) {
+      const demoResult = await seedDemoTransactions(prisma)
+      if (demoResult === 'created') {
+        demoMsg += ', legacy demo transactions (bills, expenses, payroll)'
+      }
+    }
 
     return Response.json({
       success: true,
       message: `Seeded: ${coaCreated} COA accounts, ${ccCreated} cost centers, admin user, tax rates, sequences${demoMsg}`,
+      qa: qaResult,
     })
   } catch (error) {
     console.error('Seed error:', error)
