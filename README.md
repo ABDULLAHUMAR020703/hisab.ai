@@ -158,8 +158,14 @@ You can also load sample data from the dashboard via **Load sample data** (calls
 | `npm run zatca:verify` | ZATCA offline verification |
 | `npm run qa:seed` | Load QA test data |
 | `npm run qa:verify` | Database integrity checks |
-| `npm run supabase:apply` | Apply Supabase SQL schema |
+| `npm run supabase:migrate` | Apply Supabase SQL migrations (001–013) |
+| `npm run supabase:seed` | Seed default company tenant |
 | `npm run supabase:verify` | Verify Supabase database |
+| `npm run migrate:export` | Export SQLite to `data/migration/export/` |
+| `npm run migrate:id-map` | Generate deterministic UUID map |
+| `npm run migrate:import` | Import staged data into Supabase |
+| `npm run migrate:validate` | Validate migration row counts and ZATCA fields |
+| `npm run migrate:test-db` | Test Supabase Postgres connection from `.env` |
 | `npm run db:studio` | Open [Prisma Studio](https://www.prisma.io/studio) |
 
 Documentation: [docs/README.md](./docs/README.md)
@@ -170,9 +176,10 @@ Documentation: [docs/README.md](./docs/README.md)
 
 ```
 hisab.ai/
-├── docs/                  # Product, migration, ZATCA, and testing docs
+├── docs/
 │   ├── product/           # Architecture and workflow
-│   ├── migration/         # Supabase migration guide
+│   ├── migration/         # Supabase + Phase C runbooks
+│   │   └── archive/       # Legacy reference SQL (not applied)
 │   ├── zatca/             # ZATCA production docs
 │   └── testing/           # QA and go-live checklists
 ├── prisma/
@@ -181,7 +188,8 @@ hisab.ai/
 │   ├── migrations/
 │   └── seed.ts
 ├── scripts/
-│   ├── db/                # Prisma and Supabase helpers
+│   ├── db/                # Prisma, Supabase, Phase C migration
+│   │   └── migration/     # 014–018 export/import/validate
 │   ├── qa/                # QA seed and verify
 │   └── zatca/             # ZATCA sandbox scripts
 ├── src/
@@ -189,11 +197,15 @@ hisab.ai/
 │   ├── app/(dashboard)/   # App pages
 │   ├── app/api/           # REST API routes
 │   ├── components/ui/     # Shared UI
-│   └── lib/               # Auth, ZATCA, invoices, utilities
-├── supabase/migrations/   # PostgreSQL bootstrap SQL
+│   └── lib/               # Auth, db repos, supabase, ZATCA
+├── supabase/
+│   ├── migrations/        # PostgreSQL schema 001–013
+│   ├── seed/              # Default tenant shell only
+│   └── functions/         # Edge functions (future)
 ├── tests/
 │   ├── fixtures/          # QA company profiles
 │   └── zatca/             # ZATCA unit tests
+├── data/migration/        # Gitignored Phase C staging (export + ID map)
 └── public/receipts/       # Uploaded receipt files
 ```
 

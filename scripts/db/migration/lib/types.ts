@@ -1,5 +1,7 @@
 import type { ExportTable } from './constants'
 
+export type { ExportTable } from './constants'
+
 export interface ExportManifest {
   exportedAt: string
   sqlitePath: string

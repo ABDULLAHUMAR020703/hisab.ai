@@ -198,7 +198,7 @@ export async function runComplianceChecks(
       userId: auditContext?.userId,
       userName: auditContext?.userName,
       companyName: settings.companyName,
-      metadata: { scenario, ...result },
+      metadata: { ...result },
     })
   }
 

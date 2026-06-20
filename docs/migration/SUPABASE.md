@@ -4,11 +4,10 @@ This repo is now prepared to run on Supabase Postgres instead of the local SQLit
 
 The migration kit contains:
 
-- `supabase/migrations/001_extensions.sql` … `005_company_users.sql` — Phase A tenant + RLS schema
-- `scripts/db/apply-supabase-migrations.mjs` — applies all migrations in order
-- `scripts/db/apply-supabase-seed.mjs` — seeds default company
-- `scripts/db/verify-supabase-db.mjs` — verifies Phase A tables and RLS
-- `.env.supabase.example` - copy/paste template for Supabase connection strings.
+- `supabase/migrations/001` … `013` — full schema, RLS, validation, ID map
+- `scripts/db/` — apply migrations, seed, verify
+- `scripts/db/migration/` — Phase C export/import/validate (014–018)
+- `.env.example` — copy to `.env` and fill Supabase + ZATCA values
 
 ## 1. Create The Supabase Project
 
@@ -51,23 +50,23 @@ postgresql://prisma.[PROJECT_REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:
 
 ## 3. Configure Environment Variables
 
-Copy the example file:
+Copy the example file and edit `.env`:
 
 ```powershell
-Copy-Item .env.supabase.example .env
+Copy-Item .env.example .env
 ```
 
-Then replace the placeholders:
+Minimum for migration scripts:
 
 ```env
-DATABASE_URL="postgresql://prisma.[PROJECT_REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres"
-DIRECT_URL="postgresql://prisma.[PROJECT_REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres"
-SUPABASE_DATABASE_URL="postgresql://postgres.[PROJECT_REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres"
-NEXTAUTH_SECRET="replace-with-a-long-random-secret"
-NEXTAUTH_URL="http://localhost:3000"
+DATABASE_URL="file:./prisma/dev.db"
+SUPABASE_DATABASE_URL="postgresql://postgres:YOUR_PASSWORD@db.your-project-ref.supabase.co:5432/postgres"
+NEXT_PUBLIC_SUPABASE_URL="https://your-project-ref.supabase.co"
+SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
+ZATCA_CREDENTIAL_ENCRYPTION_KEY="same-as-sqlite-runtime"
 ```
 
-`SUPABASE_DATABASE_URL` is only needed by the helper scripts. It can be the `postgres` owner connection or another role with permission to create public tables and seed `auth.users`.
+For Prisma-on-Supabase cutover (Phase D+), also set `DATABASE_URL` / `DIRECT_URL` to Postgres pooler URLs from the dashboard.
 
 ## 4. Apply The Full SQL File
 

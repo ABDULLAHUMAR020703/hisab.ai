@@ -51,10 +51,10 @@ function utf8String(value: string): forge.asn1.Asn1 {
 }
 
 function rdnSequence(attributes: RdnAttribute[]): forge.asn1.Asn1 {
-  const sequence = forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SEQUENCE, true, [])
+  const children: forge.asn1.Asn1[] = []
 
   for (const attribute of attributes) {
-    sequence.value!.push(
+    children.push(
       forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SET, true, [
         forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SEQUENCE, true, [
           forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.OID, false, oidBytes(attribute.type)),
@@ -64,7 +64,7 @@ function rdnSequence(attributes: RdnAttribute[]): forge.asn1.Asn1 {
     )
   }
 
-  return sequence
+  return forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SEQUENCE, true, children)
 }
 
 function certificateTemplateValue(environment: ZatcaCsrSubjectInput['environment']): string {

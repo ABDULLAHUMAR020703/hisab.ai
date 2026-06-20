@@ -1,10 +1,17 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type pg from 'pg'
-import { ID_MAP_FILE, MANIFEST_FILE, MIGRATION_ROOT, MIGRATION_NAMESPACE, COMPANY_ID } from './constants'
+import {
+  ID_MAP_FILE,
+  MANIFEST_FILE,
+  MIGRATION_ROOT,
+  MIGRATION_NAMESPACE,
+  COMPANY_ID,
+  EXPORT_TABLES,
+  type ExportTable,
+} from './constants'
 import { deterministicId } from './uuid'
-import type { ExportTable, ExportManifest } from './types'
-import { EXPORT_TABLES } from './constants'
+import type { ExportManifest } from './types'
 import { toTimestamptz } from './transforms'
 import type { IdMapEntry, MigrationIdMap, SqliteRow } from './types'
 

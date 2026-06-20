@@ -16,7 +16,6 @@ export async function GET() {
 
     return Response.json({
       zatcaEnabled: settings?.zatcaEnabled ?? false,
-      zatcaConnected: settings?.zatcaConnected ?? false,
       connectedAt: settings?.zatcaConnectedAt?.toISOString() ?? null,
       companyName: settings?.companyName ?? null,
       taxId: settings?.taxId ?? null,
