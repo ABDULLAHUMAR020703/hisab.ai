@@ -3,14 +3,19 @@ import type { ZatcaEnvironment } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { logZatcaAudit } from '../audit/logger'
 import { requestComplianceCsid } from './compliance-client'
+import {
+  getCredential,
+  getDecryptedCsr,
+  getOnboardingStatus,
+  storeCredentials,
+} from './credential-store'
+import { generateEgsIdentity } from './egs-identity'
+import { companySettingsToCsrInput, generateCSR } from './generate-csr-company'
+import { csrPemToZatcaBase64 } from './generate-csr'
 import { requestProductionCsid } from './production-client'
-import { getCredential, getOnboardingStatus, saveCredential } from './credential-store'
-import { csrPemToBase64, generateZatcaCsr } from './generate-csr'
+import type { OnboardingAuditContext } from './types'
 
-export interface OnboardingAuditContext {
-  userId?: string
-  userName?: string | null
-}
+export type { OnboardingAuditContext }
 
 async function getCompanySettingsOrThrow() {
   const settings = await prisma.companySettings.findFirst()
@@ -31,26 +36,23 @@ export async function generateAndStoreCsr(auditContext?: OnboardingAuditContext)
     throw new Error('VAT registration number (taxId) is required before generating a CSR')
   }
 
-  const organizationName = (settings.legalName || settings.companyName).trim()
-  const registeredAddress = [
-    settings.buildingNumber,
-    settings.streetAddress || settings.address,
-    settings.district,
-    settings.city,
-    settings.postalCode,
-  ].filter(Boolean).join(', ') || settings.city || 'Riyadh'
+  const egsIdentity = generateEgsIdentity(settings.legalName || settings.companyName, settings.taxId, environment)
 
-  const csrResult = generateZatcaCsr({
-    environment,
-    vatNumber: settings.taxId,
-    organizationName,
-    organizationUnit: settings.district || settings.city || 'Main Branch',
-    registeredAddress,
-    businessCategory: 'Telecommunications',
+  await prisma.companySettings.update({
+    where: { id: settings.id },
+    data: {
+      zatcaEgsUnitId: egsIdentity.egsUnitId,
+      zatcaDeviceIdentifier: egsIdentity.deviceIdentifier,
+      zatcaEgsSerialNumber: egsIdentity.egsSerialNumber,
+    },
   })
 
-  await saveCredential({
+  const csrResult = await generateCSR(companySettingsToCsrInput(settings, egsIdentity))
+
+  await storeCredentials({
     environment,
+    companySettingsId: settings.id,
+    egsUnitId: egsIdentity.egsUnitId,
     csr: csrResult.csrPem,
     privateKeyPem: csrResult.privateKeyPem,
     onboardingStatus: 'CSR_GENERATED',
@@ -81,31 +83,70 @@ export async function generateAndStoreCsr(auditContext?: OnboardingAuditContext)
 export async function submitComplianceOnboarding(otp: string, auditContext?: OnboardingAuditContext) {
   const settings = await getCompanySettingsOrThrow()
   const environment: ZatcaEnvironment = settings.zatcaEnvironment
-  const credential = await getCredential(environment)
+  const csrPem = await getDecryptedCsr(environment)
 
-  if (!credential?.csr) {
+  if (!csrPem) {
     throw new Error('CSR not found. Generate a CSR before requesting compliance CSID.')
   }
 
   try {
+    await logZatcaAudit({
+      action: 'COMPLIANCE_CSID_REQUESTED',
+      result: 'SUCCESS',
+      message: 'Submitting stored CSR to ZATCA compliance API',
+      userId: auditContext?.userId,
+      userName: auditContext?.userName,
+      companyName: settings.companyName,
+      metadata: { environment },
+    })
+
     const response = await requestComplianceCsid({
-      csrBase64: csrPemToBase64(credential.csr),
+      csrBase64: csrPemToZatcaBase64(csrPem),
       otp,
       environment,
     })
 
-    await saveCredential({
+    await storeCredentials({
       environment,
+      companySettingsId: settings.id,
+      egsUnitId: settings.zatcaEgsUnitId ?? undefined,
       certificate: response.certificatePem,
+      binarySecurityToken: response.binarySecurityToken,
       secret: response.secret,
       complianceCsid: response.requestId || response.binarySecurityToken.slice(0, 64),
+      requestId: response.requestId,
       onboardingStatus: 'COMPLIANCE_ISSUED',
       lastError: null,
       onboardedAt: new Date(),
     })
 
+    await prisma.companySettings.update({
+      where: { id: settings.id },
+      data: { zatcaConnected: true },
+    })
+
+    await logZatcaAudit({
+      action: 'CREDENTIALS_STORED',
+      result: 'SUCCESS',
+      message: 'Compliance CSID credentials encrypted and stored',
+      userId: auditContext?.userId,
+      userName: auditContext?.userName,
+      companyName: settings.companyName,
+      metadata: { requestId: response.requestId, environment },
+    })
+
     await logZatcaAudit({
       action: 'COMPLIANCE_CSID_ISSUED',
+      result: 'SUCCESS',
+      message: response.dispositionMessage,
+      userId: auditContext?.userId,
+      userName: auditContext?.userName,
+      companyName: settings.companyName,
+      metadata: { requestId: response.requestId, environment },
+    })
+
+    await logZatcaAudit({
+      action: 'ONBOARDING_COMPLETED',
       result: 'SUCCESS',
       message: response.dispositionMessage,
       userId: auditContext?.userId,
@@ -122,13 +163,14 @@ export async function submitComplianceOnboarding(otp: string, auditContext?: Onb
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    await saveCredential({
+    await storeCredentials({
       environment,
+      companySettingsId: settings.id,
       onboardingStatus: 'FAILED',
       lastError: message,
     })
     await logZatcaAudit({
-      action: 'COMPLIANCE_CSID_ISSUED',
+      action: 'ONBOARDING_FAILED',
       result: 'FAILED',
       message,
       userId: auditContext?.userId,
@@ -149,8 +191,9 @@ export async function requestAndStoreProductionCsid(auditContext?: OnboardingAud
   try {
     const response = await requestProductionCsid(environment)
 
-    await saveCredential({
+    await storeCredentials({
       environment,
+      companySettingsId: settings.id,
       productionCsid: response.requestId || response.binarySecurityToken.slice(0, 64),
       productionCertificate: response.certificatePem,
       secret: response.secret,
@@ -176,8 +219,9 @@ export async function requestAndStoreProductionCsid(auditContext?: OnboardingAud
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    await saveCredential({
+    await storeCredentials({
       environment,
+      companySettingsId: settings.id,
       onboardingStatus: 'FAILED',
       lastError: message,
     })

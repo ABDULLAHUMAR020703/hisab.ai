@@ -4,6 +4,8 @@ import {
   getCredential,
   getDecryptedPrivateKey,
   getDecryptedSecret,
+  getDecryptedCertificate,
+  getDecryptedProductionCertificate,
 } from '../onboarding/credential-store'
 
 export interface SigningCredentials {
@@ -30,8 +32,8 @@ function pemToBase64Der(pem: string): string {
 export async function loadComplianceSigningCredentials(
   environment: ZatcaEnvironment,
 ): Promise<SigningCredentials> {
-  const cred = await getCredential(environment)
-  if (!cred?.certificate) {
+  const certificatePem = await getDecryptedCertificate(environment)
+  if (!certificatePem) {
     throw new Error('Compliance certificate not found. Complete compliance onboarding first.')
   }
 
@@ -43,10 +45,10 @@ export async function loadComplianceSigningCredentials(
   }
 
   return {
-    certificatePem: cred.certificate,
+    certificatePem,
     privateKeyPem,
     secret,
-    csidToken: pemToBase64Der(cred.certificate),
+    csidToken: pemToBase64Der(certificatePem),
     environment,
     useProduction: false,
   }
@@ -60,10 +62,10 @@ export async function loadSigningCredentials(
     throw new Error('ZATCA credentials not found. Complete onboarding first.')
   }
 
-  const useProduction = Boolean(cred.productionCsid && cred.productionCertificate)
+  const useProduction = Boolean(cred.productionCsid && (cred.productionCertificateEnc || cred.productionCertificate))
   const certificatePem = useProduction
-    ? cred.productionCertificate!
-    : cred.certificate
+    ? await getDecryptedProductionCertificate(environment)
+    : await getDecryptedCertificate(environment)
 
   if (!certificatePem) {
     throw new Error('ZATCA certificate not found. Complete compliance onboarding first.')

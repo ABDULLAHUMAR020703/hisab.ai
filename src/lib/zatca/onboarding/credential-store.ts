@@ -3,6 +3,7 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypt
 import type { ZatcaEnvironment } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import type { SaveCredentialInput, ZatcaOnboardingStatusView } from './types'
+import { resolveConnectionLabel } from './validate-onboarding'
 
 const ENCRYPTION_SALT = 'hisab-zatca-v1'
 
@@ -37,26 +38,52 @@ export function decryptSecret(ciphertext: string): string {
   return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8')
 }
 
+function decryptField(enc: string | null | undefined, plain: string | null | undefined): string | null {
+  if (enc) return decryptSecret(enc)
+  return plain ?? null
+}
+
 export async function getCredential(environment: ZatcaEnvironment) {
   return prisma.zatcaCredential.findUnique({ where: { environment } })
+}
+
+/** Persists ZATCA credentials with AES-256-GCM encryption for sensitive fields. */
+export async function storeCredentials(input: SaveCredentialInput) {
+  return saveCredential(input)
 }
 
 export async function saveCredential(input: SaveCredentialInput) {
   const updateData: Record<string, unknown> = {}
 
-  if (input.csr !== undefined) updateData.csr = input.csr
-  if (input.certificate !== undefined) updateData.certificate = input.certificate
+  if (input.companySettingsId !== undefined) updateData.companySettingsId = input.companySettingsId
+  if (input.egsUnitId !== undefined) updateData.egsUnitId = input.egsUnitId
+  if (input.requestId !== undefined) updateData.requestId = input.requestId
   if (input.complianceCsid !== undefined) updateData.complianceCsid = input.complianceCsid
   if (input.productionCsid !== undefined) updateData.productionCsid = input.productionCsid
-  if (input.productionCertificate !== undefined) updateData.productionCertificate = input.productionCertificate
   if (input.onboardingStatus !== undefined) updateData.onboardingStatus = input.onboardingStatus
   if (input.lastError !== undefined) updateData.lastError = input.lastError
   if (input.onboardedAt !== undefined) updateData.onboardedAt = input.onboardedAt
+
+  if (input.csr !== undefined) {
+    updateData.csrEnc = encryptSecret(input.csr)
+    updateData.csr = null
+  }
+  if (input.certificate !== undefined) {
+    updateData.certificateEnc = encryptSecret(input.certificate)
+    updateData.certificate = null
+  }
+  if (input.productionCertificate !== undefined) {
+    updateData.productionCertificateEnc = encryptSecret(input.productionCertificate)
+    updateData.productionCertificate = null
+  }
   if (input.privateKeyPem !== undefined) {
     updateData.privateKeyEnc = encryptSecret(input.privateKeyPem)
   }
   if (input.secret !== undefined) {
     updateData.secretEnc = encryptSecret(input.secret)
+  }
+  if (input.binarySecurityToken !== undefined) {
+    updateData.binarySecurityTokenEnc = encryptSecret(input.binarySecurityToken)
   }
 
   return prisma.zatcaCredential.upsert({
@@ -82,34 +109,98 @@ export async function getDecryptedSecret(environment: ZatcaEnvironment): Promise
   return decryptSecret(cred.secretEnc)
 }
 
+export async function getDecryptedCsr(environment: ZatcaEnvironment): Promise<string | null> {
+  const cred = await getCredential(environment)
+  if (!cred) return null
+  return decryptField(cred.csrEnc, cred.csr)
+}
+
+export async function getDecryptedCertificate(environment: ZatcaEnvironment): Promise<string | null> {
+  const cred = await getCredential(environment)
+  if (!cred) return null
+  return decryptField(cred.certificateEnc, cred.certificate)
+}
+
+export async function getDecryptedProductionCertificate(environment: ZatcaEnvironment): Promise<string | null> {
+  const cred = await getCredential(environment)
+  if (!cred) return null
+  return decryptField(cred.productionCertificateEnc, cred.productionCertificate)
+}
+
 export async function getOnboardingStatus(
   environment: ZatcaEnvironment,
 ): Promise<ZatcaOnboardingStatusView> {
-  const cred = await getCredential(environment)
+  const [cred, settings] = await Promise.all([
+    getCredential(environment),
+    prisma.companySettings.findFirst(),
+  ])
 
   if (!cred) {
     return {
       environment,
       onboardingStatus: 'NOT_STARTED',
+      connectionStatus: 'NOT_CONNECTED',
+      zatcaConnected: settings?.zatcaConnected ?? false,
+      egsUnitId: settings?.zatcaEgsUnitId ?? null,
       hasCsr: false,
       hasCertificate: false,
       hasComplianceCsid: false,
       hasProductionCsid: false,
       onboardedAt: null,
       lastError: null,
+      requestId: null,
       updatedAt: new Date().toISOString(),
     }
   }
 
+  const hasCsr = Boolean(cred.csrEnc || cred.csr)
+  const hasCertificate = Boolean(cred.certificateEnc || cred.certificate)
+
   return {
     environment: cred.environment,
     onboardingStatus: cred.onboardingStatus,
-    hasCsr: Boolean(cred.csr),
-    hasCertificate: Boolean(cred.certificate),
-    hasComplianceCsid: Boolean(cred.complianceCsid),
+    connectionStatus: resolveConnectionLabel(
+      settings?.zatcaConnected ?? false,
+      cred.onboardingStatus,
+    ),
+    zatcaConnected: settings?.zatcaConnected ?? false,
+    egsUnitId: cred.egsUnitId ?? settings?.zatcaEgsUnitId ?? null,
+    hasCsr,
+    hasCertificate,
+    hasComplianceCsid: Boolean(cred.complianceCsid || cred.binarySecurityTokenEnc),
     hasProductionCsid: Boolean(cred.productionCsid),
     onboardedAt: cred.onboardedAt?.toISOString() ?? null,
     lastError: cred.lastError,
+    requestId: cred.requestId,
     updatedAt: cred.updatedAt.toISOString(),
+  }
+}
+
+export async function testStoredConnection(environment: ZatcaEnvironment): Promise<{
+  ok: boolean
+  message: string
+  hasPrivateKey: boolean
+  hasCertificate: boolean
+  hasSecret: boolean
+}> {
+  const [privateKey, certificate, secret] = await Promise.all([
+    getDecryptedPrivateKey(environment),
+    getDecryptedCertificate(environment),
+    getDecryptedSecret(environment),
+  ])
+
+  const hasPrivateKey = Boolean(privateKey)
+  const hasCertificate = Boolean(certificate)
+  const hasSecret = Boolean(secret)
+  const ok = hasPrivateKey && hasCertificate && hasSecret
+
+  return {
+    ok,
+    hasPrivateKey,
+    hasCertificate,
+    hasSecret,
+    message: ok
+      ? 'ZATCA credentials are present and decryptable for this environment.'
+      : 'Missing or incomplete ZATCA credentials. Complete onboarding or regenerate CSR.',
   }
 }

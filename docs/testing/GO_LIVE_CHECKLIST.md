@@ -32,10 +32,10 @@ if ($env:ZATCA_MOCK_SUBMISSION) { throw "MOCK SUBMISSION SET" }
 | Item | Action | Verified |
 |------|--------|----------|
 | Provider | PostgreSQL (not SQLite) | [ ] |
-| Schema applied | `supabase/hisab_ai_supabase.sql` or migrations | [ ] |
+| Schema applied | `supabase/migrations/001_schema.sql` | [ ] |
 | Backup configured | Daily `pg_dump` to secure storage | [ ] |
 | Connection pooling | PgBouncer / Supabase pooler on port 6543 | [ ] |
-| Prisma client | `node scripts/prisma-generate.mjs` with postgres URL | [ ] |
+| Prisma client | `node scripts/db/prisma-generate.mjs` with postgres URL | [ ] |
 | QA verify | `npm run qa:verify` against staging DB | [ ] |
 
 ---
@@ -114,7 +114,7 @@ if ($env:ZATCA_MOCK_SUBMISSION) { throw "MOCK SUBMISSION SET" }
 | Step | Command / action | Verified |
 |------|------------------|----------|
 | Build succeeds | `npm run build` | [ ] |
-| Prisma generate (postgres) | `DATABASE_URL=postgresql://... node scripts/prisma-generate.mjs` | [ ] |
+| Prisma generate (postgres) | `DATABASE_URL=postgresql://... node scripts/db/prisma-generate.mjs` | [ ] |
 | Deploy to staging | | [ ] |
 | Run smoke tests on staging | Manual guide Section K | [ ] |
 | Deploy to production | | [ ] |
@@ -177,7 +177,7 @@ npm run qa:seed
 npm run qa:verify
 
 # 3. ZATCA mock E2E
-npx tsx -r ./scripts/setup-server-only.cjs scripts/run-zatca-sandbox.mjs
+npm run zatca:sandbox
 
 # 4. Build
 npm run build

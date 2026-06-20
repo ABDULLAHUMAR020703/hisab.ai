@@ -248,7 +248,7 @@ Create one invoice of each type (if UI supports type selection):
 
 ### G2. Test alternate company profile
 
-1. Open file `data/qa-company-profiles.json` in project folder
+1. Open file `tests/fixtures/qa-company-profiles.json` in the project folder
 2. Copy **retail** profile fields into Settings form
 3. Save
 

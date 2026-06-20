@@ -45,7 +45,10 @@ export async function PUT(request: Request) {
       currency: body.currency,
       fiscalYearStart: body.fiscalYearStart,
       zatcaEnabled: body.zatcaEnabled,
+      zatcaConnected: body.zatcaConnected,
       zatcaEnvironment: body.zatcaEnvironment === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX',
+      zatcaEgsUnitId: body.zatcaEgsUnitId?.trim() || null,
+      zatcaBusinessCategory: body.zatcaBusinessCategory?.trim() || null,
     } as const
 
     let settings = await prisma.companySettings.findFirst()

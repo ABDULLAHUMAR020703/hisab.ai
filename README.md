@@ -101,7 +101,7 @@ npm rebuild better-sqlite3
 Create a `.env` file in the project root:
 
 ```env
-DATABASE_URL="file:./dev.db"
+DATABASE_URL="file:./prisma/dev.db"
 ```
 
 > `.env` is gitignored. Never commit secrets or production credentials.
@@ -153,7 +153,16 @@ You can also load sample data from the dashboard via **Load sample data** (calls
 | `npm run lint` | Run ESLint |
 | `npm run db:push` | Apply Prisma schema to SQLite |
 | `npm run db:seed` | Seed base + demo data (`prisma/seed.ts`) |
+| `npm run test:zatca` | ZATCA onboarding unit tests |
+| `npm run zatca:sandbox` | Mock ZATCA E2E scenarios |
+| `npm run zatca:verify` | ZATCA offline verification |
+| `npm run qa:seed` | Load QA test data |
+| `npm run qa:verify` | Database integrity checks |
+| `npm run supabase:apply` | Apply Supabase SQL schema |
+| `npm run supabase:verify` | Verify Supabase database |
 | `npm run db:studio` | Open [Prisma Studio](https://www.prisma.io/studio) |
+
+Documentation: [docs/README.md](./docs/README.md)
 
 ---
 
@@ -161,25 +170,31 @@ You can also load sample data from the dashboard via **Load sample data** (calls
 
 ```
 hisab.ai/
+├── docs/                  # Product, migration, ZATCA, and testing docs
+│   ├── product/           # Architecture and workflow
+│   ├── migration/         # Supabase migration guide
+│   ├── zatca/             # ZATCA production docs
+│   └── testing/           # QA and go-live checklists
 ├── prisma/
-│   ├── schema.prisma      # Data models
-│   └── seed.ts            # Database seed script
+│   ├── schema.prisma      # SQLite schema (dev)
+│   ├── schema.postgresql.prisma
+│   ├── migrations/
+│   └── seed.ts
+├── scripts/
+│   ├── db/                # Prisma and Supabase helpers
+│   ├── qa/                # QA seed and verify
+│   └── zatca/             # ZATCA sandbox scripts
 ├── src/
-│   ├── app/
-│   │   ├── (auth)/        # Login
-│   │   ├── (dashboard)/ # Main app pages
-│   │   │   ├── page.tsx   # Dashboard
-│   │   │   ├── accounts/
-│   │   │   ├── invoices/
-│   │   │   ├── bills/
-│   │   │   ├── reports/   # P&L, balance sheet, GL, cash flow
-│   │   │   └── ...
-│   │   └── api/           # REST API route handlers
-│   ├── components/        # Shared UI components
-│   └── lib/               # Auth, Prisma, utilities, demo seed
-├── dev.db                 # SQLite database (created after db:push)
-├── prisma.config.ts       # Prisma CLI configuration
-└── package.json
+│   ├── app/(auth)/        # Login
+│   ├── app/(dashboard)/   # App pages
+│   ├── app/api/           # REST API routes
+│   ├── components/ui/     # Shared UI
+│   └── lib/               # Auth, ZATCA, invoices, utilities
+├── supabase/migrations/   # PostgreSQL bootstrap SQL
+├── tests/
+│   ├── fixtures/          # QA company profiles
+│   └── zatca/             # ZATCA unit tests
+└── public/receipts/       # Uploaded receipt files
 ```
 
 ---
@@ -205,7 +220,7 @@ All protected routes require a valid `session` cookie.
 
 ## Deployment notes
 
-- **SQLite:** The default setup stores data in `dev.db` at the project root. Serverless hosts (e.g. Vercel) need a **persistent volume** or a switch to PostgreSQL/MySQL.
+- **SQLite:** The default setup stores data in `prisma/dev.db`. Serverless hosts (e.g. Vercel) need a **persistent volume** or a switch to PostgreSQL/Supabase.
 - **Production database:** Update `prisma/schema.prisma` datasource and `DATABASE_URL`, then run migrations against the new provider.
 - **Security:** Rotate default passwords, use HTTPS, and set secure cookie flags in production.
 

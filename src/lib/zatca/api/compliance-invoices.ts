@@ -1,7 +1,7 @@
 import 'server-only'
 import type { ZatcaEnvironment } from '@prisma/client'
 import { buildBasicAuthHeader } from '../signature/certificate'
-import { getCredential, getDecryptedSecret } from '../onboarding/credential-store'
+import { getDecryptedCertificate, getDecryptedSecret } from '../onboarding/credential-store'
 import { isMockSubmission, resolveApiPath, type ZatcaApiResponseBody } from './client'
 
 function pemToBase64Der(pem: string): string {
@@ -12,15 +12,15 @@ function pemToBase64Der(pem: string): string {
 }
 
 async function buildComplianceAuthHeaders(environment: ZatcaEnvironment) {
-  const cred = await getCredential(environment)
-  if (!cred?.certificate) {
+  const certificatePem = await getDecryptedCertificate(environment)
+  if (!certificatePem) {
     throw new Error('Compliance certificate required for compliance invoice checks')
   }
   const secret = await getDecryptedSecret(environment)
   if (!secret) {
     throw new Error('Compliance secret required for compliance invoice checks')
   }
-  const csidToken = pemToBase64Der(cred.certificate)
+  const csidToken = pemToBase64Der(certificatePem)
   return {
     Authorization: buildBasicAuthHeader(csidToken, secret),
     Accept: 'application/json',

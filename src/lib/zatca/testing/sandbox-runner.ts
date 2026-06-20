@@ -7,7 +7,7 @@ import { generateZatcaInvoiceXml } from '../generate'
 import { generateInvoiceHash } from '../hash'
 import { enrichZatcaInvoiceInput, loadZatcaInvoiceById } from '../invoice-service'
 import { generateZatcaCsr } from '../onboarding/generate-csr'
-import { getCredential, saveCredential } from '../onboarding/credential-store'
+import { getCredential, getDecryptedCsr, saveCredential } from '../onboarding/credential-store'
 import { signAndEmbedPhase2Qr } from '../invoice-signing'
 import { loadSigningCredentials } from '../signature/certificate'
 import { submitClearanceInvoice } from '../api/clearance'
@@ -50,18 +50,19 @@ async function ensureSandboxPrerequisites() {
 
   const vatNumber = settings.taxId ?? '300000000000003'
   let cred = await getCredential(settings.zatcaEnvironment)
-  const needsMockCredentials = !cred?.privateKeyEnc || !cred?.certificate
+  const needsMockCredentials = !cred?.privateKeyEnc || !(cred?.certificateEnc || cred?.certificate)
 
   if (needsMockCredentials) {
-    let csrPem = cred?.csr ?? ''
+    let csrPem = (await getDecryptedCsr(settings.zatcaEnvironment)) ?? ''
     let privateKeyPem = '-----BEGIN PRIVATE KEY-----\nMOCK\n-----END PRIVATE KEY-----'
 
     try {
-      const csrResult = generateZatcaCsr({
+      const csrResult = await generateZatcaCsr({
         environment: settings.zatcaEnvironment,
         vatNumber,
         organizationName: settings.legalName || settings.companyName,
         registeredAddress: settings.streetAddress || settings.city || 'Riyadh',
+        egsUnitId: settings.zatcaEgsUnitId,
       })
       csrPem = csrResult.csrPem
       privateKeyPem = csrResult.privateKeyPem

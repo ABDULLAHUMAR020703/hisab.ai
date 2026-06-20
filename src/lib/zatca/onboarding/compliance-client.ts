@@ -12,7 +12,21 @@ export function getApiBaseUrl(): string {
 }
 
 function wrapCertificatePem(binarySecurityToken: string): string {
-  const lines = binarySecurityToken.match(/.{1,64}/g) ?? [binarySecurityToken]
+  // ZATCA's binarySecurityToken is base64 of the certificate's base64 DER body
+  // (i.e. double-encoded). Decode one layer to recover the real PEM body before
+  // wrapping; otherwise the resulting "certificate" cannot be parsed as X.509.
+  let body = binarySecurityToken.trim()
+  if (!/-----BEGIN/.test(body)) {
+    try {
+      const decoded = Buffer.from(body, 'base64').toString('utf8').trim()
+      if (/^MII[A-Za-z0-9+/]/.test(decoded)) {
+        body = decoded
+      }
+    } catch {
+      // Keep the original token if it is not a second base64 layer.
+    }
+  }
+  const lines = body.match(/.{1,64}/g) ?? [body]
   return `-----BEGIN CERTIFICATE-----\n${lines.join('\n')}\n-----END CERTIFICATE-----`
 }
 
@@ -37,7 +51,27 @@ interface ZatcaComplianceApiResponse {
   dispositionMessage?: string
   binarySecurityToken?: string
   secret?: string
+  errorCode?: string
+  errorCategory?: string
+  errorMessage?: string
   errors?: Array<{ message?: string; code?: string }> | null
+}
+
+function formatComplianceError(
+  body: ZatcaComplianceApiResponse,
+  status: number,
+): string {
+  const message = body.errorMessage
+    ?? body.errors?.[0]?.message
+    ?? body.dispositionMessage
+    ?? `ZATCA compliance request failed (${status})`
+
+  const category = body.errorCategory ?? body.errors?.[0]?.code
+  if (category && !message.includes(category)) {
+    return `${category}: ${message}`
+  }
+
+  return message
 }
 
 /**
@@ -56,25 +90,57 @@ export async function requestComplianceCsid(
   }
 
   const url = `${getApiBaseUrl()}${ZATCA_API_PATHS[request.environment]}`
+  const otp = request.otp.trim()
+  const headers = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    'Accept-Version': 'V2',
+    OTP: otp,
+  }
+  const requestBody = JSON.stringify({ csr: request.csrBase64 })
+
+  let decodedCsrPem = ''
+  try {
+    decodedCsrPem = Buffer.from(request.csrBase64, 'base64').toString('utf8')
+  } catch {
+    decodedCsrPem = '(could not base64-decode csr)'
+  }
+
+  console.log('========== [ZATCA] OUTGOING COMPLIANCE REQUEST ==========')
+  console.log('URL:        ', url)
+  console.log('Method:     ', 'POST')
+  console.log('Environment:', request.environment)
+  console.log('Headers:    ', JSON.stringify(headers, null, 2))
+  console.log('OTP:        ', otp)
+  console.log('Body (raw): ', requestBody)
+  console.log('csr (base64 sent):')
+  console.log(request.csrBase64)
+  console.log('csr (base64 decoded back to PEM):')
+  console.log(decodedCsrPem)
+  console.log('=========================================================')
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      'Accept-Version': 'V2',
-      OTP: request.otp.trim(),
-    },
-    body: JSON.stringify({ csr: request.csrBase64 }),
+    headers,
+    body: requestBody,
   })
 
-  const body = (await response.json().catch(() => ({}))) as ZatcaComplianceApiResponse
+  const rawText = await response.text()
+  let body: ZatcaComplianceApiResponse = {}
+  try {
+    body = JSON.parse(rawText) as ZatcaComplianceApiResponse
+  } catch {
+    // non-JSON response
+  }
+
+  console.log('[ZATCA] Compliance response', {
+    status: response.status,
+    ok: response.ok,
+    rawBody: rawText.slice(0, 1000),
+  })
 
   if (!response.ok) {
-    const message = body.errors?.[0]?.message
-      ?? body.dispositionMessage
-      ?? `ZATCA compliance request failed (${response.status})`
-    throw new Error(message)
+    throw new Error(formatComplianceError(body, response.status))
   }
 
   if (!body.binarySecurityToken || !body.secret) {

@@ -122,6 +122,9 @@ export default function DashboardPage() {
   const [error, setError] = useState('')
   const [seeding, setSeeding] = useState(false)
   const [seedMsg, setSeedMsg] = useState('')
+  // Rendered client-side only: server/client locale + timezone formatting of the
+  // current date differ and would otherwise cause a hydration mismatch.
+  const [todayLabel, setTodayLabel] = useState('')
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -169,6 +172,12 @@ export default function DashboardPage() {
 
   useEffect(() => { loadData() }, [loadData])
 
+  useEffect(() => {
+    setTodayLabel(
+      new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+    )
+  }, [])
+
   const kpis = data?.kpis ?? {
     totalRevenue: 0, totalExpenses: 0, totalInvoiced: 0, totalBilled: 0,
     totalCollected: 0, totalPaidOut: 0, payrollTotal: 0,
@@ -202,7 +211,7 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-xl font-bold text-slate-900">Financial Overview</h1>
           <p className="text-slate-500 text-sm mt-0.5">
-            Live summary of all activity across {PRODUCT_NAME} · {new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+            Live summary of all activity across {PRODUCT_NAME}{todayLabel ? ` · ${todayLabel}` : ''}
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">

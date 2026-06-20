@@ -13,7 +13,21 @@ function pemToBase64Der(pem: string): string {
 }
 
 function wrapCertificatePem(binarySecurityToken: string): string {
-  const lines = binarySecurityToken.match(/.{1,64}/g) ?? [binarySecurityToken]
+  // ZATCA's binarySecurityToken is base64 of the certificate's base64 DER body
+  // (i.e. double-encoded). Decode one layer to recover the real PEM body before
+  // wrapping; otherwise the resulting "certificate" cannot be parsed as X.509.
+  let body = binarySecurityToken.trim()
+  if (!/-----BEGIN/.test(body)) {
+    try {
+      const decoded = Buffer.from(body, 'base64').toString('utf8').trim()
+      if (/^MII[A-Za-z0-9+/]/.test(decoded)) {
+        body = decoded
+      }
+    } catch {
+      // Keep the original token if it is not a second base64 layer.
+    }
+  }
+  const lines = body.match(/.{1,64}/g) ?? [body]
   return `-----BEGIN CERTIFICATE-----\n${lines.join('\n')}\n-----END CERTIFICATE-----`
 }
 

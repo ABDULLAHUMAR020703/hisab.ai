@@ -22,7 +22,9 @@ enum ZatcaOnboardingStatus {
   NOT_STARTED
   CSR_GENERATED
   COMPLIANCE_ISSUED
+  COMPLIANCE_VALIDATED
   PRODUCTION_ISSUED
+  PRODUCTION_READY
   FAILED
 }
 
@@ -427,9 +429,18 @@ model CompanySettings {
   currency               String           @default("SAR")
   fiscalYearStart        String           @default("01-01")
   zatcaEnabled           Boolean          @default(false)
+  zatcaConnected         Boolean          @default(false)
+  zatcaConnectedAt       DateTime?
   zatcaEnvironment       ZatcaEnvironment @default(SANDBOX)
+  zatcaEgsUnitId         String?
+  zatcaDeviceIdentifier  String?
+  zatcaEgsSerialNumber   String?
+  zatcaBusinessCategory  String?
   createdAt              DateTime         @default(now())
   updatedAt              DateTime         @updatedAt
+
+  zatcaCredentials       ZatcaCredential[]
+  zatcaOnboardingRequests ZatcaOnboardingRequest[]
 }
 
 model ZatcaAuditLog {
@@ -456,20 +467,45 @@ model ZatcaSandboxTestRun {
 }
 
 model ZatcaCredential {
-  id               String                @id @default(cuid())
-  environment      ZatcaEnvironment      @unique
-  csr              String?
-  privateKeyEnc    String?
-  certificate      String?
-  secretEnc        String?
+  id                    String                @id @default(cuid())
+  companySettingsId     String?
+  environment           ZatcaEnvironment      @unique
+  egsUnitId             String?
+  csr                   String?
+  csrEnc                String?
+  privateKeyEnc         String?
+  certificate           String?
+  certificateEnc        String?
+  secretEnc             String?
+  binarySecurityTokenEnc String?
   complianceCsid        String?
+  requestId             String?
   productionCsid        String?
   productionCertificate String?
+  productionCertificateEnc String?
   onboardingStatus      ZatcaOnboardingStatus @default(NOT_STARTED)
-  lastError        String?
-  onboardedAt      DateTime?
-  createdAt        DateTime              @default(now())
-  updatedAt        DateTime              @updatedAt
+  lastError             String?
+  onboardedAt           DateTime?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  companySettings       CompanySettings?      @relation(fields: [companySettingsId], references: [id], onDelete: SetNull)
+}
+
+model ZatcaOnboardingRequest {
+  id                String           @id @default(cuid())
+  companySettingsId String
+  environment       ZatcaEnvironment
+  egsUnitId         String
+  requestId         String?
+  status            String           @default("PENDING")
+  errorMessage      String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  companySettings   CompanySettings    @relation(fields: [companySettingsId], references: [id], onDelete: Cascade)
+
+  @@index([companySettingsId, environment])
 }
 
 model Sequence {

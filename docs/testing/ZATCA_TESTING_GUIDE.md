@@ -274,7 +274,7 @@ Terminal states cannot re-submit.
 ### Run all scenarios
 
 ```powershell
-npx tsx -r ./scripts/setup-server-only.cjs scripts/run-zatca-sandbox.mjs
+npm run zatca:sandbox
 ```
 
 Or UI: ZATCA Monitor → **Run Sandbox Tests**
@@ -291,7 +291,7 @@ Or API: `POST /api/zatca/sandbox/run`
 ### Phase 7 verification
 
 ```powershell
-npx tsx -r ./scripts/setup-server-only.cjs scripts/zatca-phase7-verify.mjs
+npm run zatca:verify
 ```
 
 ---
@@ -368,7 +368,7 @@ Only after all mock tests pass:
 - [ ] 1 SIMPLIFIED invoice reported
 - [ ] Validate QR with ZATCA SDK or portal validator
 
-See: [ZATCA_PHASE7_REAL_SANDBOX.md](../ZATCA_PHASE7_REAL_SANDBOX.md)
+See: [ZATCA_TESTING_GUIDE.md](./ZATCA_TESTING_GUIDE.md) (real sandbox OTP section)
 
 ---
 
