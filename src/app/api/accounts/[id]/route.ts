@@ -1,11 +1,12 @@
 import { requireAuth } from '@/lib/auth'
+import { getAccountRepository } from '@/lib/db/provider'
 import { prisma } from '@/lib/prisma'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     await requireAuth()
     const { id } = await params
-    const account = await prisma.chartOfAccount.findUnique({ where: { id } })
+    const account = await getAccountRepository().findById(id)
     if (!account) return Response.json({ error: 'Not found' }, { status: 404 })
     return Response.json(account)
   } catch (error) {

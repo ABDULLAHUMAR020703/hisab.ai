@@ -1,5 +1,6 @@
 ﻿import { randomUUID } from 'crypto'
 import { requireAuth } from '@/lib/auth'
+import { getInvoiceRepository } from '@/lib/db/provider'
 import { prisma } from '@/lib/prisma'
 import { getNextSequence } from '@/lib/sequences'
 
@@ -11,25 +12,9 @@ export async function GET(request: Request) {
   try {
     await requireAuth()
     const { searchParams } = new URL(request.url)
-    const search = searchParams.get('search') ?? ''
-    const status = searchParams.get('status') ?? ''
-
-    const invoices = await prisma.invoice.findMany({
-      where: {
-        AND: [
-          search ? {
-            OR: [
-              { invoiceNo: { contains: search } },
-              { customer: { name: { contains: search } } },
-            ],
-          } : {},
-          status ? { status } : {},
-        ],
-      },
-      include: { customer: { select: { name: true, email: true } }, lines: true },
-      orderBy: { date: 'desc' },
-    })
-
+    const search = searchParams.get('search') ?? undefined
+    const status = searchParams.get('status') ?? undefined
+    const invoices = await getInvoiceRepository().findMany({ search, status })
     return Response.json(invoices)
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {

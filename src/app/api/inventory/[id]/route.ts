@@ -1,11 +1,12 @@
 import { requireAuth } from '@/lib/auth'
+import { getInventoryRepository } from '@/lib/db/provider'
 import { prisma } from '@/lib/prisma'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     await requireAuth()
     const { id } = await params
-    const item = await prisma.inventoryItem.findUnique({ where: { id } })
+    const item = await getInventoryRepository().findById(id)
     if (!item) return Response.json({ error: 'Not found' }, { status: 404 })
     return Response.json(item)
   } catch (error) {

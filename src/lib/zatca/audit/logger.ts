@@ -46,8 +46,6 @@ export async function logZatcaAudit(input: ZatcaAuditInput) {
 }
 
 export async function getRecentAuditLogs(limit = 50) {
-  return prisma.zatcaAuditLog.findMany({
-    orderBy: { createdAt: 'desc' },
-    take: limit,
-  })
+  const { getAuditRepository } = await import('@/lib/db/provider')
+  return getAuditRepository().findRecent(limit)
 }

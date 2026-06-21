@@ -8,7 +8,8 @@
   "scripts": {
     "dev": "next dev",
     "postinstall": "node scripts/db/prisma-generate.mjs",
-    "build": "prisma generate && node scripts/db/prisma-migrate.mjs && node scripts/db/prisma-sqlite-sync.mjs && next build",
+    "build": "prisma generate && node scripts/db/prisma-migrate.mjs && next build",
+    "build:sqlite": "prisma generate && node scripts/db/prisma-migrate.mjs && node scripts/db/prisma-sqlite-sync.mjs && next build",
     "db:seed": "npm rebuild better-sqlite3 && npx tsx prisma/seed.ts",
     "qa:seed": "npx tsx scripts/qa/qa-seed.mjs",
     "qa:verify": "node scripts/qa/qa-verify.mjs",
@@ -24,9 +25,11 @@
     "migrate:import": "npx tsx scripts/db/migration/016_import_supabase.ts",
     "migrate:test-db": "npx tsx scripts/db/migration/018_test_db_connection.ts",
     "migrate:validate": "npx tsx scripts/db/migration/017_validate_migration.ts",
+    "db:test-customer-vendor-write": "npx tsx -r ./scripts/zatca/setup-server-only.cjs scripts/db/test-customer-vendor-write.ts",
     "start": "next start",
     "lint": "eslint",
     "db:push": "prisma db push",
+    "db:sqlite-sync": "node scripts/db/prisma-sqlite-sync.mjs",
     "db:studio": "prisma studio"
   },
   "dependencies": {

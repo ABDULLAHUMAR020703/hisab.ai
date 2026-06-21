@@ -26,13 +26,9 @@ export function getSupabaseServiceRoleKey(): string {
   return key
 }
 
-/** When true, repositories and future routes use Supabase instead of Prisma. */
+/** Supabase is the default runtime. Set USE_SUPABASE=false only for Prisma/SQLite rollback. */
 export function isSupabaseEnabled(): boolean {
-  if (process.env.USE_SUPABASE === 'true') return true
-  if (process.env.USE_SUPABASE === 'false') return false
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL
-  const db = process.env.DATABASE_URL ?? ''
-  return Boolean(url) && db.startsWith('postgres')
+  return process.env.USE_SUPABASE !== 'false'
 }
 
 export const DEFAULT_COMPANY_ID = '00000000-0000-4000-8000-000000000001'

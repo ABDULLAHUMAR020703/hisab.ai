@@ -1,19 +1,12 @@
 import { requireAuth } from '@/lib/auth'
+import { getInvoiceRepository } from '@/lib/db/provider'
 import { prisma } from '@/lib/prisma'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     await requireAuth()
     const { id } = await params
-    const invoice = await prisma.invoice.findUnique({
-      where: { id },
-      include: {
-        customer: true,
-        lines: { include: { account: true } },
-        payments: true,
-        createdBy: { select: { name: true } },
-      },
-    })
+    const invoice = await getInvoiceRepository().findById(id)
     if (!invoice) return Response.json({ error: 'Not found' }, { status: 404 })
     return Response.json(invoice)
   } catch (error) {

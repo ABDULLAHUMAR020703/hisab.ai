@@ -1,4 +1,5 @@
 ﻿import { requireAuth } from '@/lib/auth'
+import { getPayrollRepository } from '@/lib/db/provider'
 import { prisma } from '@/lib/prisma'
 import { getNextSequence } from '@/lib/sequences'
 
@@ -6,20 +7,8 @@ export async function GET(request: Request) {
   try {
     await requireAuth()
     const { searchParams } = new URL(request.url)
-    const search = searchParams.get('search') ?? ''
-
-    const payrolls = await prisma.payrollEntry.findMany({
-      where: search ? {
-        OR: [
-          { payrollNo: { contains: search } },
-          { period: { contains: search } },
-          { employee: { name: { contains: search } } },
-        ],
-      } : {},
-      include: { employee: { select: { name: true, employeeNo: true, department: true } }, lines: true },
-      orderBy: { createdAt: 'desc' },
-    })
-
+    const search = searchParams.get('search') ?? undefined
+    const payrolls = await getPayrollRepository().findMany({ search })
     return Response.json(payrolls)
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
@@ -42,7 +31,7 @@ export async function POST(request: Request) {
     const totalAllowances = allowances || 0
     const totalDeductions = deductions || 0
     const grossSalary = basicSalary + totalAllowances
-    const taxAmount = 0 // Saudi Arabia: no income tax for most employees
+    const taxAmount = 0
     const netSalary = grossSalary - totalDeductions - taxAmount
 
     const payrollNo = await getNextSequence('PAYROLL', 'PRL-')

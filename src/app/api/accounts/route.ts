@@ -1,29 +1,14 @@
 import { requireAuth } from '@/lib/auth'
+import { getAccountRepository } from '@/lib/db/provider'
 import { prisma } from '@/lib/prisma'
 
 export async function GET(request: Request) {
   try {
     await requireAuth()
     const { searchParams } = new URL(request.url)
-    const search = searchParams.get('search') ?? ''
-    const type = searchParams.get('type') ?? ''
-
-    const accounts = await prisma.chartOfAccount.findMany({
-      where: {
-        AND: [
-          search ? {
-            OR: [
-              { name: { contains: search } },
-              { accountNo: { contains: search } },
-              { fullName: { contains: search } },
-            ],
-          } : {},
-          type ? { accountType: type } : {},
-        ],
-      },
-      orderBy: { accountNo: 'asc' },
-    })
-
+    const search = searchParams.get('search') ?? undefined
+    const type = searchParams.get('type') ?? undefined
+    const accounts = await getAccountRepository().findMany({ search, type })
     return Response.json(accounts)
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {

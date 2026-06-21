@@ -1,4 +1,5 @@
 ﻿import { requireAuth } from '@/lib/auth'
+import { getInventoryRepository } from '@/lib/db/provider'
 import { prisma } from '@/lib/prisma'
 import { getNextSequence } from '@/lib/sequences'
 
@@ -6,19 +7,8 @@ export async function GET(request: Request) {
   try {
     await requireAuth()
     const { searchParams } = new URL(request.url)
-    const search = searchParams.get('search') ?? ''
-
-    const items = await prisma.inventoryItem.findMany({
-      where: search ? {
-        OR: [
-          { name: { contains: search } },
-          { itemCode: { contains: search } },
-          { category: { contains: search } },
-        ],
-      } : {},
-      orderBy: { name: 'asc' },
-    })
-
+    const search = searchParams.get('search') ?? undefined
+    const items = await getInventoryRepository().findMany({ search })
     return Response.json(items)
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {

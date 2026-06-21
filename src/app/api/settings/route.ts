@@ -1,17 +1,18 @@
 import { requireAuth } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { getSettingsRepository } from '@/lib/db/provider'
+import type { CompanySettingsUpdateInput } from '@/lib/db/types'
 
 export async function GET() {
   try {
     await requireAuth()
-    let settings = await prisma.companySettings.findFirst()
+    const settingsRepo = getSettingsRepository()
+
+    let settings = await settingsRepo.findFirst()
     if (!settings) {
-      settings = await prisma.companySettings.create({
-        data: {
-          companyName: 'NETKOM COMPANY FOR COMMUNICATION',
-          country: 'Saudi Arabia',
-          currency: 'SAR',
-        },
+      settings = await settingsRepo.create({
+        companyName: 'NETKOM COMPANY FOR COMMUNICATION',
+        country: 'Saudi Arabia',
+        currency: 'SAR',
       })
     }
     return Response.json(settings)
@@ -27,8 +28,9 @@ export async function PUT(request: Request) {
   try {
     await requireAuth()
     const body = await request.json()
+    const settingsRepo = getSettingsRepository()
 
-    const data = {
+    const data: CompanySettingsUpdateInput = {
       companyName: body.companyName,
       legalName: body.legalName,
       taxId: body.taxId,
@@ -49,18 +51,9 @@ export async function PUT(request: Request) {
       zatcaEnvironment: body.zatcaEnvironment === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX',
       zatcaEgsUnitId: body.zatcaEgsUnitId?.trim() || null,
       zatcaBusinessCategory: body.zatcaBusinessCategory?.trim() || null,
-    } as const
-
-    let settings = await prisma.companySettings.findFirst()
-    if (!settings) {
-      settings = await prisma.companySettings.create({ data })
-    } else {
-      settings = await prisma.companySettings.update({
-        where: { id: settings.id },
-        data,
-      })
     }
 
+    const settings = await settingsRepo.upsert(data)
     return Response.json(settings)
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {

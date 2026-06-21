@@ -1,14 +1,12 @@
 import { requireAuth } from '@/lib/auth'
+import { getPayrollRepository } from '@/lib/db/provider'
 import { prisma } from '@/lib/prisma'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     await requireAuth()
     const { id } = await params
-    const payroll = await prisma.payrollEntry.findUnique({
-      where: { id },
-      include: { employee: true, lines: true },
-    })
+    const payroll = await getPayrollRepository().findById(id)
     if (!payroll) return Response.json({ error: 'Not found' }, { status: 404 })
     return Response.json(payroll)
   } catch (error) {
