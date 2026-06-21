@@ -1,4 +1,5 @@
 import 'server-only'
+import { randomUUID } from 'crypto'
 import {
   mapChartOfAccountRow,
   mapCustomerRow,
@@ -7,8 +8,91 @@ import {
   mapPaymentRow,
 } from '../entity-mappers'
 import type { InvoiceRecord } from '../entities'
-import { queryByIdOrLegacy, resolveCompanyId, supabaseDb } from '../repository-utils'
-import type { InvoiceListOptions, InvoiceRepository } from './invoice.repository.interface'
+import { isUuid, queryByIdOrLegacy, resolveCompanyId, supabaseDb } from '../repository-utils'
+import { resolveSequenceRepository } from '../sequence-resolver'
+import type {
+  InvoiceCreateInput,
+  InvoiceLineInput,
+  InvoiceListOptions,
+  InvoiceRepository,
+  InvoiceUpdateInput,
+} from './invoice.repository.interface'
+
+function formatIssueTime(date: Date): string {
+  return date.toTimeString().split(' ')[0]
+}
+
+function processLines(lines: InvoiceLineInput[]) {
+  let subtotal = 0
+  let taxAmount = 0
+  const processedLines = lines.map((line) => {
+    const quantity = Number(line.quantity)
+    const unitPrice = Number(line.unitPrice)
+    const taxRate = Number(line.taxRate)
+    const amount = quantity * unitPrice
+    subtotal += amount
+    taxAmount += amount * (taxRate / 100)
+    return {
+      description: line.description,
+      quantity,
+      unitPrice: unitPrice,
+      taxRate,
+      amount,
+      accountId: line.accountId || null,
+      costCenterId: line.costCenterId || null,
+    }
+  })
+  return { processedLines, subtotal, taxAmount, total: subtotal + taxAmount }
+}
+
+async function resolveScopedUuid(
+  table: string,
+  id: string | null | undefined,
+  companyId: string,
+): Promise<string | null> {
+  if (!id) return null
+  const row = await queryByIdOrLegacy(supabaseDb(), table, id, companyId)
+  return row ? String(row.id) : null
+}
+
+async function resolveProfileUuid(userId: string | null | undefined): Promise<string | null> {
+  if (!userId) return null
+  const db = supabaseDb()
+
+  if (isUuid(userId)) {
+    const { data, error } = await db.from('profiles').select('id').eq('id', userId).maybeSingle()
+    if (error) throw error
+    if (data) return String(data.id)
+  }
+
+  const { data, error } = await db
+    .from('profiles')
+    .select('id')
+    .eq('legacy_user_id', userId)
+    .maybeSingle()
+  if (error) throw error
+  return data ? String(data.id) : null
+}
+
+async function buildLineRows(
+  lines: ReturnType<typeof processLines>['processedLines'],
+  invoiceId: string,
+  companyId: string,
+) {
+  return Promise.all(
+    lines.map(async (line) => ({
+      company_id: companyId,
+      invoice_id: invoiceId,
+      account_id: await resolveScopedUuid('chart_of_accounts', line.accountId, companyId),
+      cost_center_id: await resolveScopedUuid('cost_centers', line.costCenterId, companyId),
+      description: line.description,
+      quantity: line.quantity,
+      unit_price: line.unitPrice,
+      tax_rate: line.taxRate,
+      amount: line.amount,
+    })),
+  )
+}
 
 export const supabaseInvoiceRepository: InvoiceRepository = {
   async findMany(options: InvoiceListOptions = {}) {
@@ -124,5 +208,131 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
         ? { name: (profileRes.data.full_name as string | null) ?? null }
         : undefined,
     } as InvoiceRecord
+  },
+
+  async create(input: InvoiceCreateInput) {
+    const db = supabaseDb()
+    const companyId = await resolveCompanyId()
+    const customerId = await resolveScopedUuid('customers', input.customerId, companyId)
+    if (!customerId) throw new Error('Customer not found')
+
+    const { processedLines, subtotal, taxAmount, total } = processLines(input.lines)
+    const invoiceNo = await resolveSequenceRepository().next('INVOICE', 'INV-')
+    const issueDate = new Date(input.date)
+    const createdById = await resolveProfileUuid(input.createdById)
+
+    const { data, error } = await db
+      .from('invoices')
+      .insert({
+        company_id: companyId,
+        invoice_no: invoiceNo,
+        invoice_uuid: randomUUID(),
+        customer_id: customerId,
+        date: issueDate.toISOString(),
+        issue_time: formatIssueTime(issueDate),
+        due_date: new Date(input.dueDate).toISOString(),
+        subtotal,
+        tax_amount: taxAmount,
+        total,
+        balance: total,
+        notes: input.notes ?? null,
+        terms: input.terms ?? null,
+        is_recurring: input.isRecurring ?? false,
+        recurring_day: input.recurringDay ?? null,
+        created_by_id: createdById,
+      })
+      .select('*')
+      .single()
+
+    if (error) throw error
+
+    const invoiceId = String(data.id)
+    const lineRows = await buildLineRows(processedLines, invoiceId, companyId)
+    if (lineRows.length > 0) {
+      const { error: lineError } = await db.from('invoice_lines').insert(lineRows)
+      if (lineError) throw lineError
+    }
+
+    const created = await this.findById(invoiceId)
+    if (!created) throw new Error('Invoice not found')
+    return created
+  },
+
+  async update(id: string, input: InvoiceUpdateInput) {
+    const db = supabaseDb()
+    const companyId = await resolveCompanyId()
+    const invoiceId = await resolveScopedUuid('invoices', id, companyId)
+    if (!invoiceId) throw new Error('Invoice not found')
+
+    const existingRow = await queryByIdOrLegacy(db, 'invoices', invoiceId, companyId)
+    if (!existingRow) throw new Error('Invoice not found')
+    const existing = mapInvoiceRow(existingRow)
+    if (existing.status === 'PAID') throw new Error('Cannot edit paid invoice')
+
+    const patch: Record<string, unknown> = {}
+    if (input.customerId !== undefined) {
+      const customerId = await resolveScopedUuid('customers', input.customerId, companyId)
+      if (!customerId) throw new Error('Customer not found')
+      patch.customer_id = customerId
+    }
+    if (input.date !== undefined) patch.date = new Date(input.date).toISOString()
+    if (input.dueDate !== undefined) patch.due_date = new Date(input.dueDate).toISOString()
+    if (input.notes !== undefined) patch.notes = input.notes
+    if (input.terms !== undefined) patch.terms = input.terms
+    if (input.status !== undefined) patch.status = input.status
+
+    if (input.lines !== undefined) {
+      const { processedLines, subtotal, taxAmount, total } = processLines(input.lines)
+      patch.subtotal = subtotal
+      patch.tax_amount = taxAmount
+      patch.total = total
+      patch.balance = total - existing.amountPaid
+
+      const { error: deleteLineError } = await db
+        .from('invoice_lines')
+        .delete()
+        .eq('company_id', companyId)
+        .eq('invoice_id', invoiceId)
+      if (deleteLineError) throw deleteLineError
+
+      const lineRows = await buildLineRows(processedLines, invoiceId, companyId)
+      if (lineRows.length > 0) {
+        const { error: insertLineError } = await db.from('invoice_lines').insert(lineRows)
+        if (insertLineError) throw insertLineError
+      }
+    }
+
+    const { error } = await db
+      .from('invoices')
+      .update(patch)
+      .eq('id', invoiceId)
+      .eq('company_id', companyId)
+      .is('deleted_at', null)
+
+    if (error) throw error
+
+    const updated = await this.findById(invoiceId)
+    if (!updated) throw new Error('Invoice not found')
+    return updated
+  },
+
+  async delete(id: string) {
+    const db = supabaseDb()
+    const companyId = await resolveCompanyId()
+    const invoiceId = await resolveScopedUuid('invoices', id, companyId)
+    if (!invoiceId) throw new Error('Invoice not found')
+
+    const existingRow = await queryByIdOrLegacy(db, 'invoices', invoiceId, companyId)
+    if (!existingRow) throw new Error('Invoice not found')
+    const existing = mapInvoiceRow(existingRow)
+    if (existing.status === 'PAID') throw new Error('Cannot delete paid invoice')
+
+    const { error } = await db
+      .from('invoices')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', invoiceId)
+      .eq('company_id', companyId)
+
+    if (error) throw error
   },
 }

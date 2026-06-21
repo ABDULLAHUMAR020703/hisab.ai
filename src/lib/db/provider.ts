@@ -33,6 +33,7 @@ import { resolveSequenceRepository } from './sequence-resolver'
 
 const CUSTOMER_WRITE_METHODS: (keyof CustomerRepository)[] = ['create', 'update', 'delete']
 const VENDOR_WRITE_METHODS: (keyof VendorRepository)[] = ['create', 'update', 'delete']
+const INVOICE_WRITE_METHODS: (keyof InvoiceRepository)[] = ['create', 'update', 'delete']
 
 function resolve<T extends object>(
   label: string,
@@ -83,7 +84,13 @@ export function getAccountRepository(): AccountRepository {
 }
 
 export function getInvoiceRepository(): InvoiceRepository {
-  return resolve('invoice', prismaInvoiceRepository, supabaseInvoiceRepository, ['findMany', 'findById'])
+  return resolve(
+    'invoice',
+    prismaInvoiceRepository,
+    supabaseInvoiceRepository,
+    ['findMany', 'findById'],
+    INVOICE_WRITE_METHODS,
+  )
 }
 
 export function getInventoryRepository(): InventoryRepository {
