@@ -5,6 +5,7 @@ import { Upload, FileText, CheckCircle, X } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { readApiError } from '@/lib/api-client'
 
 interface Props {
   open: boolean
@@ -47,6 +48,10 @@ export function UploadDocumentModal({ open, onClose, onSuccess, title = 'Upload 
       if (description) fd.append('description', description)
 
       const res = await fetch('/api/receipts', { method: 'POST', body: fd })
+      if (!res.ok) {
+        alert(await readApiError(res))
+        return
+      }
       if (res.ok) {
         setDone(true)
         onSuccess?.()

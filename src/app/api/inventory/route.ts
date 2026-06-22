@@ -22,12 +22,18 @@ export async function POST(request: Request) {
   try {
     await requireAuth()
     const body = await request.json()
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+
+    if (!name) {
+      return Response.json({ error: 'Item name is required' }, { status: 400 })
+    }
+
     const itemCode = await getNextSequence('ITEM', 'ITEM-')
 
     const item = await prisma.inventoryItem.create({
       data: {
         itemCode: body.itemCode || itemCode,
-        name: body.name,
+        name,
         description: body.description,
         category: body.category,
         unit: body.unit || 'PCS',

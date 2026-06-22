@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { Input } from '@/components/ui/input'
 import { PageHeader, SearchBar, FilterBar } from '@/components/ui/page-header'
+import { readApiError } from '@/lib/api-client'
 
 interface Vendor {
   id: string; vendorNo: string; name: string; email?: string; phone?: string
@@ -49,13 +50,22 @@ export default function VendorsPage() {
     setSaving(true)
     const url = editing ? `/api/vendors/${editing.id}` : '/api/vendors'
     const res = await fetch(url, { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
+    if (!res.ok) {
+      alert(await readApiError(res))
+      setSaving(false)
+      return
+    }
     if (res.ok) { setShowModal(false); load() }
     setSaving(false)
   }
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this vendor?')) return
-    await fetch(`/api/vendors/${id}`, { method: 'DELETE' })
+    const res = await fetch(`/api/vendors/${id}`, { method: 'DELETE' })
+    if (!res.ok) {
+      alert(await readApiError(res))
+      return
+    }
     load()
   }
 

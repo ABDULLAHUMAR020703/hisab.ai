@@ -31,12 +31,18 @@ export async function POST(request: Request) {
   try {
     await requireAuth()
     const body = await request.json()
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+
+    if (!name) {
+      return Response.json({ error: 'Cost center name is required' }, { status: 400 })
+    }
+
     const autoCode = await getNextSequence('CC', 'CC-')
 
     const center = await prisma.costCenter.create({
       data: {
         code: body.code || autoCode,
-        name: body.name,
+        name,
         type: body.type || 'PROJECT',
         description: body.description,
       },

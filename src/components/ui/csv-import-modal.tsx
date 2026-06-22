@@ -4,6 +4,7 @@ import { useState, useRef } from 'react'
 import { Upload, Download, X, CheckCircle, AlertCircle, FileText } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { Button } from '@/components/ui/button'
+import { readApiError } from '@/lib/api-client'
 
 export type ImportType = 'expenses' | 'bills' | 'journal'
 
@@ -126,6 +127,10 @@ export function CsvImportModal({ type, open, onClose, onSuccess }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rows }),
       })
+      if (!res.ok) {
+        alert(await readApiError(res))
+        return
+      }
       const data = await res.json()
       setResult(data)
       if (data.created > 0) onSuccess()

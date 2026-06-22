@@ -5,6 +5,7 @@ import { Shield, RefreshCw, CheckCircle2, XCircle, Play } from 'lucide-react'
 import { formatDate, cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/ui/page-header'
+import { readApiError } from '@/lib/api-client'
 
 interface DashboardData {
   stats: {
@@ -60,6 +61,11 @@ export default function ZatcaDashboardPage() {
     setRunningTests(true)
     setTestMsg(null)
     const res = await fetch('/api/zatca/sandbox/run', { method: 'POST' })
+    if (!res.ok) {
+      setTestMsg(await readApiError(res))
+      setRunningTests(false)
+      return
+    }
     const result = await res.json()
     if (res.ok) {
       setTestMsg(`Sandbox tests: ${result.summary.passed}/${result.summary.total} passed`)

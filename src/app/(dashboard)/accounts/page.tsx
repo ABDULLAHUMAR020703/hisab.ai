@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { Input, Select } from '@/components/ui/input'
 import { PageHeader, SearchBar, FilterBar } from '@/components/ui/page-header'
+import { readApiError } from '@/lib/api-client'
 
 interface Account {
   id: string; accountNo: string; fullName: string; name: string
@@ -74,6 +75,11 @@ export default function AccountsPage() {
     setSaving(true)
     const url = editing ? `/api/accounts/${editing.id}` : '/api/accounts'
     const res = await fetch(url, { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
+    if (!res.ok) {
+      alert(await readApiError(res))
+      setSaving(false)
+      return
+    }
     if (res.ok) { setShowModal(false); load() }
     setSaving(false)
   }

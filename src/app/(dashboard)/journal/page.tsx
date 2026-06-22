@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Plus, Search, Check, AlertCircle, Upload } from 'lucide-react'
 import { formatDate, formatCurrency } from '@/lib/utils'
 import { CsvImportModal } from '@/components/ui/csv-import-modal'
+import { readApiError } from '@/lib/api-client'
 
 interface Account { id: string; accountNo: string; name: string; accountType: string }
 interface CostCenter { id: string; code: string; name: string }
@@ -88,7 +89,11 @@ export default function JournalPage() {
   }
 
   async function handlePost(id: string) {
-    await fetch(`/api/journal/${id}/post`, { method: 'POST' })
+    const res = await fetch(`/api/journal/${id}/post`, { method: 'POST' })
+    if (!res.ok) {
+      alert(await readApiError(res))
+      return
+    }
     load()
   }
 

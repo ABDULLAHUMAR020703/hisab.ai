@@ -10,6 +10,7 @@ import { Input, Select, Textarea } from '@/components/ui/input'
 import { PageHeader, SearchBar, FilterBar } from '@/components/ui/page-header'
 import { CsvImportModal } from '@/components/ui/csv-import-modal'
 import { UploadDocumentModal } from '@/components/ui/upload-document-modal'
+import { readApiError } from '@/lib/api-client'
 
 interface Vendor { id: string; name: string }
 interface Account { id: string; accountNo: string; name: string }
@@ -69,6 +70,11 @@ export default function BillsPage() {
   async function handleSave() {
     setSaving(true)
     const res = await fetch('/api/bills', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
+    if (!res.ok) {
+      alert(await readApiError(res))
+      setSaving(false)
+      return
+    }
     if (res.ok) { setShowModal(false); load() }
     setSaving(false)
   }
@@ -76,6 +82,10 @@ export default function BillsPage() {
   async function handlePayment() {
     if (!selectedBill) return
     const res = await fetch(`/api/bills/${selectedBill.id}/payment`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payForm) })
+    if (!res.ok) {
+      alert(await readApiError(res))
+      return
+    }
     if (res.ok) { setShowPayModal(false); load() }
   }
 

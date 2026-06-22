@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Plus, RefreshCw, Send, DollarSign, RotateCcw, Eye, Shield, FileDown } from 'lucide-react'
 import { formatDate, formatCurrency, cn } from '@/lib/utils'
+import { readApiError } from '@/lib/api-client'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
@@ -92,6 +93,11 @@ export default function InvoicesPage() {
     const res = await fetch('/api/invoices', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form)
     })
+    if (!res.ok) {
+      alert(await readApiError(res))
+      setSaving(false)
+      return
+    }
     if (res.ok) { setShowModal(false); load() }
     setSaving(false)
   }
@@ -101,6 +107,10 @@ export default function InvoicesPage() {
     const res = await fetch(`/api/invoices/${selectedInvoice.id}/payment`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payForm)
     })
+    if (!res.ok) {
+      alert(await readApiError(res))
+      return
+    }
     if (res.ok) { setShowPayModal(false); load() }
   }
 

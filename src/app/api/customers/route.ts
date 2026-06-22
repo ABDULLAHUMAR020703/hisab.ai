@@ -20,8 +20,14 @@ export async function POST(request: Request) {
   try {
     await requireAuth()
     const body = await request.json()
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+
+    if (!name) {
+      return Response.json({ error: 'Customer name is required' }, { status: 400 })
+    }
+
     const customer = await getCustomerRepository().create({
-      name: body.name,
+      name,
       email: body.email,
       phone: body.phone,
       address: body.address,

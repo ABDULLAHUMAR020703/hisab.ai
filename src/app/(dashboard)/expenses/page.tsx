@@ -9,6 +9,7 @@ import { Modal } from '@/components/ui/modal'
 import { Input, Select } from '@/components/ui/input'
 import { PageHeader, SearchBar, FilterBar } from '@/components/ui/page-header'
 import { CsvImportModal } from '@/components/ui/csv-import-modal'
+import { readApiError } from '@/lib/api-client'
 
 interface Account { id: string; accountNo: string; name: string }
 interface Expense {
@@ -57,12 +58,21 @@ export default function ExpensesPage() {
   async function handleSave() {
     setSaving(true)
     const res = await fetch('/api/expenses', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
+    if (!res.ok) {
+      alert(await readApiError(res))
+      setSaving(false)
+      return
+    }
     if (res.ok) { setShowModal(false); load() }
     setSaving(false)
   }
 
   async function handleApprove(id: string) {
-    await fetch(`/api/expenses/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'APPROVED' }) })
+    const res = await fetch(`/api/expenses/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'APPROVED' }) })
+    if (!res.ok) {
+      alert(await readApiError(res))
+      return
+    }
     load()
   }
 

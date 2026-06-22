@@ -24,6 +24,25 @@ export async function POST(request: Request) {
     const body = await request.json()
     const { employeeId, periodStart, periodEnd, period, allowances, deductions, notes } = body
 
+    if (!employeeId) {
+      return Response.json({ error: 'employeeId is required' }, { status: 400 })
+    }
+
+    const start = periodStart
+      ? new Date(periodStart)
+      : period
+        ? new Date(`${period}-01T00:00:00.000Z`)
+        : null
+    const end = periodEnd
+      ? new Date(periodEnd)
+      : start
+        ? new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0))
+        : null
+
+    if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      return Response.json({ error: 'period or periodStart/periodEnd is required' }, { status: 400 })
+    }
+
     const employee = await prisma.employee.findUnique({ where: { id: employeeId } })
     if (!employee) return Response.json({ error: 'Employee not found' }, { status: 404 })
 
@@ -40,9 +59,9 @@ export async function POST(request: Request) {
       data: {
         payrollNo,
         employeeId,
-        period: period || new Date(periodStart).toLocaleString('en', { month: 'long', year: 'numeric' }),
-        periodStart: new Date(periodStart),
-        periodEnd: new Date(periodEnd),
+        period: period || start.toLocaleString('en', { month: 'long', year: 'numeric' }),
+        periodStart: start,
+        periodEnd: end,
         basicSalary,
         allowances: totalAllowances,
         deductions: totalDeductions,

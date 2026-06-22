@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { Input, Select, Textarea } from '@/components/ui/input'
 import { PageHeader, FilterBar } from '@/components/ui/page-header'
+import { readApiError } from '@/lib/api-client'
 
 interface Employee { id: string; name: string; salary: number; employeeNo: string }
 interface PayrollEntry {
@@ -40,12 +41,21 @@ export default function PayrollPage() {
   async function handleSave() {
     setSaving(true)
     const res = await fetch('/api/payroll', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
+    if (!res.ok) {
+      alert(await readApiError(res))
+      setSaving(false)
+      return
+    }
     if (res.ok) { setShowModal(false); load() }
     setSaving(false)
   }
 
   async function handleApprove(id: string) {
-    await fetch(`/api/payroll/${id}/approve`, { method: 'POST' })
+    const res = await fetch(`/api/payroll/${id}/approve`, { method: 'POST' })
+    if (!res.ok) {
+      alert(await readApiError(res))
+      return
+    }
     load()
   }
 

@@ -32,12 +32,18 @@ export async function POST(request: Request) {
   try {
     await requireAuth()
     const body = await request.json()
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+
+    if (!name || !body.joiningDate) {
+      return Response.json({ error: 'name and joiningDate are required' }, { status: 400 })
+    }
+
     const employeeNo = await getNextSequence('EMPLOYEE', 'EMP-')
 
     const employee = await prisma.employee.create({
       data: {
         employeeNo,
-        name: body.name,
+        name,
         email: body.email,
         phone: body.phone,
         department: body.department,

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { Input, Select } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
+import { readApiError } from '@/lib/api-client'
 
 interface User {
   id: string; name: string; email: string; role: string; isActive: boolean; createdAt: string
@@ -49,13 +50,22 @@ export default function UsersPage() {
     const url = editing ? `/api/users/${editing.id}` : '/api/users'
     const body = editing ? { name: form.name, role: form.role } : form
     const res = await fetch(url, { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    if (!res.ok) {
+      alert(await readApiError(res))
+      setSaving(false)
+      return
+    }
     if (res.ok) { setShowModal(false); load() }
     setSaving(false)
   }
 
   async function handleDeactivate(id: string) {
     if (!confirm('Deactivate this user?')) return
-    await fetch(`/api/users/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isActive: false }) })
+    const res = await fetch(`/api/users/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isActive: false }) })
+    if (!res.ok) {
+      alert(await readApiError(res))
+      return
+    }
     load()
   }
 

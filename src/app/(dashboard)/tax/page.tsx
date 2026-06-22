@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { Input, Select } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
+import { readApiError } from '@/lib/api-client'
 
 interface TaxRate { id: string; name: string; rate: number; type: string; isDefault: boolean; isActive: boolean }
 interface TaxReport { vatCollected: number; vatPaid: number; netVat: number; period: string }
@@ -35,6 +36,11 @@ export default function TaxPage() {
   async function handleSave() {
     setSaving(true)
     const res = await fetch('/api/tax', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
+    if (!res.ok) {
+      alert(await readApiError(res))
+      setSaving(false)
+      return
+    }
     if (res.ok) { setShowModal(false); load() }
     setSaving(false)
   }

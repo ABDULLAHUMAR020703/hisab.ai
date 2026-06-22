@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/ui/page-header'
+import { readApiError } from '@/lib/api-client'
 
 interface Receipt {
   id: string; fileName: string; vendor?: string; amount?: number
@@ -35,6 +36,12 @@ export default function ReceiptsPage() {
     const fd = new FormData()
     fd.append('file', file)
     const res = await fetch('/api/receipts', { method: 'POST', body: fd })
+    if (!res.ok) {
+      alert(await readApiError(res))
+      setUploading(false)
+      if (fileRef.current) fileRef.current.value = ''
+      return
+    }
     if (res.ok) load()
     setUploading(false)
     if (fileRef.current) fileRef.current.value = ''

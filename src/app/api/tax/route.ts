@@ -18,10 +18,17 @@ export async function POST(request: Request) {
   try {
     await requireAuth()
     const body = await request.json()
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+    const rate = Number(body.rate)
+
+    if (!name || Number.isNaN(rate) || rate < 0) {
+      return Response.json({ error: 'name and a non-negative rate are required' }, { status: 400 })
+    }
+
     const taxRate = await prisma.taxRate.create({
       data: {
-        name: body.name,
-        rate: body.rate,
+        name,
+        rate,
         type: body.type || 'VAT',
         isDefault: body.isDefault || false,
       },

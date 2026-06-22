@@ -12,7 +12,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!bill) return Response.json({ error: 'Bill not found' }, { status: 404 })
     if (bill.balance <= 0) return Response.json({ error: 'Bill is already fully paid' }, { status: 400 })
 
-    const amount = Math.min(body.amount, bill.balance)
+    const requestedAmount = Number(body.amount)
+    if (Number.isNaN(requestedAmount) || requestedAmount <= 0) {
+      return Response.json({ error: 'A positive payment amount is required' }, { status: 400 })
+    }
+
+    const amount = Math.min(requestedAmount, bill.balance)
     const paymentNo = await getNextSequence('PAYMENT', 'PAY-')
 
     await prisma.payment.create({
