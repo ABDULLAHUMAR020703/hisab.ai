@@ -1,6 +1,5 @@
 import { requireAuth } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
-import bcrypt from 'bcryptjs'
+import { deleteAppUser, updateAppUser } from '@/lib/supabase/auth-users'
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -8,27 +7,19 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const { id } = await params
     const body = await request.json()
 
-    const data: {
-      name?: string; role?: string; isActive?: boolean; password?: string
-    } = {
+    const user = await updateAppUser(id, {
       name: body.name,
       role: body.role,
       isActive: body.isActive,
-    }
-
-    if (body.password) {
-      data.password = await bcrypt.hash(body.password, 10)
-    }
-
-    const user = await prisma.user.update({
-      where: { id },
-      data,
-      select: { id: true, name: true, email: true, role: true, isActive: true },
+      password: body.password,
     })
 
     return Response.json(user)
   } catch (error) {
-    return Response.json({ error: String(error) }, { status: 500 })
+    if (error instanceof Error && error.message === 'Unauthorized') {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 })
   }
 }
 
@@ -41,9 +32,12 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
       return Response.json({ error: 'Cannot delete your own account' }, { status: 400 })
     }
 
-    await prisma.user.delete({ where: { id } })
+    await deleteAppUser(id)
     return Response.json({ success: true })
   } catch (error) {
-    return Response.json({ error: String(error) }, { status: 500 })
+    if (error instanceof Error && error.message === 'Unauthorized') {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 })
   }
 }

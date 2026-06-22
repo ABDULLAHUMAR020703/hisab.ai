@@ -1,20 +1,15 @@
 import { requireAuth } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
-import bcrypt from 'bcryptjs'
+import { createAppUser, listAppUsers } from '@/lib/supabase/auth-users'
 
 export async function GET() {
   try {
     await requireAuth()
-    const users = await prisma.user.findMany({
-      select: { id: true, name: true, email: true, role: true, isActive: true, createdAt: true },
-      orderBy: { name: 'asc' },
-    })
-    return Response.json(users)
+    return Response.json(await listAppUsers())
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    return Response.json({ error: String(error) }, { status: 500 })
+    return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 })
   }
 }
 
@@ -27,16 +22,11 @@ export async function POST(request: Request) {
       return Response.json({ error: 'email and password required' }, { status: 400 })
     }
 
-    const hashed = await bcrypt.hash(body.password, 10)
-    const user = await prisma.user.create({
-      data: {
-        name: body.name,
-        email: body.email,
-        password: hashed,
-        role: body.role || 'ACCOUNTANT',
-        isActive: true,
-      },
-      select: { id: true, name: true, email: true, role: true, isActive: true, createdAt: true },
+    const user = await createAppUser({
+      name: body.name,
+      email: body.email,
+      password: body.password,
+      role: body.role || 'ACCOUNTANT',
     })
 
     return Response.json(user, { status: 201 })
@@ -44,6 +34,6 @@ export async function POST(request: Request) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
     }
-    return Response.json({ error: String(error) }, { status: 500 })
+    return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 })
   }
 }

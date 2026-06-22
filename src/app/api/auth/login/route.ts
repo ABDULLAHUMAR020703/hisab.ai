@@ -1,45 +1,27 @@
-import { prisma } from '@/lib/prisma'
-import { ensureDemoUsers } from '@/lib/demo-users'
-import bcrypt from 'bcryptjs'
-import { randomBytes } from 'crypto'
-
-function sessionCookie(token: string) {
-  const maxAge = 7 * 24 * 60 * 60
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
-  return `session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`
-}
+import { authCookieHeaderValues } from '@/lib/auth'
+import { createPasswordAuthClient, ensureDemoSupabaseUsers, getAppUser } from '@/lib/supabase/auth-users'
 
 export async function POST(request: Request) {
   try {
-    await ensureDemoUsers(prisma)
-
     const { email, password } = await request.json()
 
     if (!email || !password) {
       return Response.json({ error: 'Email and password are required' }, { status: 400 })
     }
 
-    const user = await prisma.user.findUnique({ where: { email } })
+    await ensureDemoSupabaseUsers()
 
-    if (!user || !user.password) {
+    const supabase = createPasswordAuthClient()
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+
+    if (error || !data.session || !data.user?.email) {
       return Response.json({ error: 'Invalid email or password' }, { status: 401 })
     }
 
+    const user = await getAppUser(data.user.id, data.user.email)
     if (!user.isActive) {
       return Response.json({ error: 'Account is disabled' }, { status: 403 })
     }
-
-    const valid = await bcrypt.compare(password, user.password)
-    if (!valid) {
-      return Response.json({ error: 'Invalid email or password' }, { status: 401 })
-    }
-
-    const token = randomBytes(32).toString('hex')
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-
-    await prisma.appSession.create({
-      data: { userId: user.id, token, expiresAt },
-    })
 
     const response = Response.json({
       success: true,
@@ -47,11 +29,18 @@ export async function POST(request: Request) {
     })
 
     const headers = new Headers(response.headers)
-    headers.set('Set-Cookie', sessionCookie(token))
+    for (const value of authCookieHeaderValues(
+      data.session.access_token,
+      data.session.refresh_token,
+      data.session.expires_in,
+    )) {
+      headers.append('Set-Cookie', value)
+    }
 
     return new Response(response.body, { status: 200, headers })
   } catch (error) {
     console.error('Login error:', error)
-    return Response.json({ error: 'Internal server error' }, { status: 500 })
+    const message = error instanceof Error ? error.message : 'Internal server error'
+    return Response.json({ error: message }, { status: 500 })
   }
 }
