@@ -1,10 +1,11 @@
 ﻿'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Save, Building2, Shield, Link2, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
+import { readApiError } from '@/lib/api-client'
 
 interface Settings {
   companyName: string
@@ -64,20 +65,23 @@ export default function SettingsPage() {
   const [otp, setOtp] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [onboardingMsg, setOnboardingMsg] = useState<string | null>(null)
   const [onboardingErr, setOnboardingErr] = useState<string | null>(null)
 
-  const loadOnboardingStatus = useCallback(async () => {
+  async function loadOnboardingStatus() {
     const res = await fetch('/api/zatca/onboarding/status')
     if (res.ok) setOnboarding(await res.json())
-  }, [])
+  }
 
   useEffect(() => {
+    let active = true
+
     fetch('/api/settings')
       .then((r) => r.json())
       .then((d) => {
-        if (!d || d.error) return
+        if (!active || !d || d.error) return
         setSettings((s) => ({
           ...s,
           companyName: d.companyName ?? '',
@@ -99,21 +103,43 @@ export default function SettingsPage() {
         }))
       })
       .catch(() => null)
-    loadOnboardingStatus()
-  }, [loadOnboardingStatus])
+
+    fetch('/api/zatca/onboarding/status')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (active && d) setOnboarding(d)
+      })
+      .catch(() => null)
+
+    return () => {
+      active = false
+    }
+  }, [])
 
   async function handleSave() {
     setSaving(true)
-    const res = await fetch('/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings),
-    })
-    if (res.ok) {
+    setSaved(false)
+    setSaveError(null)
+
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      })
+
+      if (!res.ok) {
+        setSaveError(await readApiError(res))
+        return
+      }
+
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Failed to save settings')
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
   }
 
   async function handleConnectZatca() {
@@ -181,6 +207,11 @@ export default function SettingsPage() {
             {saved && (
               <span className="text-sm text-emerald-600 font-medium bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-lg">
                 ✓ Saved
+              </span>
+            )}
+            {saveError && (
+              <span className="max-w-sm truncate text-sm text-red-600 font-medium bg-red-50 border border-red-200 px-3 py-1 rounded-lg" title={saveError}>
+                {saveError}
               </span>
             )}
             <Button onClick={handleSave} loading={saving}>
@@ -279,5 +310,3 @@ export default function SettingsPage() {
     </div>
   )
 }
-
-
