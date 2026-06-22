@@ -1,4 +1,5 @@
-import { prisma } from '@/lib/prisma'
+import { getSettingsRepository } from '@/lib/db/provider'
+import type { CustomerRecord } from '@/lib/db/entities'
 import { ZATCA_FIRST_PIH_BASE64 } from './constants'
 import { generateZatcaInvoiceXml } from './generate'
 import {
@@ -7,7 +8,8 @@ import {
   getPreviousInvoiceHash,
   invoiceHashHexToPihBase64,
 } from './hash'
-import type { ZatcaInvoiceInput, ZatcaXmlGenerationResult } from './types'
+import { loadInvoiceForZatca, updateInvoiceZatcaFields } from './persistence'
+import type { ZatcaCustomerInput, ZatcaInvoiceInput, ZatcaXmlGenerationResult } from './types'
 
 export interface LoadedZatcaInvoice {
   invoice: NonNullable<Awaited<ReturnType<typeof loadZatcaInvoiceById>>>
@@ -15,24 +17,32 @@ export interface LoadedZatcaInvoice {
 }
 
 export async function loadZatcaInvoiceById(invoiceId: string) {
-  const invoice = await prisma.invoice.findUnique({
-    where: { id: invoiceId },
-    include: {
-      customer: true,
-      lines: true,
-    },
-  })
+  const invoice = await loadInvoiceForZatca(invoiceId)
 
-  if (!invoice) return null
+  if (!invoice || !invoice.customer || !invoice.lines) return null
 
-  const companySettings = await prisma.companySettings.findFirst()
+  const companySettings = await getSettingsRepository().findFirst()
   if (!companySettings) return null
+  const rawCustomer = invoice.customer as Partial<CustomerRecord>
+  const customer: ZatcaCustomerInput = {
+    name: rawCustomer.name ?? '',
+    email: rawCustomer.email ?? null,
+    phone: rawCustomer.phone ?? null,
+    address: rawCustomer.address ?? null,
+    streetAddress: rawCustomer.streetAddress ?? null,
+    buildingNumber: rawCustomer.buildingNumber ?? null,
+    district: rawCustomer.district ?? null,
+    city: rawCustomer.city ?? null,
+    country: rawCustomer.country ?? null,
+    postalCode: rawCustomer.postalCode ?? null,
+    taxId: rawCustomer.taxId ?? null,
+  }
 
   const input: ZatcaInvoiceInput = {
     id: invoice.id,
     invoiceNo: invoice.invoiceNo,
     invoiceUUID: invoice.invoiceUUID,
-    invoiceType: invoice.invoiceType,
+    invoiceType: invoice.invoiceType as ZatcaInvoiceInput['invoiceType'],
     date: invoice.date,
     issueTime: invoice.issueTime,
     currency: invoice.currency,
@@ -48,7 +58,7 @@ export async function loadZatcaInvoiceById(invoiceId: string) {
       taxRate: line.taxRate,
       amount: line.amount,
     })),
-    customer: invoice.customer,
+    customer,
     companySettings,
   }
 
@@ -104,12 +114,9 @@ export async function processZatcaInvoice(
   const previousHash = await getPreviousInvoiceHash(invoiceId)
 
   if (options.persistHash) {
-    await prisma.invoice.update({
-      where: { id: invoiceId },
-      data: {
-        invoiceHash: hash,
-        previousInvoiceHash: previousHash,
-      },
+    await updateInvoiceZatcaFields(invoiceId, {
+      invoiceHash: hash,
+      previousInvoiceHash: previousHash,
     })
   }
 

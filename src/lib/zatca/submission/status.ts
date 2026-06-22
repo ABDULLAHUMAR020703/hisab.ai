@@ -1,27 +1,34 @@
 import 'server-only'
-import { prisma } from '@/lib/prisma'
+import type { ZatcaInvoiceStatus } from '@prisma/client'
+import { getSettingsRepository } from '@/lib/db/provider'
 import { getCredential } from '../onboarding/credential-store'
+import { loadInvoiceForZatca } from '../persistence'
 import { TERMINAL_ZATCA_STATUSES, type InvoiceResponseView, type InvoiceStatusView } from './types'
 
 export async function getInvoiceZatcaStatus(invoiceId: string): Promise<InvoiceStatusView | null> {
-  const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } })
+  const invoice = await loadInvoiceForZatca(invoiceId)
   if (!invoice) return null
 
-  const settings = await prisma.companySettings.findFirst()
+  const settings = await getSettingsRepository().findFirst()
   const cred = settings ? await getCredential(settings.zatcaEnvironment) : null
 
-  const hasCredentials = Boolean(cred?.certificate || cred?.productionCertificate)
+  const hasCredentials = Boolean(
+    cred?.certificate
+      || cred?.certificateEnc
+      || cred?.productionCertificate
+      || cred?.productionCertificateEnc,
+  )
   const canSubmit = Boolean(
     settings?.zatcaEnabled
     && hasCredentials
-    && !TERMINAL_ZATCA_STATUSES.includes(invoice.zatcaStatus)
+    && !TERMINAL_ZATCA_STATUSES.includes(invoice.zatcaStatus as ZatcaInvoiceStatus)
     && invoice.zatcaStatus !== 'PENDING',
   )
 
   return {
     invoiceId: invoice.id,
     invoiceNo: invoice.invoiceNo,
-    zatcaStatus: invoice.zatcaStatus,
+    zatcaStatus: invoice.zatcaStatus as ZatcaInvoiceStatus,
     requestId: invoice.zatcaRequestId,
     responseCode: invoice.zatcaResponseCode,
     responseMessage: invoice.zatcaResponseMessage,
@@ -32,7 +39,7 @@ export async function getInvoiceZatcaStatus(invoiceId: string): Promise<InvoiceS
 }
 
 export async function getInvoiceZatcaResponse(invoiceId: string): Promise<InvoiceResponseView | null> {
-  const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } })
+  const invoice = await loadInvoiceForZatca(invoiceId)
   if (!invoice) return null
 
   let zatcaResponse: Record<string, unknown> | null = null
@@ -46,7 +53,7 @@ export async function getInvoiceZatcaResponse(invoiceId: string): Promise<Invoic
 
   return {
     invoiceId: invoice.id,
-    zatcaStatus: invoice.zatcaStatus,
+    zatcaStatus: invoice.zatcaStatus as ZatcaInvoiceStatus,
     requestId: invoice.zatcaRequestId,
     responseCode: invoice.zatcaResponseCode,
     responseMessage: invoice.zatcaResponseMessage,

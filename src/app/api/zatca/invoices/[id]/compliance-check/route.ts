@@ -3,7 +3,7 @@ import { submitComplianceInvoice } from '@/lib/zatca/api/compliance-invoices'
 import { processZatcaInvoice, loadZatcaInvoiceById } from '@/lib/zatca/invoice-service'
 import { signAndEmbedPhase2Qr } from '@/lib/zatca/invoice-signing'
 import { loadComplianceSigningCredentials } from '@/lib/zatca/signature/certificate'
-import { prisma } from '@/lib/prisma'
+import { getSettingsRepository } from '@/lib/db/provider'
 
 /**
  * POST /api/zatca/invoices/[id]/compliance-check
@@ -17,7 +17,7 @@ export async function POST(
     await requireAuth()
     const { id } = await params
 
-    const settings = await prisma.companySettings.findFirst()
+    const settings = await getSettingsRepository().findFirst()
     if (!settings) {
       return Response.json({ error: 'Company settings not found' }, { status: 404 })
     }

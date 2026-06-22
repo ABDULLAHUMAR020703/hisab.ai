@@ -1,10 +1,9 @@
 import 'server-only'
 import type { ZatcaEnvironment } from '@prisma/client'
-import { prisma } from '@/lib/prisma'
+import { getSettingsRepository } from '@/lib/db/provider'
 import { logZatcaAudit } from '../audit/logger'
 import { requestComplianceCsid } from './compliance-client'
 import {
-  getCredential,
   getDecryptedCsr,
   getOnboardingStatus,
   storeCredentials,
@@ -18,7 +17,7 @@ import type { OnboardingAuditContext } from './types'
 export type { OnboardingAuditContext }
 
 async function getCompanySettingsOrThrow() {
-  const settings = await prisma.companySettings.findFirst()
+  const settings = await getSettingsRepository().findFirst()
   if (!settings) {
     throw new Error('Company settings not found')
   }
@@ -38,13 +37,10 @@ export async function generateAndStoreCsr(auditContext?: OnboardingAuditContext)
 
   const egsIdentity = generateEgsIdentity(settings.legalName || settings.companyName, settings.taxId, environment)
 
-  await prisma.companySettings.update({
-    where: { id: settings.id },
-    data: {
+  await getSettingsRepository().update(settings.id, {
       zatcaEgsUnitId: egsIdentity.egsUnitId,
       zatcaDeviceIdentifier: egsIdentity.deviceIdentifier,
       zatcaEgsSerialNumber: egsIdentity.egsSerialNumber,
-    },
   })
 
   const csrResult = await generateCSR(companySettingsToCsrInput(settings, egsIdentity))
@@ -120,10 +116,7 @@ export async function submitComplianceOnboarding(otp: string, auditContext?: Onb
       onboardedAt: new Date(),
     })
 
-    await prisma.companySettings.update({
-      where: { id: settings.id },
-      data: { zatcaConnected: true },
-    })
+    await getSettingsRepository().update(settings.id, { zatcaConnected: true })
 
     await logZatcaAudit({
       action: 'CREDENTIALS_STORED',

@@ -1,5 +1,7 @@
 import 'server-only'
+import { isUuid, resolveCompanyId, supabaseDb } from '@/lib/db/repository-utils'
 import { prisma } from '@/lib/prisma'
+import { isSupabaseEnabled } from '@/lib/supabase/env'
 
 export type ZatcaAuditAction =
   | 'CSR_GENERATED'
@@ -31,6 +33,28 @@ export interface ZatcaAuditInput {
 }
 
 export async function logZatcaAudit(input: ZatcaAuditInput) {
+  if (isSupabaseEnabled()) {
+    const companyId = await resolveCompanyId()
+    const { data, error } = await supabaseDb()
+      .from('zatca_audit_logs')
+      .insert({
+        company_id: companyId,
+        action: input.action,
+        result: input.result,
+        message: input.message ?? null,
+        user_id: input.userId && isUuid(input.userId) ? input.userId : null,
+        user_name: input.userName ?? null,
+        company_name: input.companyName ?? null,
+        invoice_id: input.invoiceId && isUuid(input.invoiceId) ? input.invoiceId : null,
+        metadata: input.metadata ?? null,
+      })
+      .select('*')
+      .single()
+
+    if (error) throw error
+    return data
+  }
+
   return prisma.zatcaAuditLog.create({
     data: {
       action: input.action,

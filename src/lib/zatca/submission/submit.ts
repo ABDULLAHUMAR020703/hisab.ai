@@ -1,15 +1,15 @@
 import 'server-only'
-import type { ZatcaInvoiceStatus } from '@prisma/client'
-import { prisma } from '@/lib/prisma'
+import type { InvoiceType, ZatcaInvoiceStatus } from '@prisma/client'
+import { getSettingsRepository } from '@/lib/db/provider'
 import { logZatcaAudit } from '../audit/logger'
 import { submitClearanceInvoice } from '../api/clearance'
 import { submitReportingInvoice } from '../api/reporting'
 import { ZatcaError, mapToZatcaError } from '../errors'
-import { generateZatcaInvoiceXml } from '../generate'
 import { signAndEmbedPhase2Qr } from '../invoice-signing'
+import { loadZatcaInvoiceById, processZatcaInvoice } from '../invoice-service'
+import { loadInvoiceForZatca, updateInvoiceZatcaFields } from '../persistence'
 import { loadSigningCredentials } from '../signature/certificate'
 import { verifyInvoiceSignature } from '../signature/signer'
-import { processZatcaInvoice } from '../invoice-service'
 import { getCredential } from '../onboarding/credential-store'
 import {
   validateFullSubmissionPipeline,
@@ -29,13 +29,10 @@ async function recordFailure(
   auditContext?: SubmitAuditContext,
   companyName?: string,
 ) {
-  await prisma.invoice.update({
-    where: { id: invoiceId },
-    data: {
-      zatcaStatus: 'FAILED',
-      zatcaFailureCode: zatcaError.code,
-      zatcaResponseMessage: zatcaError.diagnostic,
-    },
+  await updateInvoiceZatcaFields(invoiceId, {
+    zatcaStatus: 'FAILED',
+    zatcaFailureCode: zatcaError.code,
+    zatcaResponseMessage: zatcaError.diagnostic,
   })
 
   await logZatcaAudit({
@@ -51,13 +48,14 @@ async function recordFailure(
 }
 
 async function assertSubmissionReady(invoiceId: string) {
-  const settings = await prisma.companySettings.findFirst()
+  const settings = await getSettingsRepository().findFirst()
   if (!settings) throw new ZatcaError('VALIDATION_FAILED', 'Company settings not found')
 
-  const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } })
+  const invoice = await loadInvoiceForZatca(invoiceId)
   if (!invoice) throw new ZatcaError('INVOICE_NOT_FOUND', 'Invoice not found')
 
-  if (TERMINAL_ZATCA_STATUSES.includes(invoice.zatcaStatus)) {
+  const zatcaStatus = invoice.zatcaStatus as ZatcaInvoiceStatus
+  if (TERMINAL_ZATCA_STATUSES.includes(zatcaStatus)) {
     throw new ZatcaError('ALREADY_SUBMITTED', `Invoice already submitted with status: ${invoice.zatcaStatus}`)
   }
 
@@ -88,9 +86,9 @@ export async function submitInvoice(
   const { settings, invoice, companyName } = await assertSubmissionReady(invoiceId)
   const environment = settings.zatcaEnvironment
 
-  await prisma.invoice.update({
-    where: { id: invoiceId },
-    data: { zatcaStatus: 'PENDING', zatcaFailureCode: null },
+  await updateInvoiceZatcaFields(invoiceId, {
+    zatcaStatus: 'PENDING',
+    zatcaFailureCode: null,
   })
 
   try {
@@ -99,35 +97,10 @@ export async function submitInvoice(
       throw new ZatcaError('VALIDATION_FAILED', 'ZATCA validation failed before submission.')
     }
 
-    const loaded = await prisma.invoice.findUnique({
-      where: { id: invoiceId },
-      include: { customer: true, lines: true },
-    })
+    const loaded = await loadZatcaInvoiceById(invoiceId)
     if (!loaded) throw new ZatcaError('INVOICE_NOT_FOUND', 'Invoice not found')
 
-    const input = {
-      id: loaded.id,
-      invoiceNo: loaded.invoiceNo,
-      invoiceUUID: loaded.invoiceUUID,
-      invoiceType: loaded.invoiceType,
-      date: loaded.date,
-      issueTime: loaded.issueTime,
-      currency: loaded.currency,
-      subtotal: loaded.subtotal,
-      taxAmount: loaded.taxAmount,
-      total: loaded.total,
-      notes: loaded.notes,
-      lines: loaded.lines.map((l) => ({
-        id: l.id,
-        description: l.description,
-        quantity: l.quantity,
-        unitPrice: l.unitPrice,
-        taxRate: l.taxRate,
-        amount: l.amount,
-      })),
-      customer: loaded.customer,
-      companySettings: settings,
-    }
+    const input = loaded.input
 
     const fullValidation = validateFullSubmissionPipeline(input, processed.validation)
     if (!fullValidation.valid) {
@@ -160,7 +133,7 @@ export async function submitInvoice(
     }
 
     const uuid = processed.document.uuid
-    const route = getSubmissionRoute(invoice.invoiceType)
+    const route = getSubmissionRoute(invoice.invoiceType as InvoiceType)
     const submittedAt = new Date()
     const submissionHash = invoiceHashHex
 
@@ -204,9 +177,7 @@ export async function submitInvoice(
       throw mapToZatcaError(apiError)
     }
 
-    await prisma.invoice.update({
-      where: { id: invoiceId },
-      data: {
+    await updateInvoiceZatcaFields(invoiceId, {
         zatcaStatus,
         zatcaRequestId: requestId,
         zatcaResponseCode: responseCode,
@@ -217,7 +188,6 @@ export async function submitInvoice(
         signedXml,
         zatcaResponsePayload: JSON.stringify(rawResponse),
         zatcaSubmissionDate: submittedAt,
-      },
     })
 
     await logZatcaAudit({

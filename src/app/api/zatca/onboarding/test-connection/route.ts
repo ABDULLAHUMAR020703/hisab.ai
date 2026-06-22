@@ -1,5 +1,5 @@
 import { requireAuth } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { getSettingsRepository } from '@/lib/db/provider'
 import { testZatcaConnection } from '@/lib/zatca/onboarding/onboard'
 import type { ZatcaEnvironment } from '@prisma/client'
 
@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}))
     const environment = body?.environment as ZatcaEnvironment | undefined
 
-    const settings = await prisma.companySettings.findFirst()
+    const settings = await getSettingsRepository().findFirst()
     const result = await testZatcaConnection(environment ?? settings?.zatcaEnvironment)
 
     return Response.json({

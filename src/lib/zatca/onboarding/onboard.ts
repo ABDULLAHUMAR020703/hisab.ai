@@ -1,6 +1,12 @@
 import 'server-only'
 import type { ZatcaEnvironment } from '@prisma/client'
+import { getSettingsRepository } from '@/lib/db/provider'
+import {
+  createOnboardingRequest as createSupabaseOnboardingRequest,
+  updateOnboardingRequest as updateSupabaseOnboardingRequest,
+} from '@/lib/db/zatca.repository'
 import { prisma } from '@/lib/prisma'
+import { isSupabaseEnabled } from '@/lib/supabase/env'
 import { logZatcaAudit } from '../audit/logger'
 import { requestComplianceCsid } from './compliance-client'
 import { runComplianceChecks } from './compliance-checks'
@@ -29,8 +35,51 @@ export interface RunZatcaOnboardingInput {
   environment?: ZatcaEnvironment
 }
 
+async function createOnboardingRequest(input: {
+  companySettingsId: string
+  environment: ZatcaEnvironment
+  egsUnitId: string
+}) {
+  if (isSupabaseEnabled()) {
+    return createSupabaseOnboardingRequest({
+      companyId: input.companySettingsId,
+      environment: input.environment,
+      egsUnitId: input.egsUnitId,
+      status: 'PENDING',
+    })
+  }
+
+  return prisma.zatcaOnboardingRequest.create({
+    data: {
+      companySettingsId: input.companySettingsId,
+      environment: input.environment,
+      egsUnitId: input.egsUnitId,
+      status: 'PENDING',
+    },
+  })
+}
+
+async function updateOnboardingRequest(
+  id: string,
+  input: { status: string; requestId?: string | null; errorMessage?: string | null },
+) {
+  if (isSupabaseEnabled()) {
+    await updateSupabaseOnboardingRequest(id, input)
+    return
+  }
+
+  await prisma.zatcaOnboardingRequest.update({
+    where: { id },
+    data: {
+      status: input.status,
+      requestId: input.requestId,
+      errorMessage: input.errorMessage,
+    },
+  })
+}
+
 async function getCompanySettingsOrThrow() {
-  const settings = await prisma.companySettings.findFirst()
+  const settings = await getSettingsRepository().findFirst()
   if (!settings) {
     throw new Error('Company settings not found')
   }
@@ -41,14 +90,11 @@ async function persistEgsIdentity(
   settingsId: string,
   identity: ReturnType<typeof generateEgsIdentity>,
 ) {
-  await prisma.companySettings.update({
-    where: { id: settingsId },
-    data: {
+  await getSettingsRepository().update(settingsId, {
       zatcaEgsUnitId: identity.egsUnitId,
       zatcaDeviceIdentifier: identity.deviceIdentifier,
       zatcaEgsSerialNumber: identity.egsSerialNumber,
       zatcaBusinessCategory: identity.businessCategory,
-    },
   })
   return identity
 }
@@ -90,13 +136,10 @@ export async function runZatcaOnboarding(
     environment,
   )
 
-  const onboardingRequest = await prisma.zatcaOnboardingRequest.create({
-    data: {
-      companySettingsId: settings.id,
-      environment,
-      egsUnitId: egsIdentity.egsUnitId,
-      status: 'PENDING',
-    },
+  const onboardingRequest = await createOnboardingRequest({
+    companySettingsId: settings.id,
+    environment,
+    egsUnitId: egsIdentity.egsUnitId,
   })
 
   await logZatcaAudit({
@@ -192,14 +235,11 @@ export async function runZatcaOnboarding(
       onboardedAt: connectedAt,
     })
 
-    await prisma.companySettings.update({
-      where: { id: settings.id },
-      data: {
+    await getSettingsRepository().update(settings.id, {
         zatcaEnabled: true,
         zatcaConnected: true,
         zatcaConnectedAt: connectedAt,
         zatcaEnvironment: environment,
-      },
     })
 
     await logZatcaAudit({
@@ -284,13 +324,10 @@ export async function runZatcaOnboarding(
       }).catch(() => null)
     }
 
-    await prisma.zatcaOnboardingRequest.update({
-      where: { id: onboardingRequest.id },
-      data: {
-        status: 'SUCCESS',
-        requestId: productionRequestId || response.requestId,
-        errorMessage: warnings.length ? warnings.join(' | ') : null,
-      },
+    await updateOnboardingRequest(onboardingRequest.id, {
+      status: 'SUCCESS',
+      requestId: productionRequestId || response.requestId,
+      errorMessage: warnings.length ? warnings.join(' | ') : null,
     }).catch(() => null)
 
     return {
@@ -316,9 +353,9 @@ export async function runZatcaOnboarding(
       lastError: message,
     }).catch(() => null)
 
-    await prisma.zatcaOnboardingRequest.update({
-      where: { id: onboardingRequest.id },
-      data: { status: 'FAILED', errorMessage: message },
+    await updateOnboardingRequest(onboardingRequest.id, {
+      status: 'FAILED',
+      errorMessage: message,
     }).catch(() => null)
 
     await logZatcaAudit({

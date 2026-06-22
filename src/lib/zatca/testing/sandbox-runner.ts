@@ -1,13 +1,21 @@
 import 'server-only'
 import { randomUUID } from 'crypto'
 import type { InvoiceType } from '@prisma/client'
+import { getSettingsRepository } from '@/lib/db/provider'
 import { prisma } from '@/lib/prisma'
 import { logZatcaAudit } from '../audit/logger'
 import { generateZatcaInvoiceXml } from '../generate'
 import { generateInvoiceHash } from '../hash'
 import { enrichZatcaInvoiceInput, loadZatcaInvoiceById } from '../invoice-service'
 import { generateZatcaCsr } from '../onboarding/generate-csr'
-import { getCredential, getDecryptedCsr, saveCredential } from '../onboarding/credential-store'
+import {
+  getCredential,
+  getDecryptedCertificate,
+  getDecryptedCsr,
+  getDecryptedPrivateKey,
+  getDecryptedSecret,
+  saveCredential,
+} from '../onboarding/credential-store'
 import { signAndEmbedPhase2Qr } from '../invoice-signing'
 import { loadSigningCredentials } from '../signature/certificate'
 import { submitClearanceInvoice } from '../api/clearance'
@@ -42,7 +50,7 @@ const EXPECTED_STATUS: Record<SandboxScenario, string> = {
 }
 
 async function ensureSandboxPrerequisites() {
-  const settings = await prisma.companySettings.findFirst()
+  const settings = await getSettingsRepository().findFirst()
   if (!settings) throw new Error('Company settings not found')
 
   process.env.ZATCA_MOCK_ONBOARDING = 'true'
@@ -50,10 +58,28 @@ async function ensureSandboxPrerequisites() {
 
   const vatNumber = settings.taxId ?? '300000000000003'
   let cred = await getCredential(settings.zatcaEnvironment)
-  const needsMockCredentials = !cred?.privateKeyEnc || !(cred?.certificateEnc || cred?.certificate)
+  let needsMockCredentials = !cred?.privateKeyEnc || !(cred?.certificateEnc || cred?.certificate)
+
+  if (!needsMockCredentials) {
+    try {
+      const [privateKeyPem, certificatePem, secret] = await Promise.all([
+        getDecryptedPrivateKey(settings.zatcaEnvironment),
+        getDecryptedCertificate(settings.zatcaEnvironment),
+        getDecryptedSecret(settings.zatcaEnvironment),
+      ])
+      needsMockCredentials = !privateKeyPem || !certificatePem || !secret
+    } catch {
+      needsMockCredentials = true
+    }
+  }
 
   if (needsMockCredentials) {
-    let csrPem = (await getDecryptedCsr(settings.zatcaEnvironment)) ?? ''
+    let csrPem = ''
+    try {
+      csrPem = (await getDecryptedCsr(settings.zatcaEnvironment)) ?? ''
+    } catch {
+      csrPem = ''
+    }
     let privateKeyPem = '-----BEGIN PRIVATE KEY-----\nMOCK\n-----END PRIVATE KEY-----'
 
     try {
@@ -86,13 +112,28 @@ async function ensureSandboxPrerequisites() {
   const user = await prisma.user.findFirst({ where: { isActive: true } })
   if (!user) throw new Error('No active user found for sandbox tests')
 
-  let customer = await prisma.customer.findFirst({ where: { isActive: true } })
+  const sandboxBuyerVat = '399999999900003'
+  let customer = await prisma.customer.findFirst({
+    where: {
+      isActive: true,
+      taxId: sandboxBuyerVat,
+    },
+  })
   if (!customer) {
-    customer = await prisma.customer.create({
-      data: {
-        customerNo: `SANDBOX-CUST-${Date.now()}`,
+    customer = await prisma.customer.upsert({
+      where: { customerNo: 'SANDBOX-CUST' },
+      update: {
+        taxId: sandboxBuyerVat,
+        streetAddress: 'King Fahd Road',
+        city: 'Riyadh',
+        postalCode: '12345',
+        country: 'Saudi Arabia',
+        isActive: true,
+      },
+      create: {
+        customerNo: 'SANDBOX-CUST',
         name: 'Sandbox Test Customer',
-        taxId: '300000000000003',
+        taxId: sandboxBuyerVat,
         streetAddress: 'King Fahd Road',
         city: 'Riyadh',
         postalCode: '12345',
@@ -155,16 +196,13 @@ export async function runSandboxScenario(scenario: SandboxScenario): Promise<San
     const { settings, user, customer } = await ensureSandboxPrerequisites()
 
     if (!settings.taxId) {
-      await prisma.companySettings.update({
-        where: { id: settings.id },
-        data: {
+      await getSettingsRepository().update(settings.id, {
           taxId: '300000000000003',
           commercialRegistration: '1010000000',
           streetAddress: 'King Fahd Road',
           postalCode: '12345',
           city: 'Riyadh',
           zatcaEnabled: true,
-        },
       })
     }
 

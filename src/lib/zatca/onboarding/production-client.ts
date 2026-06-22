@@ -2,7 +2,7 @@ import 'server-only'
 import type { ZatcaEnvironment } from '@prisma/client'
 import { buildBasicAuthHeader } from '../signature/certificate'
 import { getApiBaseUrl, isMockMode } from './compliance-client'
-import { getDecryptedSecret, getCredential } from './credential-store'
+import { getDecryptedCertificate, getDecryptedSecret, getCredential } from './credential-store'
 import type { ProductionCsidResponse } from './types'
 
 function pemToBase64Der(pem: string): string {
@@ -57,8 +57,13 @@ export async function requestProductionCsid(
   environment: ZatcaEnvironment,
 ): Promise<ProductionCsidResponse> {
   const cred = await getCredential(environment)
-  if (!cred?.certificate || !cred.complianceCsid) {
+  if (!cred?.complianceCsid) {
     throw new Error('Compliance CSID must be issued before requesting production CSID.')
+  }
+
+  const complianceCertificate = await getDecryptedCertificate(environment)
+  if (!complianceCertificate) {
+    throw new Error('Compliance certificate must be issued before requesting production CSID.')
   }
 
   if (isMockMode()) {
@@ -70,7 +75,7 @@ export async function requestProductionCsid(
     throw new Error('ZATCA secret not found in credential store.')
   }
 
-  const csidToken = pemToBase64Der(cred.certificate)
+  const csidToken = pemToBase64Der(complianceCertificate)
   const productionPath = environment === 'SANDBOX'
     ? '/e-invoicing/simulation/production/csids'
     : '/e-invoicing/core/production/csids'

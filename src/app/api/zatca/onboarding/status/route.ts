@@ -1,5 +1,5 @@
 import { requireAuth } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { getSettingsRepository } from '@/lib/db/provider'
 import { getOnboardingStatus } from '@/lib/zatca/onboarding/service'
 
 /**
@@ -10,7 +10,7 @@ export async function GET() {
   try {
     await requireAuth()
 
-    const settings = await prisma.companySettings.findFirst()
+    const settings = await getSettingsRepository().findFirst()
     const environment = settings?.zatcaEnvironment ?? 'SANDBOX'
     const status = await getOnboardingStatus(environment)
 

@@ -1,15 +1,10 @@
-import { prisma } from '@/lib/prisma'
+import { countHashedInvoices } from '../persistence'
 
 /**
  * Returns the next monotonic invoice counter value (ICV) for ZATCA XML.
  * Based on count of invoices that have been hashed/submitted in this tenant.
  */
 export async function getNextInvoiceCounterValue(excludeInvoiceId?: string): Promise<number> {
-  const count = await prisma.invoice.count({
-    where: {
-      invoiceHash: { not: null },
-      ...(excludeInvoiceId ? { id: { not: excludeInvoiceId } } : {}),
-    },
-  })
+  const count = await countHashedInvoices(excludeInvoiceId)
   return count + 1
 }

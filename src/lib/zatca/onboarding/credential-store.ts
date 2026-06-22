@@ -1,7 +1,14 @@
 import 'server-only'
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto'
 import type { ZatcaEnvironment } from '@prisma/client'
+import { getSettingsRepository } from '@/lib/db/provider'
+import {
+  getCredential as getSupabaseCredential,
+  upsertCredential as upsertSupabaseCredential,
+} from '@/lib/db/zatca.repository'
+import type { SaveCredentialInput as DbSaveCredentialInput } from '@/lib/db/types'
 import { prisma } from '@/lib/prisma'
+import { isSupabaseEnabled } from '@/lib/supabase/env'
 import type { SaveCredentialInput, ZatcaOnboardingStatusView } from './types'
 import { resolveConnectionLabel } from './validate-onboarding'
 
@@ -44,6 +51,10 @@ function decryptField(enc: string | null | undefined, plain: string | null | und
 }
 
 export async function getCredential(environment: ZatcaEnvironment) {
+  if (isSupabaseEnabled()) {
+    return getSupabaseCredential(environment)
+  }
+
   return prisma.zatcaCredential.findUnique({ where: { environment } })
 }
 
@@ -54,36 +65,77 @@ export async function storeCredentials(input: SaveCredentialInput) {
 
 export async function saveCredential(input: SaveCredentialInput) {
   const updateData: Record<string, unknown> = {}
+  const supabaseInput: DbSaveCredentialInput = {
+    environment: input.environment,
+    companySettingsId: input.companySettingsId,
+  }
 
   if (input.companySettingsId !== undefined) updateData.companySettingsId = input.companySettingsId
-  if (input.egsUnitId !== undefined) updateData.egsUnitId = input.egsUnitId
-  if (input.requestId !== undefined) updateData.requestId = input.requestId
-  if (input.complianceCsid !== undefined) updateData.complianceCsid = input.complianceCsid
-  if (input.productionCsid !== undefined) updateData.productionCsid = input.productionCsid
-  if (input.onboardingStatus !== undefined) updateData.onboardingStatus = input.onboardingStatus
-  if (input.lastError !== undefined) updateData.lastError = input.lastError
-  if (input.onboardedAt !== undefined) updateData.onboardedAt = input.onboardedAt
+  if (input.egsUnitId !== undefined) {
+    updateData.egsUnitId = input.egsUnitId
+    supabaseInput.egsUnitId = input.egsUnitId
+  }
+  if (input.requestId !== undefined) {
+    updateData.requestId = input.requestId
+    supabaseInput.requestId = input.requestId
+  }
+  if (input.complianceCsid !== undefined) {
+    updateData.complianceCsid = input.complianceCsid
+    supabaseInput.complianceCsid = input.complianceCsid
+  }
+  if (input.productionCsid !== undefined) {
+    updateData.productionCsid = input.productionCsid
+    supabaseInput.productionCsid = input.productionCsid
+  }
+  if (input.onboardingStatus !== undefined) {
+    updateData.onboardingStatus = input.onboardingStatus
+    supabaseInput.onboardingStatus = input.onboardingStatus
+  }
+  if (input.lastError !== undefined) {
+    updateData.lastError = input.lastError
+    supabaseInput.lastError = input.lastError
+  }
+  if (input.onboardedAt !== undefined) {
+    updateData.onboardedAt = input.onboardedAt
+    supabaseInput.onboardedAt = input.onboardedAt
+  }
 
   if (input.csr !== undefined) {
-    updateData.csrEnc = encryptSecret(input.csr)
+    const csrEnc = encryptSecret(input.csr)
+    updateData.csrEnc = csrEnc
     updateData.csr = null
+    supabaseInput.csrEnc = csrEnc
   }
   if (input.certificate !== undefined) {
-    updateData.certificateEnc = encryptSecret(input.certificate)
+    const certificateEnc = encryptSecret(input.certificate)
+    updateData.certificateEnc = certificateEnc
     updateData.certificate = null
+    supabaseInput.certificateEnc = certificateEnc
   }
   if (input.productionCertificate !== undefined) {
-    updateData.productionCertificateEnc = encryptSecret(input.productionCertificate)
+    const productionCertificateEnc = encryptSecret(input.productionCertificate)
+    updateData.productionCertificateEnc = productionCertificateEnc
     updateData.productionCertificate = null
+    supabaseInput.productionCertificateEnc = productionCertificateEnc
   }
   if (input.privateKeyPem !== undefined) {
-    updateData.privateKeyEnc = encryptSecret(input.privateKeyPem)
+    const privateKeyEnc = encryptSecret(input.privateKeyPem)
+    updateData.privateKeyEnc = privateKeyEnc
+    supabaseInput.privateKeyEnc = privateKeyEnc
   }
   if (input.secret !== undefined) {
-    updateData.secretEnc = encryptSecret(input.secret)
+    const secretEnc = encryptSecret(input.secret)
+    updateData.secretEnc = secretEnc
+    supabaseInput.secretEnc = secretEnc
   }
   if (input.binarySecurityToken !== undefined) {
-    updateData.binarySecurityTokenEnc = encryptSecret(input.binarySecurityToken)
+    const binarySecurityTokenEnc = encryptSecret(input.binarySecurityToken)
+    updateData.binarySecurityTokenEnc = binarySecurityTokenEnc
+    supabaseInput.binarySecurityTokenEnc = binarySecurityTokenEnc
+  }
+
+  if (isSupabaseEnabled()) {
+    return upsertSupabaseCredential(supabaseInput)
   }
 
   return prisma.zatcaCredential.upsert({
@@ -132,7 +184,7 @@ export async function getOnboardingStatus(
 ): Promise<ZatcaOnboardingStatusView> {
   const [cred, settings] = await Promise.all([
     getCredential(environment),
-    prisma.companySettings.findFirst(),
+    getSettingsRepository().findFirst(),
   ])
 
   if (!cred) {

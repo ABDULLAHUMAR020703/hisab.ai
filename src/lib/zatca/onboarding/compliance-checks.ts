@@ -1,6 +1,7 @@
 import 'server-only'
 import { randomUUID } from 'crypto'
 import type { InvoiceType, ZatcaEnvironment } from '@prisma/client'
+import { getSettingsRepository } from '@/lib/db/provider'
 import { prisma } from '@/lib/prisma'
 import { logZatcaAudit } from '../audit/logger'
 import { submitComplianceInvoice } from '../api/compliance-invoices'
@@ -143,7 +144,7 @@ export async function runComplianceChecks(
   environment: ZatcaEnvironment,
   auditContext?: OnboardingAuditContext,
 ): Promise<ComplianceChecksSummary> {
-  const settings = await prisma.companySettings.findFirst()
+  const settings = await getSettingsRepository().findFirst()
   if (!settings) throw new Error('Company settings not found')
 
   const user = await prisma.user.findFirst({ where: { isActive: true } })
