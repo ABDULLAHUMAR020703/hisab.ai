@@ -1,5 +1,21 @@
+let redirectingToLogin = false
+
+function redirectToLoginAfterUnauthorized() {
+  if (typeof window === 'undefined' || redirectingToLogin) return
+
+  redirectingToLogin = true
+  void fetch('/api/auth/logout', { method: 'POST' })
+    .catch(() => null)
+    .finally(() => {
+      window.location.assign('/login')
+    })
+}
+
 export async function readApiError(response: Response): Promise<string> {
-  if (response.status === 401) return 'Your session has expired. Please sign in again.'
+  if (response.status === 401) {
+    redirectToLoginAfterUnauthorized()
+    return 'Your session has expired. Redirecting to sign in...'
+  }
 
   const contentType = response.headers.get('content-type') ?? ''
   if (contentType.includes('application/json')) {

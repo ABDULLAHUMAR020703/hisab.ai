@@ -7,7 +7,7 @@ import {
   LayoutDashboard, BookOpen, FileText, Users, Receipt, CreditCard,
   Building2, DollarSign, UserCheck, Package, MapPin, Camera,
   BarChart3, Shield, UserCog, Settings, LogOut, ChevronLeft,
-  Menu, X, List, Bell, ChevronDown, TrendingUp
+  Menu, List, Bell, ChevronDown, TrendingUp
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { DEMO_ADMIN_EMAIL, PRODUCT_NAME } from '@/lib/brand'
@@ -79,12 +79,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router = useRouter()
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [user, setUser] = useState<UserInfo>({ name: 'Admin', role: 'ADMIN' })
+  const [user] = useState<UserInfo>({ name: 'Admin', role: 'ADMIN' })
   const [showUserMenu, setShowUserMenu] = useState(false)
 
   useEffect(() => {
-    fetch('/api/settings').then(r => r.json()).catch(() => null)
-  }, [])
+    fetch('/api/settings')
+      .then((response) => {
+        if (response.status === 401) {
+          void fetch('/api/auth/logout', { method: 'POST' })
+            .catch(() => null)
+            .finally(() => {
+              router.push('/login')
+              router.refresh()
+            })
+          return null
+        }
+        return response.json()
+      })
+      .catch(() => null)
+  }, [router])
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/'
@@ -99,7 +112,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const currentPageLabel = NAV.flatMap(s => s.items).find(i => isActive(i.href))?.label || 'Dashboard'
 
-  const Sidebar = ({ mobile = false }: { mobile?: boolean }) => (
+  const renderSidebar = (mobile = false) => (
     <div className="flex flex-col h-full">
       {/* Brand */}
       <div className={cn(
@@ -224,14 +237,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         )}
         style={{ background: 'var(--bg-sidebar)' }}
       >
-        <Sidebar />
+        {renderSidebar()}
       </aside>
 
       {/* Mobile Sidebar */}
       {mobileOpen && (
         <div className="md:hidden fixed inset-0 z-50 flex">
           <aside className="w-[260px] flex flex-col animate-slide-in" style={{ background: 'var(--bg-sidebar)' }}>
-            <Sidebar mobile />
+            {renderSidebar(true)}
           </aside>
           <div
             className="flex-1 bg-black/40 backdrop-blur-sm"

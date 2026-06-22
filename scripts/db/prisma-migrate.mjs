@@ -14,8 +14,13 @@ if (!isPostgres) {
 }
 
 const schema = 'prisma/schema.postgresql.prisma'
+const env = {
+  ...process.env,
+  DIRECT_URL: process.env.DIRECT_URL || databaseUrl,
+}
+
 console.log('prisma-migrate: deploying to PostgreSQL...')
 execSync(`npx prisma migrate deploy --schema ${schema}`, {
   stdio: 'inherit',
-  env: process.env,
+  env,
 })
