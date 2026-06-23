@@ -42,6 +42,16 @@ export interface SandboxScenarioResult {
   actualStatus?: string
 }
 
+function formatError(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (typeof err === 'string') return err
+  try {
+    return JSON.stringify(err)
+  } catch {
+    return String(err)
+  }
+}
+
 const EXPECTED_STATUS: Record<SandboxScenario, string> = {
   STANDARD: 'CLEARED',
   SIMPLIFIED: 'REPORTED',
@@ -295,7 +305,7 @@ export async function runSandboxScenario(scenario: SandboxScenario): Promise<San
       data: {
         scenario,
         passed,
-        steps: JSON.stringify(steps),
+        steps,
         error: passed ? null : `Expected ${expectedStatus}, got ${actualStatus}`,
         durationMs,
       },
@@ -312,7 +322,7 @@ export async function runSandboxScenario(scenario: SandboxScenario): Promise<San
 
     return result
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = formatError(err)
     steps.push({ step: 'Error', passed: false, detail: message })
     const durationMs = Date.now() - start
 
@@ -320,7 +330,7 @@ export async function runSandboxScenario(scenario: SandboxScenario): Promise<San
       data: {
         scenario,
         passed: false,
-        steps: JSON.stringify(steps),
+        steps,
         error: message,
         durationMs,
       },

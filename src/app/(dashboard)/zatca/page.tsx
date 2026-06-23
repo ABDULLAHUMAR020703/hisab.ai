@@ -36,6 +36,7 @@ interface DashboardData {
     id: string
     scenario: string
     passed: boolean
+    steps?: Array<{ step: string; passed: boolean; detail?: string }>
     error: string | null
     durationMs: number | null
     createdAt: string
@@ -194,19 +195,24 @@ export default function ZatcaDashboardPage() {
               <h2 className="font-semibold text-slate-900">Sandbox Test Results</h2>
             </div>
             <div className="divide-y divide-slate-50">
-              {data?.sandboxTests.map((test) => (
-                <div key={test.id} className="px-4 py-3 flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2">
-                    {test.passed
-                      ? <CheckCircle2 size={14} className="text-emerald-500" />
-                      : <XCircle size={14} className="text-red-500" />}
-                    <span className="font-medium">{test.scenario}</span>
+              {data?.sandboxTests.length ? data.sandboxTests.map((test) => (
+                <div key={test.id} className="px-4 py-3 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      {test.passed
+                        ? <CheckCircle2 size={14} className="text-emerald-500" />
+                        : <XCircle size={14} className="text-red-500" />}
+                      <span className="font-medium">{test.scenario}</span>
+                    </div>
+                    <span className="text-xs text-slate-400">
+                      {test.durationMs ? `${test.durationMs}ms` : ''} · {formatDate(test.createdAt)}
+                    </span>
                   </div>
-                  <span className="text-xs text-slate-400">
-                    {test.durationMs ? `${test.durationMs}ms` : ''} · {formatDate(test.createdAt)}
-                  </span>
+                  {!test.passed && test.error && (
+                    <p className="mt-1 break-words text-xs text-red-600">{test.error}</p>
+                  )}
                 </div>
-              )) ?? <p className="px-4 py-8 text-center text-slate-400 text-sm">No test runs yet</p>}
+              )) : <p className="px-4 py-8 text-center text-slate-400 text-sm">No test runs yet</p>}
             </div>
           </div>
         </div>

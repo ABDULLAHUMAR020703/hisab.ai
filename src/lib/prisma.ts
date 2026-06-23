@@ -80,7 +80,12 @@ const LINE_RELATIONS: Record<string, { table: string; fk: string }> = {
   payrollEntry: { table: 'payroll_lines', fk: 'payroll_id' },
 }
 
+const FIELD_OVERRIDES: Record<string, string> = {
+  invoiceUUID: 'invoice_uuid',
+}
+
 function snake(key: string): string {
+  if (FIELD_OVERRIDES[key]) return FIELD_OVERRIDES[key]
   return key.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`)
 }
 
@@ -118,6 +123,28 @@ function normalizeData(data: AnyRecord): AnyRecord {
   return normalized
 }
 
+function splitUpdateOperators(data: AnyRecord) {
+  const row: AnyRecord = {}
+  const operators: Array<{ field: string; op: 'increment' | 'decrement'; amount: number }> = []
+
+  for (const [key, value] of Object.entries(data)) {
+    if (
+      value
+      && typeof value === 'object'
+      && !Array.isArray(value)
+      && !(value instanceof Date)
+      && ('increment' in value || 'decrement' in value)
+    ) {
+      const op = 'increment' in value ? 'increment' : 'decrement'
+      operators.push({ field: key, op, amount: Number((value as AnyRecord)[op] ?? 0) })
+    } else {
+      row[key] = value
+    }
+  }
+
+  return { row, operators }
+}
+
 async function addCompanyId(row: AnyRecord, table: string) {
   if ('company_id' in row || table === 'profiles') return row
   row.company_id = await getDefaultCompanyId()
@@ -135,6 +162,7 @@ function applyWhere(query: any, where?: AnyRecord) {
     if (value && typeof value === 'object' && !(value instanceof Date) && !Array.isArray(value)) {
       if ('contains' in value) query = query.ilike(key, `%${String(value.contains)}%`)
       else if ('equals' in value) query = query.eq(key, value.equals)
+      else if ('in' in value && Array.isArray(value.in)) query = query.in(key, value.in)
       else if ('not' in value) query = query.neq(key, value.not)
       else {
         if ('gte' in value) query = query.gte(key, value.gte instanceof Date ? value.gte.toISOString() : value.gte)
@@ -314,7 +342,20 @@ function delegate(model: string) {
       const client = createAdminClient()
       const data = args.data ?? {}
       const nestedLines = data.lines?.create ?? data.lines
-      const row = normalizeData(data)
+      const { row: plainData, operators } = splitUpdateOperators(data)
+      let row = normalizeData(plainData)
+
+      if (operators.length > 0) {
+        const existing = await this.findUnique({ where: args.where })
+        if (!existing) throw new Error(`${model} record not found`)
+        for (const operator of operators) {
+          const current = Number(existing[operator.field] ?? 0)
+          row[snake(operator.field)] = operator.op === 'increment'
+            ? current + operator.amount
+            : current - operator.amount
+        }
+      }
+
       let query = client.from(table).update(row).select('*')
       query = applyWhere(query, args.where)
       const { data: updated, error } = await query.single()
