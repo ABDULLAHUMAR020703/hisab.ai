@@ -1,273 +1,101 @@
-# hisab.ai
+# hisab.ai Current State
 
-A full-featured small-business accounting web application. Manage chart of accounts, sales and purchases, expenses, payroll, inventory, and financial reporting from a single dashboard.
+hisab.ai is a Supabase-only accounting and ZATCA e-invoicing web app for NETKOM COMPANY FOR COMMUNICATION.
 
-Built with **Next.js 16**, **React 19**, **Prisma 7**, and **SQLite** — ideal for local development, demos, and small teams.
+## Runtime
 
-**Repository:** [github.com/ABDULLAHUMAR020703/hisab.ai](https://github.com/ABDULLAHUMAR020703/hisab.ai)
+- Framework: Next.js 16 App Router
+- UI: React 19, Tailwind CSS 4, Radix UI, Recharts
+- Backend: Next.js API routes
+- Database and auth: Supabase only
+- Runtime database access: Supabase client with service-role server access where needed
+- Authentication: Supabase Auth with HTTP-only app cookies
+- Deployment target: Vercel
 
----
+There is no Prisma runtime, SQLite database, Postgres direct connection string, or local database fallback.
 
-## Features
+## Environment
 
-### Dashboard
-- Live financial overview: revenue, costs, net profit, AR/AP
-- Module counts across the entire app
-- Recent activity feed and status breakdowns
-- Revenue vs costs charts, AR aging, monthly profit
-- Optional sample data loader for demos
-
-### Accounting
-- **Chart of accounts** — Hierarchical COA with 80+ pre-seeded accounts
-- **Journal entries** — Draft and post double-entry transactions
-- **Cost centers** — Branch, project, and department tracking
-
-### Sales (Accounts Receivable)
-- **Customers** — Contact details, payment terms, credit limits
-- **Invoices** — Line items, VAT, statuses (Draft → Sent → Paid)
-- **Payments** — Record customer payments against invoices
-
-### Purchases (Accounts Payable)
-- **Vendors** — Supplier directory
-- **Bills** — Vendor invoices with line-level accounts
-- **Payments** — Pay bills and track balances
-
-### Operations
-- **Expenses** — Categorized expenses with approval workflow
-- **Receipts** — Upload and track receipt documents
-- **Employees** — HR records and departments
-- **Payroll** — Salary runs with earnings and deductions
-- **Inventory** — Stock items, quantities, and pricing
-
-### Reports
-| Report | Description |
-|--------|-------------|
-| [Profit & Loss](http://localhost:3000/reports/profit-loss) | Revenue, COGS, expenses, net profit by period |
-| [Balance Sheet](http://localhost:3000/reports/balance-sheet) | Assets, liabilities, and equity snapshot |
-| [General Ledger](http://localhost:3000/reports/general-ledger) | Account-level transaction history |
-| [Cash Flow](http://localhost:3000/reports/cash-flow) | Customer receipts vs vendor payments |
-
-### Administration
-- **Users** — Role-based accounts (Admin, Accountant)
-- **Settings** — Company profile, currency (SAR), fiscal year
-- **Tax & ZATCA** — VAT rates and tax reporting helpers
-
-### Security
-- Session-based authentication with HTTP-only cookies
-- Protected API routes and dashboard layout
-
----
-
-## Tech stack
-
-| Layer | Technology |
-|--------|------------|
-| Framework | [Next.js 16](https://nextjs.org) (App Router) |
-| UI | [React 19](https://react.dev), [Tailwind CSS 4](https://tailwindcss.com), [Radix UI](https://www.radix-ui.com) |
-| Charts | [Recharts](https://recharts.org) |
-| Database | SQLite (`dev.db`) |
-| ORM | [Prisma 7](https://www.prisma.io) + `better-sqlite3` adapter |
-| Forms | [React Hook Form](https://react-hook-form.com) + [Zod](https://zod.dev) |
-| Auth | Custom sessions (`bcryptjs` password hashing) |
-
----
-
-## Prerequisites
-
-- **Node.js** 20 or later (LTS recommended)
-- **npm** 9+ (or pnpm / yarn)
-- **Windows:** [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) may be required for `better-sqlite3` native compilation
-
----
-
-## Getting started
-
-### 1. Clone and install
-
-```bash
-git clone https://github.com/ABDULLAHUMAR020703/hisab.ai.git
-cd hisab.ai
-npm install
-```
-
-If `better-sqlite3` fails to load on Windows, rebuild native bindings:
-
-```bash
-npm rebuild better-sqlite3
-```
-
-### 2. Environment variables
-
-Create a `.env` file in the project root:
+Use only these variables in Vercel and local `.env`:
 
 ```env
-DATABASE_URL="file:./prisma/dev.db"
+NEXT_PUBLIC_SUPABASE_URL="https://your-project-ref.supabase.co"
+NEXT_PUBLIC_SUPABASE_ANON_KEY="your-supabase-anon-key"
+SUPABASE_SERVICE_ROLE_KEY="your-supabase-service-role-key"
+
+APP_SECRET="replace-with-a-long-random-secret"
+
+ZATCA_CREDENTIAL_ENCRYPTION_KEY="replace-with-a-long-random-secret"
+ZATCA_MOCK_ONBOARDING=false
+ZATCA_MOCK_SUBMISSION=false
+
+# Optional
+# ZATCA_API_BASE_URL="https://gw-fatoora.zatca.gov.sa"
 ```
 
-> `.env` is gitignored. Never commit secrets or production credentials.
+Do not set these old variables:
 
-### 3. Database setup
-
-```bash
-npm run db:push
-npm run db:seed
+```txt
+DATABASE_URL
+DIRECT_URL
+SUPABASE_DATABASE_URL
+USE_SUPABASE
+DB_PARITY_CHECK
+DUAL_WRITE
+RUN_PRISMA_MIGRATE
+NEXTAUTH_URL
+NEXTAUTH_SECRET
 ```
 
-This creates the SQLite database, seeds the chart of accounts, users, tax rates, cost centers, and **demo transactions** (customers, invoices, bills, etc.) when the database is empty.
-
-### 4. Run the development server
+## Commands
 
 ```bash
+npm install
 npm run dev
+npm run build
+npm start
 ```
 
-On **Windows**, if Turbopack fails with a native SWC error, use Webpack instead:
+Available checks:
 
 ```bash
-npm run dev -- --webpack
+npx tsc --noEmit
+npm run build
+npm run test:zatca
 ```
 
-Open **[http://localhost:3000](http://localhost:3000)** in your browser.
+## App Areas
 
-### 5. Sign in
+- Dashboard and financial overview
+- Chart of accounts
+- Customers and vendors
+- Invoices, bills, payments, expenses, receipts
+- Employees, payroll, inventory
+- Reports: profit/loss, balance sheet, cash flow, general ledger
+- Users and company settings
+- Tax and ZATCA monitoring
+- ZATCA onboarding, CSID handling, sandbox simulation, invoice submission helpers
 
-| Role | Email | Password |
-|------|--------|----------|
-| Admin | `admin@hisab.ai` | `admin123` |
-| Accountant | `accountant@hisab.ai` | `accountant123` |
+## Supabase Notes
 
-> These accounts are for **development only**. Change or remove them before any public deployment.
+- Supabase Auth users are mirrored into `profiles` and `company_users`.
+- Server routes use Supabase service role for backend operations.
+- RLS policies remain in Supabase migrations and protect authenticated tenant access.
+- The default demo login is managed through Supabase Auth:
 
-You can also load sample data from the dashboard via **Load sample data** (calls `POST /api/seed`).
-
----
-
-## Available scripts
-
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start Next.js dev server |
-| `npm run dev -- --webpack` | Dev server with Webpack (Windows fallback) |
-| `npm run build` | Generate Prisma client and production build |
-| `npm run start` | Run production server |
-| `npm run lint` | Run ESLint |
-| `npm run db:push` | Apply Prisma schema to SQLite |
-| `npm run db:seed` | Seed base + demo data (`prisma/seed.ts`) |
-| `npm run test:zatca` | ZATCA onboarding unit tests |
-| `npm run zatca:sandbox` | Mock ZATCA E2E scenarios |
-| `npm run zatca:verify` | ZATCA offline verification |
-| `npm run qa:seed` | Load QA test data |
-| `npm run qa:verify` | Database integrity checks |
-| `npm run supabase:migrate` | Apply Supabase SQL migrations (001–013) |
-| `npm run supabase:seed` | Seed default company tenant |
-| `npm run supabase:verify` | Verify Supabase database |
-| `npm run migrate:export` | Export SQLite to `data/migration/export/` |
-| `npm run migrate:id-map` | Generate deterministic UUID map |
-| `npm run migrate:import` | Import staged data into Supabase |
-| `npm run migrate:validate` | Validate migration row counts and ZATCA fields |
-| `npm run migrate:test-db` | Test Supabase Postgres connection from `.env` |
-| `npm run db:studio` | Open [Prisma Studio](https://www.prisma.io/studio) |
-
-Documentation: [docs/README.md](./docs/README.md)
-
----
-
-## Project structure
-
-```
-hisab.ai/
-├── docs/
-│   ├── product/           # Architecture and workflow
-│   ├── migration/         # Supabase + Phase C runbooks
-│   │   └── archive/       # Legacy reference SQL (not applied)
-│   ├── zatca/             # ZATCA production docs
-│   └── testing/           # QA and go-live checklists
-├── prisma/
-│   ├── schema.prisma      # SQLite schema (dev)
-│   ├── schema.postgresql.prisma
-│   ├── migrations/
-│   └── seed.ts
-├── scripts/
-│   ├── db/                # Prisma, Supabase, Phase C migration
-│   │   └── migration/     # 014–018 export/import/validate
-│   ├── qa/                # QA seed and verify
-│   └── zatca/             # ZATCA sandbox scripts
-├── src/
-│   ├── app/(auth)/        # Login
-│   ├── app/(dashboard)/   # App pages
-│   ├── app/api/           # REST API routes
-│   ├── components/ui/     # Shared UI
-│   └── lib/               # Auth, db repos, supabase, ZATCA
-├── supabase/
-│   ├── migrations/        # PostgreSQL schema 001–013
-│   ├── seed/              # Default tenant shell only
-│   └── functions/         # Edge functions (future)
-├── tests/
-│   ├── fixtures/          # QA company profiles
-│   └── zatca/             # ZATCA unit tests
-├── data/migration/        # Gitignored Phase C staging (export + ID map)
-└── public/receipts/       # Uploaded receipt files
+```txt
+admin@hisab.ai
+admin123
 ```
 
----
+## Removed Legacy Stack
 
-## API overview
+The previous Prisma/SQLite stack has been removed from active code and deployment:
 
-REST-style handlers under `src/app/api/`:
+- No `prisma/` schema or SQLite `dev.db`
+- No Prisma client generation during install/build
+- No direct Postgres connection strings in Vercel
+- No dual-write or parity feature flags
+- No SQLite seed flow
 
-| Area | Endpoints |
-|------|-----------|
-| Auth | `POST /api/auth/login`, `POST /api/auth/logout` |
-| Core | `/api/accounts`, `/api/journal`, `/api/cost-centers` |
-| AR | `/api/customers`, `/api/invoices`, invoice payments |
-| AP | `/api/vendors`, `/api/bills`, bill payments |
-| Ops | `/api/expenses`, `/api/payroll`, `/api/employees`, `/api/inventory`, `/api/receipts` |
-| Reports | `/api/reports/profit-loss`, `balance-sheet`, `general-ledger`, `cash-flow` |
-| Dashboard | `GET /api/dashboard` |
-| Admin | `/api/users`, `/api/settings`, `/api/tax`, `POST /api/seed` |
-
-All protected routes require a valid `session` cookie.
-
----
-
-## Deployment notes
-
-- **SQLite:** The default setup stores data in `prisma/dev.db`. Serverless hosts (e.g. Vercel) need a **persistent volume** or a switch to PostgreSQL/Supabase.
-- **Production database:** Update `prisma/schema.prisma` datasource and `DATABASE_URL`, then run migrations against the new provider.
-- **Security:** Rotate default passwords, use HTTPS, and set secure cookie flags in production.
-
----
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| `'next' is not recognized` | Run `npm install` |
-| `better-sqlite3` bindings error | Run `npm rebuild better-sqlite3` |
-| Turbopack / SWC error on Windows | Use `npm run dev -- --webpack` |
-| Dashboard shows zeros | Create transactions or use **Load sample data**; DRAFT records are included |
-| `/reports/cash-flow` empty | Record payments on invoices or bills first |
-
----
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Commit your changes (`git commit -m 'Add my feature'`)
-4. Push to the branch (`git push origin feature/my-feature`)
-5. Open a Pull Request
-
----
-
-## Author
-
-**Abdul Samad Saleem** — [AbdulSamadSaleem1208](https://github.com/AbdulSamadSaleem1208)
-
----
-
-## Acknowledgments
-
-- [Next.js](https://nextjs.org/docs)
-- [Prisma](https://www.prisma.io/docs)
-- Pre-configured for **NETKOM COMPANY FOR COMMUNICATION** (Saudi Arabia, SAR)
+The app should be operated as Supabase-first and Supabase-only.
