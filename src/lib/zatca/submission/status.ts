@@ -1,5 +1,5 @@
 import 'server-only'
-import type { ZatcaInvoiceStatus } from '@prisma/client'
+import type { ZatcaInvoiceStatus } from '@/lib/db/prisma-types'
 import { getSettingsRepository } from '@/lib/db/provider'
 import { getCredential } from '../onboarding/credential-store'
 import { loadInvoiceForZatca } from '../persistence'

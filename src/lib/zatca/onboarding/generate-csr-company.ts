@@ -1,4 +1,4 @@
-import type { CompanySettings } from '@prisma/client'
+import type { CompanySettings } from '@/lib/db/prisma-types'
 import type { ZatcaCsrSubjectInput } from './types'
 import { buildCompanyRegisteredAddress, type CompanyCsrInput } from './egs-identity'
 import { generateZatcaCsr } from './generate-csr'

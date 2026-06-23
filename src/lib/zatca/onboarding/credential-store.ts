@@ -1,6 +1,6 @@
 import 'server-only'
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto'
-import type { ZatcaEnvironment } from '@prisma/client'
+import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
 import { getSettingsRepository } from '@/lib/db/provider'
 import {
   getCredential as getSupabaseCredential,

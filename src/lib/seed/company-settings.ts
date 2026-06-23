@@ -1,41 +1,23 @@
-import { prisma } from '@/lib/prisma'
-import { seedQaData } from '@/lib/qa-seed'
-
-const DEMO_COMPANY = {
-  companyName: 'NETKOM COMPANY FOR COMMUNICATION',
-  legalName: 'NETKOM COMPANY FOR COMMUNICATION LLC',
-  taxId: '300000000000003',
-  commercialRegistration: '1010000000',
-  streetAddress: 'King Fahd Road',
-  buildingNumber: '4521',
-  district: 'Al Olaya',
-  city: 'Riyadh',
-  postalCode: '12211',
-  country: 'Saudi Arabia',
-  currency: 'SAR',
-  fiscalYearStart: '01-01',
-  zatcaEnabled: true,
-}
+import { getSettingsRepository } from '@/lib/db/provider'
 
 export async function ensureDemoCompanySettings() {
-  const existing = await prisma.companySettings.findFirst()
-  if (!existing) {
-    await prisma.companySettings.create({ data: DEMO_COMPANY })
-    return
-  }
+  const repo = getSettingsRepository()
+  const existing = await repo.findFirst()
+  if (existing) return existing
 
-  await prisma.companySettings.update({
-    where: { id: existing.id },
-    data: {
-      legalName: existing.legalName ?? DEMO_COMPANY.legalName,
-      taxId: existing.taxId ?? DEMO_COMPANY.taxId,
-      commercialRegistration: existing.commercialRegistration ?? DEMO_COMPANY.commercialRegistration,
-      streetAddress: existing.streetAddress ?? DEMO_COMPANY.streetAddress,
-      buildingNumber: existing.buildingNumber ?? DEMO_COMPANY.buildingNumber,
-      district: existing.district ?? DEMO_COMPANY.district,
-      city: existing.city ?? DEMO_COMPANY.city,
-      postalCode: existing.postalCode ?? DEMO_COMPANY.postalCode,
-      zatcaEnabled: true,
-    },
+  return repo.create({
+    companyName: 'NETKOM COMPANY FOR COMMUNICATION',
+    legalName: 'NETKOM COMPANY FOR COMMUNICATION LLC',
+    taxId: '300000000000003',
+    commercialRegistration: '1010000000',
+    streetAddress: 'King Fahd Road',
+    buildingNumber: '4521',
+    district: 'Al Olaya',
+    city: 'Riyadh',
+    postalCode: '12211',
+    country: 'Saudi Arabia',
+    currency: 'SAR',
+    fiscalYearStart: '01-01',
+    zatcaEnabled: true,
   })
 }

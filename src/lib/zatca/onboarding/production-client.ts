@@ -1,5 +1,5 @@
 import 'server-only'
-import type { ZatcaEnvironment } from '@prisma/client'
+import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
 import { buildBasicAuthHeader } from '../signature/certificate'
 import { getApiBaseUrl, isMockMode } from './compliance-client'
 import { getDecryptedCertificate, getDecryptedSecret, getCredential } from './credential-store'

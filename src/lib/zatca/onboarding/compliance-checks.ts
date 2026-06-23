@@ -1,6 +1,6 @@
 import 'server-only'
 import { randomUUID } from 'crypto'
-import type { InvoiceType, ZatcaEnvironment } from '@prisma/client'
+import type { InvoiceType, ZatcaEnvironment } from '@/lib/db/prisma-types'
 import { getSettingsRepository } from '@/lib/db/provider'
 import { prisma } from '@/lib/prisma'
 import { logZatcaAudit } from '../audit/logger'

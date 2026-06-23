@@ -1,6 +1,8 @@
 import { requireAuth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
+type PaymentView = { amount: number; date: Date }
+
 export async function GET(request: Request) {
   try {
     await requireAuth()
@@ -18,19 +20,19 @@ export async function GET(request: Request) {
       where: { billId: { not: null }, date: { gte: from, lte: to } },
     })
 
-    const totalInflows = invoicePayments.reduce((s, p) => s + p.amount, 0)
-    const totalOutflows = billPayments.reduce((s, p) => s + p.amount, 0)
+    const totalInflows = (invoicePayments as PaymentView[]).reduce((s: number, p: PaymentView) => s + p.amount, 0)
+    const totalOutflows = (billPayments as PaymentView[]).reduce((s: number, p: PaymentView) => s + p.amount, 0)
 
     // Monthly breakdown
     const monthlyMap: Record<string, { inflows: number; outflows: number }> = {}
 
-    for (const p of invoicePayments) {
+    for (const p of invoicePayments as PaymentView[]) {
       const key = p.date.toISOString().substring(0, 7)
       if (!monthlyMap[key]) monthlyMap[key] = { inflows: 0, outflows: 0 }
       monthlyMap[key].inflows += p.amount
     }
 
-    for (const p of billPayments) {
+    for (const p of billPayments as PaymentView[]) {
       const key = p.date.toISOString().substring(0, 7)
       if (!monthlyMap[key]) monthlyMap[key] = { inflows: 0, outflows: 0 }
       monthlyMap[key].outflows += p.amount

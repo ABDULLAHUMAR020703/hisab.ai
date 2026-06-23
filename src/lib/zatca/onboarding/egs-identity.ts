@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'crypto'
-import type { CompanySettings, ZatcaEnvironment } from '@prisma/client'
+import type { CompanySettings, ZatcaEnvironment } from '@/lib/db/prisma-types'
 
 const SOLUTION_NAME = 'hisab.ai'
 const DEFAULT_EGS_MODEL = 'hisab.ai'

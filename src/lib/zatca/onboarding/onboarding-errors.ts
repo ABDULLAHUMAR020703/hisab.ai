@@ -1,4 +1,4 @@
-import type { ZatcaEnvironment } from '@prisma/client'
+import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
 
 export type OnboardingErrorCode =
   | 'INVALID_OTP'

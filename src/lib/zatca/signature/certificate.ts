@@ -1,5 +1,5 @@
 import 'server-only'
-import type { ZatcaEnvironment } from '@prisma/client'
+import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
 import {
   getCredential,
   getDecryptedPrivateKey,

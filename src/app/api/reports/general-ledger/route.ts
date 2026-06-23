@@ -1,6 +1,15 @@
 import { requireAuth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
+type LedgerLineView = {
+  debit: number
+  credit: number
+  description?: string | null
+  journal: { date: Date; entryNo: string; description: string; status: string }
+  account: unknown
+  costCenter: unknown
+}
+
 export async function GET(request: Request) {
   try {
     await requireAuth()
@@ -23,7 +32,8 @@ export async function GET(request: Request) {
     })
 
     let runningBalance = 0
-    const entries = lines.map((line) => {
+    const ledgerLines = lines as LedgerLineView[]
+    const entries = ledgerLines.map((line: LedgerLineView) => {
       runningBalance += line.debit - line.credit
       return {
         date: line.journal.date,
@@ -38,8 +48,8 @@ export async function GET(request: Request) {
       }
     })
 
-    const totalDebit = lines.reduce((s, l) => s + l.debit, 0)
-    const totalCredit = lines.reduce((s, l) => s + l.credit, 0)
+    const totalDebit = ledgerLines.reduce((s: number, l: LedgerLineView) => s + l.debit, 0)
+    const totalCredit = ledgerLines.reduce((s: number, l: LedgerLineView) => s + l.credit, 0)
 
     return Response.json({
       period: { from: from.toISOString(), to: to.toISOString() },

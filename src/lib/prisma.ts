@@ -1,43 +1,373 @@
 import 'server-only'
-import { PrismaClient } from '@prisma/client'
-import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3'
-import { PrismaPg } from '@prisma/adapter-pg'
-import pg from 'pg'
-import { getDatabaseUrl, isPostgresDatabase } from './database'
-import { getSqliteDatabaseUrl } from './sqlite-db'
+/* eslint-disable @typescript-eslint/no-explicit-any, prefer-const */
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { createAdminClient } from './supabase/admin'
+import { getDefaultCompanyId } from './db/company.repository'
 
-const globalForPrisma = globalThis as unknown as { prisma: PrismaClient | undefined }
+type AnyRecord = Record<string, any>
 
-function createPrismaClient() {
-  const databaseUrl = getDatabaseUrl()
-
-  if (isPostgresDatabase(databaseUrl)) {
-    const pool = new pg.Pool({ connectionString: databaseUrl })
-    const adapter = new PrismaPg(pool)
-    return new PrismaClient({ adapter })
-  }
-
-  const sqliteUrl = getSqliteDatabaseUrl()
-  const adapter = new PrismaBetterSqlite3({ url: sqliteUrl })
-  return new PrismaClient({ adapter })
+const MODEL_TABLES: Record<string, string> = {
+  appSession: 'auth.sessions',
+  bill: 'bills',
+  billLine: 'bill_lines',
+  chartOfAccount: 'chart_of_accounts',
+  companySettings: 'company_settings',
+  costCenter: 'cost_centers',
+  customer: 'customers',
+  employee: 'employees',
+  expense: 'expenses',
+  expenseLine: 'expense_lines',
+  inventoryItem: 'inventory_items',
+  invoice: 'invoices',
+  invoiceLine: 'invoice_lines',
+  journalEntry: 'journal_entries',
+  journalLine: 'journal_lines',
+  payment: 'payments',
+  payrollEntry: 'payroll_entries',
+  payrollLine: 'payroll_lines',
+  receipt: 'receipts',
+  sequence: 'sequences',
+  taxRate: 'tax_rates',
+  user: 'profiles',
+  vendor: 'vendors',
+  zatcaAuditLog: 'zatca_audit_logs',
+  zatcaCredential: 'zatca_credentials',
+  zatcaOnboardingRequest: 'zatca_onboarding_requests',
+  zatcaSandboxTestRun: 'zatca_sandbox_test_runs',
 }
 
-function getPrismaClient(): PrismaClient {
-  if (!globalForPrisma.prisma) {
-    globalForPrisma.prisma = createPrismaClient()
-  }
-  return globalForPrisma.prisma
+const RELATIONS: Record<string, Record<string, { table: string; local: string; foreign: string; many?: boolean }>> = {
+  bill: {
+    vendor: { table: 'vendors', local: 'vendor_id', foreign: 'id' },
+    lines: { table: 'bill_lines', local: 'id', foreign: 'bill_id', many: true },
+    payments: { table: 'payments', local: 'id', foreign: 'bill_id', many: true },
+  },
+  expense: {
+    lines: { table: 'expense_lines', local: 'id', foreign: 'expense_id', many: true },
+    receipt: { table: 'receipts', local: 'receipt_id', foreign: 'id' },
+  },
+  invoice: {
+    customer: { table: 'customers', local: 'customer_id', foreign: 'id' },
+    lines: { table: 'invoice_lines', local: 'id', foreign: 'invoice_id', many: true },
+    payments: { table: 'payments', local: 'id', foreign: 'invoice_id', many: true },
+  },
+  journalEntry: {
+    lines: { table: 'journal_lines', local: 'id', foreign: 'journal_id', many: true },
+  },
+  journalLine: {
+    account: { table: 'chart_of_accounts', local: 'account_id', foreign: 'id' },
+    costCenter: { table: 'cost_centers', local: 'cost_center_id', foreign: 'id' },
+    journal: { table: 'journal_entries', local: 'journal_id', foreign: 'id' },
+  },
+  payment: {
+    invoice: { table: 'invoices', local: 'invoice_id', foreign: 'id' },
+    bill: { table: 'bills', local: 'bill_id', foreign: 'id' },
+  },
+  payrollEntry: {
+    employee: { table: 'employees', local: 'employee_id', foreign: 'id' },
+    lines: { table: 'payroll_lines', local: 'id', foreign: 'payroll_id', many: true },
+  },
+  receipt: {
+    uploadedBy: { table: 'profiles', local: 'uploaded_by_id', foreign: 'id' },
+  },
 }
 
-/** Lazy Prisma client — avoids DB access during Next.js build static analysis. */
-export const prisma = new Proxy({} as PrismaClient, {
-  get(_target, prop) {
-    const client = getPrismaClient()
-    const value = client[prop as keyof PrismaClient]
-    if (typeof value === 'function') {
-      return (value as (...args: unknown[]) => unknown).bind(client)
+const LINE_RELATIONS: Record<string, { table: string; fk: string }> = {
+  bill: { table: 'bill_lines', fk: 'bill_id' },
+  expense: { table: 'expense_lines', fk: 'expense_id' },
+  invoice: { table: 'invoice_lines', fk: 'invoice_id' },
+  journalEntry: { table: 'journal_lines', fk: 'journal_id' },
+  payrollEntry: { table: 'payroll_lines', fk: 'payroll_id' },
+}
+
+function snake(key: string): string {
+  return key.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`)
+}
+
+function camel(key: string): string {
+  return key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())
+}
+
+function toSnakeDeep(value: any): any {
+  if (value instanceof Date) return value.toISOString()
+  if (Array.isArray(value)) return value.map(toSnakeDeep)
+  if (!value || typeof value !== 'object') return value
+
+  const out: AnyRecord = {}
+  for (const [key, val] of Object.entries(value)) {
+    if (key === 'lines' || key === 'payments') continue
+    out[snake(key)] = toSnakeDeep(val)
+  }
+  return out
+}
+
+function toCamelDeep(value: any): any {
+  if (Array.isArray(value)) return value.map(toCamelDeep)
+  if (!value || typeof value !== 'object') return value
+
+  const out: AnyRecord = {}
+  for (const [key, val] of Object.entries(value)) {
+    out[camel(key)] = toCamelDeep(val)
+  }
+  return out
+}
+
+function normalizeData(data: AnyRecord): AnyRecord {
+  const normalized = toSnakeDeep(data)
+  delete normalized.id
+  return normalized
+}
+
+async function addCompanyId(row: AnyRecord, table: string) {
+  if ('company_id' in row || table === 'profiles') return row
+  row.company_id = await getDefaultCompanyId()
+  return row
+}
+
+function applyWhere(query: any, where?: AnyRecord) {
+  if (!where) return query
+
+  for (const [rawKey, rawValue] of Object.entries(where)) {
+    if (rawValue === undefined) continue
+    const key = snake(rawKey)
+    const value = rawValue as any
+
+    if (value && typeof value === 'object' && !(value instanceof Date) && !Array.isArray(value)) {
+      if ('contains' in value) query = query.ilike(key, `%${String(value.contains)}%`)
+      else if ('equals' in value) query = query.eq(key, value.equals)
+      else if ('not' in value) query = query.neq(key, value.not)
+      else {
+        if ('gte' in value) query = query.gte(key, value.gte instanceof Date ? value.gte.toISOString() : value.gte)
+        if ('lte' in value) query = query.lte(key, value.lte instanceof Date ? value.lte.toISOString() : value.lte)
+        if ('gt' in value) query = query.gt(key, value.gt instanceof Date ? value.gt.toISOString() : value.gt)
+        if ('lt' in value) query = query.lt(key, value.lt instanceof Date ? value.lt.toISOString() : value.lt)
+      }
+      continue
     }
-    return value
+
+    if (value === null) query = query.is(key, null)
+    else query = query.eq(key, value instanceof Date ? value.toISOString() : value)
+  }
+
+  return query
+}
+
+function applyOrder(query: any, orderBy?: AnyRecord | AnyRecord[]) {
+  const orders = Array.isArray(orderBy) ? orderBy : orderBy ? [orderBy] : []
+  for (const order of orders) {
+    for (const [key, direction] of Object.entries(order)) {
+      query = query.order(snake(key), { ascending: direction !== 'desc' })
+    }
+  }
+  return query
+}
+
+function applySelect(row: any, select?: AnyRecord) {
+  if (!row || !select) return row
+  const out: AnyRecord = {}
+  for (const [key, enabled] of Object.entries(select)) {
+    if (enabled) out[key] = row[key]
+  }
+  return out
+}
+
+async function attachIncludes(model: string, row: any, include?: AnyRecord, client: SupabaseClient = createAdminClient()) {
+  if (!row || !include) return row
+  const relations = RELATIONS[model] ?? {}
+  const out = { ...row }
+
+  for (const [name, enabled] of Object.entries(include)) {
+    if (!enabled || !relations[name]) continue
+    const relation = relations[name]
+    const localValue = row[camel(relation.local)]
+    if (!localValue) {
+      out[name] = relation.many ? [] : null
+      continue
+    }
+
+    let query = client.from(relation.table).select('*').eq(relation.foreign, localValue)
+    if (relation.many) {
+      const { data, error } = await query
+      if (error) throw error
+      out[name] = toCamelDeep(data ?? [])
+    } else {
+      const { data, error } = await query.maybeSingle()
+      if (error) throw error
+      out[name] = data ? toCamelDeep(data) : null
+    }
+  }
+
+  return out
+}
+
+function sumRows(rows: AnyRecord[], field: string) {
+  return rows.reduce((sum, row) => sum + Number(row[snake(field)] ?? 0), 0)
+}
+
+function delegate(model: string) {
+  const table = MODEL_TABLES[model]
+  if (!table) throw new Error(`Unknown Supabase model: ${model}`)
+
+  return {
+    async findMany(args: AnyRecord = {}) {
+      const client = createAdminClient()
+      let query = client.from(table).select('*')
+      query = applyWhere(query, args.where)
+      query = applyOrder(query, args.orderBy)
+      if (args.take) query = query.limit(args.take)
+
+      const { data, error } = await query
+      if (error) throw error
+
+      const rows = await Promise.all((data ?? []).map(async (row) => attachIncludes(model, toCamelDeep(row), args.include, client)))
+      return args.select ? rows.map((row) => applySelect(row, args.select)) : rows
+    },
+
+    async findFirst(args: AnyRecord = {}) {
+      const rows = await this.findMany({ ...args, take: 1 })
+      return rows[0] ?? null
+    },
+
+    async findUnique(args: AnyRecord = {}) {
+      return this.findFirst(args)
+    },
+
+    async count(args: AnyRecord = {}) {
+      let query = createAdminClient().from(table).select('id', { count: 'exact', head: true })
+      query = applyWhere(query, args.where)
+      const { count, error } = await query
+      if (error) throw error
+      return count ?? 0
+    },
+
+    async aggregate(args: AnyRecord = {}) {
+      const rows = await this.findMany({ where: args.where })
+      const result: AnyRecord = {}
+      if (args._sum) {
+        result._sum = {}
+        for (const field of Object.keys(args._sum)) result._sum[field] = sumRows(rows.map(toSnakeDeep), field)
+      }
+      if (args._count) result._count = rows.length
+      return result
+    },
+
+    async groupBy(args: AnyRecord = {}) {
+      const by = Array.isArray(args.by) ? args.by : [args.by]
+      const rows = await this.findMany({ where: args.where })
+      const groups = new Map<string, AnyRecord[]>()
+
+      for (const row of rows) {
+        const key = by.map((field) => String(row[field] ?? '')).join('\u001f')
+        const bucket = groups.get(key) ?? []
+        bucket.push(row)
+        groups.set(key, bucket)
+      }
+
+      return [...groups.values()].map((bucket) => {
+        const out: AnyRecord = {}
+        for (const field of by) out[field] = bucket[0][field]
+        if (args._count) out._count = bucket.length
+        if (args._sum) {
+          out._sum = {}
+          for (const field of Object.keys(args._sum)) {
+            out._sum[field] = bucket.reduce((sum, row) => sum + Number(row[field] ?? 0), 0)
+          }
+        }
+        return out
+      })
+    },
+
+    async create(args: AnyRecord) {
+      const client = createAdminClient()
+      const data = args.data ?? args
+      const nestedLines = data.lines?.create ?? data.lines
+      const row = await addCompanyId(normalizeData(data), table)
+
+      const { data: inserted, error } = await client.from(table).insert(row).select('*').single()
+      if (error) throw error
+
+      const relation = LINE_RELATIONS[model]
+      if (relation && Array.isArray(nestedLines) && nestedLines.length > 0) {
+        const lineRows = await Promise.all(
+          nestedLines.map(async (line: AnyRecord) => ({
+            ...(await addCompanyId(normalizeData(line), relation.table)),
+            [relation.fk]: inserted.id,
+          })),
+        )
+        const { error: lineError } = await client.from(relation.table).insert(lineRows)
+        if (lineError) throw lineError
+      }
+
+      const camelRow = toCamelDeep(inserted)
+      return attachIncludes(model, camelRow, args.include, client)
+    },
+
+    async createMany(args: AnyRecord) {
+      const rows = await Promise.all((args.data ?? []).map(async (row: AnyRecord) => addCompanyId(normalizeData(row), table)))
+      if (rows.length === 0) return { count: 0 }
+      const { error } = await createAdminClient().from(table).insert(rows)
+      if (error) throw error
+      return { count: rows.length }
+    },
+
+    async update(args: AnyRecord) {
+      const client = createAdminClient()
+      const data = args.data ?? {}
+      const nestedLines = data.lines?.create ?? data.lines
+      const row = normalizeData(data)
+      let query = client.from(table).update(row).select('*')
+      query = applyWhere(query, args.where)
+      const { data: updated, error } = await query.single()
+      if (error) throw error
+
+      const relation = LINE_RELATIONS[model]
+      if (relation && Array.isArray(nestedLines)) {
+        await client.from(relation.table).delete().eq(relation.fk, updated.id)
+        if (nestedLines.length > 0) {
+          const lineRows = await Promise.all(
+            nestedLines.map(async (line: AnyRecord) => ({
+              ...(await addCompanyId(normalizeData(line), relation.table)),
+              [relation.fk]: updated.id,
+            })),
+          )
+          const { error: lineError } = await client.from(relation.table).insert(lineRows)
+          if (lineError) throw lineError
+        }
+      }
+
+      return attachIncludes(model, toCamelDeep(updated), args.include, client)
+    },
+
+    async upsert(args: AnyRecord) {
+      const existing = await this.findUnique({ where: args.where })
+      if (existing) return this.update({ where: args.where, data: args.update, include: args.include })
+      return this.create({ data: { ...(args.create ?? {}), ...(args.where ?? {}) }, include: args.include })
+    },
+
+    async delete(args: AnyRecord) {
+      const client = createAdminClient()
+      const existing = await this.findUnique({ where: args.where })
+      let query = client.from(table).delete()
+      query = applyWhere(query, args.where)
+      const { error } = await query
+      if (error) throw error
+      return existing
+    },
+
+    async deleteMany(args: AnyRecord = {}) {
+      let query = createAdminClient().from(table).delete()
+      query = applyWhere(query, args.where)
+      const { error } = await query
+      if (error) throw error
+      return { count: 0 }
+    },
+  }
+}
+
+export const prisma = new Proxy({} as any, {
+  get(_target, prop) {
+    if (prop === '$disconnect') return async () => undefined
+    return delegate(String(prop))
   },
 })
 

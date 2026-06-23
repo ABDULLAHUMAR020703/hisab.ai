@@ -1,7 +1,7 @@
 import { requireAuth } from '@/lib/auth'
 import { mapOnboardingError } from '@/lib/zatca/onboarding/onboarding-errors'
 import { runZatcaOnboarding } from '@/lib/zatca/onboarding/onboard'
-import type { ZatcaEnvironment } from '@prisma/client'
+import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
 
 /**
  * POST /api/zatca/onboard

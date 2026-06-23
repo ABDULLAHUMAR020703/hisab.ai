@@ -12,7 +12,7 @@ async function main() {
   const { getCustomerRepository, getVendorRepository } = await import('../../src/lib/db/provider')
   const { isSupabaseEnabled } = await import('../../src/lib/supabase/env')
 
-  console.log(`USE_SUPABASE=${process.env.USE_SUPABASE ?? '(unset)'}`)
+  console.log('Data backend=Supabase')
   console.log(`Active backend: ${isSupabaseEnabled() ? 'Supabase' : 'Prisma/SQLite'}`)
   console.log('---')
 

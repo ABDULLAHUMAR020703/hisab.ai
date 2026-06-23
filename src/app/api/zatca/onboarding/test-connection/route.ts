@@ -1,7 +1,7 @@
 import { requireAuth } from '@/lib/auth'
 import { getSettingsRepository } from '@/lib/db/provider'
 import { testZatcaConnection } from '@/lib/zatca/onboarding/onboard'
-import type { ZatcaEnvironment } from '@prisma/client'
+import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
 
 /**
  * POST /api/zatca/onboarding/test-connection

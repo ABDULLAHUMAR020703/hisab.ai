@@ -1,4 +1,4 @@
-import type { ZatcaEnvironment, ZatcaOnboardingStatus } from '@prisma/client'
+import type { ZatcaEnvironment, ZatcaOnboardingStatus } from '@/lib/db/prisma-types'
 
 export interface ZatcaCsrSubjectInput {
   environment: ZatcaEnvironment

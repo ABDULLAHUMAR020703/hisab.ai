@@ -1,5 +1,5 @@
 import 'server-only'
-import type { ZatcaEnvironment } from '@prisma/client'
+import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
 import { getSettingsRepository } from '@/lib/db/provider'
 import {
   createOnboardingRequest as createSupabaseOnboardingRequest,

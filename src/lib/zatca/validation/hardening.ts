@@ -1,4 +1,4 @@
-import type { InvoiceType } from '@prisma/client'
+import type { InvoiceType } from '@/lib/db/prisma-types'
 import {
   mergeValidationResults,
   validateZatcaDocument,

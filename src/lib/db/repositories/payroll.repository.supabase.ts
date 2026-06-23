@@ -10,7 +10,7 @@ export const supabasePayrollRepository: PayrollRepository = {
     const companyId = await resolveCompanyId()
     const search = options.search?.trim()
 
-    let query = db
+    const query = db
       .from('payroll_entries')
       .select('*, employees(name, employee_no, department)')
       .eq('company_id', companyId)

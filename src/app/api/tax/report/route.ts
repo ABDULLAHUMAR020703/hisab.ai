@@ -1,6 +1,8 @@
 import { requireAuth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
+type TaxRow = { taxAmount: number; subtotal: number }
+
 export async function GET(request: Request) {
   try {
     await requireAuth()
@@ -17,8 +19,9 @@ export async function GET(request: Request) {
       select: { taxAmount: true, subtotal: true },
     })
 
-    const vatCollected = invoices.reduce((s, i) => s + i.taxAmount, 0)
-    const salesAmount = invoices.reduce((s, i) => s + i.subtotal, 0)
+    const invoiceRows = invoices as TaxRow[]
+    const vatCollected = invoiceRows.reduce((s: number, i: TaxRow) => s + i.taxAmount, 0)
+    const salesAmount = invoiceRows.reduce((s: number, i: TaxRow) => s + i.subtotal, 0)
 
     // VAT paid (from bills)
     const bills = await prisma.bill.findMany({
@@ -29,8 +32,9 @@ export async function GET(request: Request) {
       select: { taxAmount: true, subtotal: true },
     })
 
-    const vatPaid = bills.reduce((s, b) => s + b.taxAmount, 0)
-    const purchasesAmount = bills.reduce((s, b) => s + b.subtotal, 0)
+    const billRows = bills as TaxRow[]
+    const vatPaid = billRows.reduce((s: number, b: TaxRow) => s + b.taxAmount, 0)
+    const purchasesAmount = billRows.reduce((s: number, b: TaxRow) => s + b.subtotal, 0)
 
     const vatPayable = vatCollected - vatPaid
 

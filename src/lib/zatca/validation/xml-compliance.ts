@@ -1,4 +1,4 @@
-import type { InvoiceType } from '@prisma/client'
+import type { InvoiceType } from '@/lib/db/prisma-types'
 import { ZATCA_PROFILE_BY_TYPE } from '../constants'
 import type { ZatcaValidationIssue, ZatcaValidationResult } from '../types'
 

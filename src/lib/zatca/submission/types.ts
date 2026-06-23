@@ -1,4 +1,4 @@
-import type { InvoiceType, ZatcaEnvironment, ZatcaInvoiceStatus } from '@prisma/client'
+import type { InvoiceType, ZatcaEnvironment, ZatcaInvoiceStatus } from '@/lib/db/prisma-types'
 
 export type ZatcaSubmissionRoute = 'clearance' | 'reporting'
 

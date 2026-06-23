@@ -1,6 +1,6 @@
 import 'server-only'
 import PDFDocument from 'pdfkit'
-import type { CompanySettings, Customer, Invoice, InvoiceLine } from '@prisma/client'
+import type { CompanySettings, Customer, Invoice, InvoiceLine } from '@/lib/db/prisma-types'
 import { resolveInvoiceQrForPdf } from './qr-for-pdf'
 
 type InvoiceWithRelations = Invoice & {

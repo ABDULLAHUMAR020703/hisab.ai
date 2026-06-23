@@ -1,5 +1,5 @@
 import 'server-only'
-import type { ZatcaEnvironment } from '@prisma/client'
+import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
 import { buildBasicAuthHeader, loadSigningCredentials } from '../signature/certificate'
 
 export function getZatcaApiBaseUrl(): string {

@@ -1,6 +1,14 @@
 import { requireAuth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
+type JournalLineView = { debit: number; credit: number }
+type AccountView = {
+  accountNo: string
+  fullName: string
+  accountType: string
+  journalLines: JournalLineView[]
+}
+
 export async function GET(request: Request) {
   try {
     await requireAuth()
@@ -23,9 +31,9 @@ export async function GET(request: Request) {
       Equity: [],
     }
 
-    for (const acc of accounts) {
-      const debitTotal = acc.journalLines.reduce((s, l) => s + l.debit, 0)
-      const creditTotal = acc.journalLines.reduce((s, l) => s + l.credit, 0)
+    for (const acc of accounts as AccountView[]) {
+      const debitTotal = acc.journalLines.reduce((s: number, l: JournalLineView) => s + l.debit, 0)
+      const creditTotal = acc.journalLines.reduce((s: number, l: JournalLineView) => s + l.credit, 0)
 
       let balance = 0
       if (acc.accountType === 'Asset' || acc.accountType === 'Expense' || acc.accountType === 'CostOfGoodsSold') {

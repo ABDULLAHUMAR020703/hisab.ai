@@ -9,11 +9,10 @@ import type { ZatcaCsrResult, ZatcaCsrSubjectInput } from './types'
 import { buildZatcaOpenSslConfig } from './csr-template'
 import { buildCsrSubjectValues, csrPemToZatcaBase64 } from './csr-subject'
 
-const OPENSSL_CANDIDATES = [
-  'openssl',
-  'C:\\Program Files\\Git\\usr\\bin\\openssl.exe',
-  'C:\\Program Files (x86)\\Git\\usr\\bin\\openssl.exe',
-]
+const OPENSSL_CANDIDATES =
+  process.platform === 'win32'
+    ? ['openssl', 'C:\\Program Files\\Git\\usr\\bin\\openssl.exe', 'C:\\Program Files (x86)\\Git\\usr\\bin\\openssl.exe']
+    : ['openssl']
 
 interface SpawnResult {
   code: number | null

@@ -1,5 +1,5 @@
 import QRCode from 'qrcode'
-import type { InvoiceType } from '@prisma/client'
+import type { InvoiceType } from '@/lib/db/prisma-types'
 import type { ZatcaCompanySettingsInput, ZatcaInvoiceInput } from '../types'
 import { getCertificateHash, parseZatcaCertificate } from '../signature/x509'
 import { extractSignatureValuesFromXml } from '../signature/signer'

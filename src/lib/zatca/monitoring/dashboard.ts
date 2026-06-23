@@ -1,5 +1,5 @@
 import 'server-only'
-import type { ZatcaInvoiceStatus } from '@prisma/client'
+import type { ZatcaInvoiceStatus } from '@/lib/db/prisma-types'
 import { prisma } from '@/lib/prisma'
 
 export interface ZatcaDashboardStats {
@@ -18,6 +18,16 @@ export interface ZatcaRecentActivity {
   requestId: string | null
   submittedAt: string | null
   responseMessage: string | null
+}
+
+type ZatcaInvoiceActivityRow = {
+  id: string
+  invoiceNo: string
+  invoiceType: string
+  zatcaStatus: ZatcaInvoiceStatus
+  zatcaRequestId: string | null
+  zatcaSubmissionDate?: Date | null
+  zatcaResponseMessage: string | null
 }
 
 export async function getZatcaDashboardStats(): Promise<ZatcaDashboardStats> {
@@ -52,7 +62,7 @@ export async function getZatcaRecentActivity(limit = 20): Promise<ZatcaRecentAct
     },
   })
 
-  return invoices.map((inv) => ({
+  return (invoices as ZatcaInvoiceActivityRow[]).map((inv: ZatcaInvoiceActivityRow) => ({
     id: inv.id,
     invoiceNo: inv.invoiceNo,
     invoiceType: inv.invoiceType,

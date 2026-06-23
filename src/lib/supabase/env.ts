@@ -26,9 +26,8 @@ export function getSupabaseServiceRoleKey(): string {
   return key
 }
 
-/** Supabase is the default runtime. Set USE_SUPABASE=false only for Prisma/SQLite rollback. */
 export function isSupabaseEnabled(): boolean {
-  return process.env.USE_SUPABASE !== 'false'
+  return true
 }
 
 export const DEFAULT_COMPANY_ID = '00000000-0000-4000-8000-000000000001'

@@ -1,5 +1,5 @@
 import 'server-only'
-import type { InvoiceType, ZatcaInvoiceStatus } from '@prisma/client'
+import type { InvoiceType, ZatcaInvoiceStatus } from '@/lib/db/prisma-types'
 import { getSettingsRepository } from '@/lib/db/provider'
 import { logZatcaAudit } from '../audit/logger'
 import { submitClearanceInvoice } from '../api/clearance'

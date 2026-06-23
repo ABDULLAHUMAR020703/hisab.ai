@@ -1,4 +1,4 @@
-import type { CompanySettings, ZatcaCredential, ZatcaEnvironment } from '@prisma/client'
+import type { CompanySettings, ZatcaCredential, ZatcaEnvironment } from '@/lib/db/prisma-types'
 
 export interface OnboardingValidationResult {
   valid: boolean
