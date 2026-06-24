@@ -122,6 +122,20 @@ export async function submitComplianceInvoice(
   })
 
   if (!response.ok) {
+    const alreadyCompleted = response.status === 406
+      && body.validationResults?.errorMessages?.some((m) => m.code === 'Submitted before')
+    if (alreadyCompleted) {
+      return {
+        requestId: response.requestId || body.requestID || '',
+        validationStatus: 'PASS',
+        responseMessage: 'Compliance check already completed for this invoice type',
+        rawResponse: body,
+        submittedAt: new Date(),
+        responseCode: 'PASS',
+        warningCount: response.warningCount,
+        errorCount: 0,
+      }
+    }
     throw new Error(zatcaResponseMessage(body, `Compliance invoice check failed (${response.status})`))
   }
 

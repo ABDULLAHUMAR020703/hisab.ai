@@ -175,8 +175,8 @@ export function validateZatcaDocument(document: ZatcaInvoiceDocument): ZatcaVali
     errors.push(error('CUSTOMER_NAME_REQUIRED', 'customer.registrationName', 'Customer name is required'))
   }
 
-  if (!document.supplier.identifications.some((i) => i.schemeId === 'VAT')) {
-    warnings.push(warning('SUPPLIER_VAT_MISSING', 'supplier.identifications', 'Supplier VAT identification is missing'))
+  if (!document.supplier.vatNumber) {
+    warnings.push(warning('SUPPLIER_VAT_MISSING', 'supplier.vatNumber', 'Supplier VAT identification is missing'))
   }
 
   if (document.supplier.postalAddress.countryCode !== SAUDI_COUNTRY_CODE) {

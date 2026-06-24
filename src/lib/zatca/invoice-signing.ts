@@ -15,6 +15,8 @@ function shouldEmbedQrInXml(invoiceType: ZatcaInvoiceInput['invoiceType']): bool
   return invoiceType === 'SIMPLIFIED' || invoiceType === 'CREDIT_NOTE' || invoiceType === 'DEBIT_NOTE'
 }
 
+const QR_PLACEHOLDER = 'UEFSQ0VIT0xERVI='
+
 /**
  * Signs invoice XML and embeds Phase 2 QR (tags 1–9) for reporting invoice types.
  */
@@ -24,7 +26,11 @@ export function signAndEmbedPhase2Qr(
   certificatePem: string,
   privateKeyPem: string,
 ): SignedInvoiceWithQrResult {
-  const signResult = signInvoiceXmlDetailed(unsignedXml, certificatePem, privateKeyPem)
+  const xmlToSign = shouldEmbedQrInXml(input.invoiceType)
+    ? embedQrInInvoiceXml(unsignedXml, QR_PLACEHOLDER)
+    : unsignedXml
+
+  const signResult = signInvoiceXmlDetailed(xmlToSign, certificatePem, privateKeyPem)
 
   if (!shouldEmbedQrInXml(input.invoiceType)) {
     return {

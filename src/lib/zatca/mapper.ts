@@ -79,15 +79,14 @@ function taxCategoryFromRate(rate: number): ZatcaTaxCategory {
 function buildSupplierParty(settings: ZatcaCompanySettingsInput): ZatcaParty {
   const identifications: ZatcaParty['identifications'] = []
 
-  if (settings.taxId?.trim()) {
-    identifications.push({ id: settings.taxId.trim(), schemeId: 'VAT' })
-  }
+  // BR-KSA-08: seller PartyIdentification allows only one additional ID (CRN, MOM, ...), not VAT.
   if (settings.commercialRegistration?.trim()) {
     identifications.push({ id: settings.commercialRegistration.trim(), schemeId: 'CRN' })
   }
 
   return {
     registrationName: (settings.legalName || settings.companyName).trim(),
+    vatNumber: settings.taxId?.trim() || undefined,
     identifications,
     postalAddress: buildPostalAddress(settings, {
       cityName: 'Riyadh',
@@ -100,16 +99,16 @@ function buildSupplierParty(settings: ZatcaCompanySettingsInput): ZatcaParty {
   }
 }
 
-function buildCustomerParty(customer: ZatcaCustomerInput): ZatcaParty {
-  const identifications: ZatcaParty['identifications'] = []
-
-  if (customer.taxId?.trim()) {
-    identifications.push({ id: customer.taxId.trim(), schemeId: 'VAT' })
-  }
+function buildCustomerParty(
+  customer: ZatcaCustomerInput,
+  invoiceType: ZatcaInvoiceInput['invoiceType'],
+): ZatcaParty {
+  const isStandard = invoiceType === 'STANDARD'
 
   return {
     registrationName: customer.name.trim(),
-    identifications,
+    vatNumber: isStandard && customer.taxId?.trim() ? customer.taxId.trim() : undefined,
+    identifications: [],
     postalAddress: buildPostalAddress(customer),
     email: customer.email?.trim() || undefined,
     telephone: customer.phone?.trim() || undefined,
@@ -194,7 +193,7 @@ export function mapInvoiceToZatcaDocument(input: ZatcaInvoiceInput): ZatcaInvoic
 
   return {
     ublVersionId: '2.1',
-    profileId: ZATCA_PROFILE_BY_TYPE[invoiceType],
+    profileId: input.profileIdOverride ?? ZATCA_PROFILE_BY_TYPE[invoiceType],
     invoiceNumber: input.invoiceNo.trim(),
     uuid,
     issueDate: formatDate(input.date),
@@ -205,7 +204,7 @@ export function mapInvoiceToZatcaDocument(input: ZatcaInvoiceInput): ZatcaInvoic
     taxCurrencyCode: currency,
     additionalDocumentReferences,
     supplier: buildSupplierParty(input.companySettings),
-    customer: buildCustomerParty(input.customer),
+    customer: buildCustomerParty(input.customer, invoiceType),
     taxTotal: {
       taxAmount,
       subtotals: taxSubtotals.length
@@ -224,5 +223,6 @@ export function mapInvoiceToZatcaDocument(input: ZatcaInvoiceInput): ZatcaInvoic
     },
     invoiceLines,
     notes: input.notes?.trim() || undefined,
+    billingReferenceId: input.billingReferenceId?.trim() || undefined,
   }
 }

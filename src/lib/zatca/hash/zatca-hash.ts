@@ -8,7 +8,7 @@ import { canonicalizeInvoiceXml, stripSignatureBlock } from '../signature/canoni
 export function stripXmlForZatcaHash(xml: string): string {
   let result = stripSignatureBlock(xml)
   result = result.replace(
-    /<cac:AdditionalDocumentReference>[\s\S]*?<cbc:ID>QR<\/cbc:ID>[\s\S]*?<\/cac:AdditionalDocumentReference>/g,
+    /<cac:AdditionalDocumentReference>\s*<cbc:ID>QR<\/cbc:ID>[\s\S]*?<\/cac:AdditionalDocumentReference>/g,
     '',
   )
   result = result.replace(/<cac:Signature>[\s\S]*?<\/cac:Signature>/g, '')

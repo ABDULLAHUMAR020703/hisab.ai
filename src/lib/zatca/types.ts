@@ -9,7 +9,7 @@ export type ZatcaInvoiceTypeCode = '388' | '381' | '383'
 
 export interface ZatcaPartyIdentification {
   id: string
-  schemeId: 'CRN' | 'VAT' | 'TIN' | 'NAT' | 'OTH'
+  schemeId: 'CRN' | 'TIN' | 'NAT' | 'MOM' | 'MLS' | '700' | 'SAG' | 'OTH'
 }
 
 export interface ZatcaPostalAddress {
@@ -23,6 +23,8 @@ export interface ZatcaPostalAddress {
 
 export interface ZatcaParty {
   registrationName: string
+  /** VAT TRN rendered in PartyTaxScheme/CompanyID (not PartyIdentification). */
+  vatNumber?: string
   identifications: ZatcaPartyIdentification[]
   postalAddress: ZatcaPostalAddress
   email?: string
@@ -88,6 +90,8 @@ export interface ZatcaInvoiceDocument {
   legalMonetaryTotal: ZatcaMonetaryTotal
   invoiceLines: ZatcaInvoiceLine[]
   notes?: string
+  /** Original invoice number for credit/debit notes (BR-KSA-56). */
+  billingReferenceId?: string
 }
 
 export interface ZatcaValidationIssue {
@@ -183,4 +187,8 @@ export interface ZatcaInvoiceInput {
   previousInvoiceHashBase64?: string
   /** Base64 TLV QR payload for AdditionalDocumentReference (simplified / reporting) */
   qrPayloadBase64?: string
+  /** Original invoice number for credit/debit notes (BR-KSA-56). */
+  billingReferenceId?: string
+  /** Optional profile override (e.g. compliance API requires reporting:1.0 for standard samples). */
+  profileIdOverride?: ZatcaDocumentProfile
 }

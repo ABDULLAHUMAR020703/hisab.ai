@@ -147,14 +147,21 @@ export function embedQrInInvoiceXml(xml: string, qrPayloadBase64: string): strin
 
   if (xml.includes('<cbc:ID>QR</cbc:ID>')) {
     return xml.replace(
-      /<cac:AdditionalDocumentReference>[\s\S]*?<cbc:ID>QR<\/cbc:ID>[\s\S]*?<\/cac:AdditionalDocumentReference>/,
+      /<cac:AdditionalDocumentReference>\s*<cbc:ID>QR<\/cbc:ID>[\s\S]*?<\/cac:AdditionalDocumentReference>/,
       qrBlock,
     )
   }
 
+  if (xml.includes('<cbc:ID>PIH</cbc:ID>')) {
+    return xml.replace(
+      /(<cac:AdditionalDocumentReference>[\s\S]*?<cbc:ID>PIH<\/cbc:ID>[\s\S]*?<\/cac:AdditionalDocumentReference>)/,
+      `$1\n  ${qrBlock}`,
+    )
+  }
+
   return xml.replace(
-    /(<cbc:TaxCurrencyCode>[^<]+<\/cbc:TaxCurrencyCode>)/,
-    `$1${qrBlock}`,
+    /(<cac:Signature>)/,
+    `${qrBlock}\n  $1`,
   )
 }
 

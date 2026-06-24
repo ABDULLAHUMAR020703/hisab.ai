@@ -24,11 +24,12 @@ export function cleanCertificateBody(certificatePem: string): string {
 }
 
 /**
- * ZATCA certificate hash: SHA-256(cert base64 body) → hex → base64(hex string).
+ * ZATCA certificate hash: SHA-256(cert base64 body as UTF-8) → hex → base64(hex string).
  * @see ZATCA security features implementation standards §1.6.2.1.1.2
  */
 export function getCertificateHash(certBodyBase64: string): string {
-  return createHash('sha256').update(Buffer.from(certBodyBase64, 'base64')).digest('base64')
+  const hexDigest = createHash('sha256').update(certBodyBase64, 'utf8').digest('hex')
+  return Buffer.from(hexDigest, 'utf8').toString('base64')
 }
 
 function parseWithNodeCrypto(certificatePem: string, bodyBase64: string): ZatcaCertificateInfo | null {

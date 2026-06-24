@@ -20,6 +20,7 @@ export interface ComplianceCheckResult {
   passed: boolean
   validationStatus: string
   requestId?: string
+  invoiceNo?: string
   error?: string
 }
 
@@ -34,6 +35,7 @@ async function createComplianceTestInvoice(
   invoiceType: InvoiceType,
   userId: string,
   customerId: string,
+  billingReferenceId?: string,
 ) {
   const now = new Date()
   const seq = await prisma.sequence.upsert({
@@ -77,13 +79,25 @@ async function runSingleComplianceCheck(
   environment: ZatcaEnvironment,
   userId: string,
   customerId: string,
+  billingReferenceId?: string,
 ): Promise<ComplianceCheckResult> {
+  let invoiceNo: string | undefined
   try {
-    const invoice = await createComplianceTestInvoice(scenario, userId, customerId)
+    const invoice = await createComplianceTestInvoice(
+      scenario,
+      userId,
+      customerId,
+      billingReferenceId,
+    )
+    invoiceNo = invoice.invoiceNo
     const loaded = await loadZatcaInvoiceById(invoice.id)
     if (!loaded) throw new Error('Failed to load compliance test invoice')
 
-    const enrichedInput = await enrichZatcaInvoiceInput(loaded.input, invoice.id)
+    const enrichedInput = await enrichZatcaInvoiceInput({
+      ...loaded.input,
+      billingReferenceId,
+      profileIdOverride: scenario === 'STANDARD' ? 'reporting:1.0' : undefined,
+    }, invoice.id)
     const xmlResult = generateZatcaInvoiceXml(enrichedInput)
     const validation = validateFullSubmissionPipeline(loaded.input, xmlResult.validation)
     if (!validation.valid) {
@@ -93,7 +107,7 @@ async function runSingleComplianceCheck(
     const creds = await loadComplianceSigningCredentials(environment)
     const { signedXml, invoiceHashHex } = signAndEmbedPhase2Qr(
       xmlResult.xml,
-      loaded.input,
+      enrichedInput,
       creds.certificatePem,
       creds.privateKeyPem,
     )
@@ -130,6 +144,7 @@ async function runSingleComplianceCheck(
       passed,
       validationStatus: submission.validationStatus,
       requestId: submission.requestId,
+      invoiceNo: invoice.invoiceNo,
     }
   } catch (error) {
     return {
@@ -137,6 +152,7 @@ async function runSingleComplianceCheck(
       passed: false,
       validationStatus: 'FAIL',
       error: error instanceof Error ? error.message : String(error),
+      invoiceNo,
     }
   }
 }
@@ -192,9 +208,29 @@ export async function runComplianceChecks(
   })
 
   const results: ComplianceCheckResult[] = []
+  let simplifiedReferenceInvoiceNo: string | undefined
+
   for (const scenario of SCENARIOS) {
-    const result = await runSingleComplianceCheck(scenario, environment, user.id, customer.id)
+    const billingReferenceId = scenario === 'CREDIT_NOTE' || scenario === 'DEBIT_NOTE'
+      ? simplifiedReferenceInvoiceNo
+      : undefined
+
+    if (billingReferenceId === undefined && (scenario === 'CREDIT_NOTE' || scenario === 'DEBIT_NOTE')) {
+      throw new Error('SIMPLIFIED compliance invoice must be created before credit/debit checks')
+    }
+
+    const result = await runSingleComplianceCheck(
+      scenario,
+      environment,
+      user.id,
+      customer.id,
+      billingReferenceId,
+    )
     results.push(result)
+
+    if (scenario === 'SIMPLIFIED' && result.invoiceNo) {
+      simplifiedReferenceInvoiceNo = result.invoiceNo
+    }
 
     await logZatcaAudit({
       action: 'COMPLIANCE_CHECK_SCENARIO',

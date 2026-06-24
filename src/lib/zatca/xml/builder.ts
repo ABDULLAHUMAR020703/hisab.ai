@@ -52,17 +52,16 @@ function buildParty(party: ZatcaParty): string {
   const identifications = party.identifications
     .map((ident) => buildPartyIdentification(ident.schemeId, ident.id))
     .join('\n    ')
-  const vatIdentification = party.identifications.find((ident) => ident.schemeId === 'VAT')
 
   const contact = [
     party.telephone ? el('cbc:Telephone', party.telephone) : '',
     party.email ? el('cbc:ElectronicMail', party.email) : '',
   ].filter(Boolean)
 
-  const partyTaxScheme = vatIdentification
+  const partyTaxScheme = party.vatNumber
     ? [
         '<cac:PartyTaxScheme>',
-        el('cbc:CompanyID', vatIdentification.id),
+        el('cbc:CompanyID', party.vatNumber),
         '<cac:TaxScheme>',
         el('cbc:ID', 'VAT'),
         '</cac:TaxScheme>',
@@ -133,6 +132,24 @@ function buildUblSignatureStub(): string {
     el('cbc:ID', 'urn:oasis:names:specification:ubl:signature:Invoice'),
     el('cbc:SignatureMethod', 'urn:oasis:names:specification:ubl:dsig:enveloped:xades'),
     '</cac:Signature>',
+  ].join('\n  ')
+}
+
+function buildDeliveryBlock(issueDate: string): string {
+  return [
+    '<cac:Delivery>',
+    el('cbc:ActualDeliveryDate', issueDate),
+    '</cac:Delivery>',
+  ].join('\n  ')
+}
+
+function buildBillingReference(invoiceNumber: string): string {
+  return [
+    '<cac:BillingReference>',
+    '<cac:InvoiceDocumentReference>',
+    el('cbc:ID', invoiceNumber),
+    '</cac:InvoiceDocumentReference>',
+    '</cac:BillingReference>',
   ].join('\n  ')
 }
 
@@ -209,9 +226,10 @@ export function buildZatcaInvoiceXml(document: ZatcaInvoiceDocument): string {
     el('cbc:IssueDate', document.issueDate),
     el('cbc:IssueTime', document.issueTime),
     el('cbc:InvoiceTypeCode', document.invoiceTypeCode, { name: document.invoiceTypeCodeName }),
+    document.notes ? el('cbc:Note', document.notes) : '',
     el('cbc:DocumentCurrencyCode', document.documentCurrencyCode),
     el('cbc:TaxCurrencyCode', document.taxCurrencyCode),
-    document.notes ? el('cbc:Note', document.notes) : '',
+    document.billingReferenceId ? buildBillingReference(document.billingReferenceId) : '',
     additionalRefs,
     buildUblSignatureStub(),
     '<cac:AccountingSupplierParty>',
@@ -220,6 +238,7 @@ export function buildZatcaInvoiceXml(document: ZatcaInvoiceDocument): string {
     '<cac:AccountingCustomerParty>',
     buildParty(document.customer),
     '</cac:AccountingCustomerParty>',
+    document.invoiceTypeCodeName.startsWith('01') ? buildDeliveryBlock(document.issueDate) : '',
     buildPaymentMeans(document),
     '<cac:TaxTotal>',
     amountEl('cbc:TaxAmount', document.taxTotal.taxAmount, currency),
