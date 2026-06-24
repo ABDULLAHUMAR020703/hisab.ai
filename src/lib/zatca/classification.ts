@@ -33,3 +33,43 @@ export function resolveZatcaInvoiceType(
   }
   return classifySalesInvoiceType(customer)
 }
+
+/** Maps standard/simplified ZATCA family to InvoiceTypeCode @name. */
+export function zatcaFamilyToCodeName(family: 'STANDARD' | 'SIMPLIFIED'): string {
+  return family === 'STANDARD' ? '0100000' : '0200000'
+}
+
+/**
+ * Derives BT-3 InvoiceTypeCode @name from business facts — never from persisted XML metadata.
+ * Sales invoices: invoice type + customer VAT.
+ * Credit/debit notes: referenced parent tax invoice type + customer VAT.
+ */
+export function resolveZatcaInvoiceTypeCodeName(input: {
+  invoiceType: InvoiceType
+  customer?: { taxId?: string | null }
+  referencedSourceInvoiceType?: string | null
+}): string {
+  if (input.invoiceType === 'STANDARD' || input.invoiceType === 'SIMPLIFIED') {
+    return zatcaFamilyToCodeName(input.invoiceType)
+  }
+
+  if (input.invoiceType === 'CREDIT_NOTE' || input.invoiceType === 'DEBIT_NOTE') {
+    if (!input.referencedSourceInvoiceType) {
+      return zatcaFamilyToCodeName(classifySalesInvoiceType(input.customer ?? {}))
+    }
+    const parentFamily = resolveZatcaInvoiceType(
+      input.referencedSourceInvoiceType,
+      input.customer ?? {},
+    )
+    if (parentFamily !== 'STANDARD' && parentFamily !== 'SIMPLIFIED') {
+      return zatcaFamilyToCodeName(classifySalesInvoiceType(input.customer ?? {}))
+    }
+    return zatcaFamilyToCodeName(parentFamily)
+  }
+
+  return zatcaFamilyToCodeName(classifySalesInvoiceType(input.customer ?? {}))
+}
+
+export function isAdjustableTaxInvoice(invoiceType: string): boolean {
+  return invoiceType === 'STANDARD' || invoiceType === 'SIMPLIFIED'
+}

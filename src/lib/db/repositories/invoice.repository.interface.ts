@@ -36,10 +36,21 @@ export interface InvoiceUpdateInput {
   status?: string
 }
 
+export interface InvoiceAdjustmentCreateInput {
+  sourceInvoiceId: string
+  adjustmentType: 'CREDIT_NOTE' | 'DEBIT_NOTE'
+  date: string | Date
+  dueDate: string | Date
+  lines: InvoiceLineInput[]
+  notes?: string | null
+  createdById: string
+}
+
 export interface InvoiceRepository {
   findMany(options?: InvoiceListOptions): Promise<InvoiceRecord[]>
   findById(id: string): Promise<InvoiceRecord | null>
   create(input: InvoiceCreateInput): Promise<InvoiceRecord>
+  createAdjustment(input: InvoiceAdjustmentCreateInput): Promise<InvoiceRecord>
   update(id: string, input: InvoiceUpdateInput): Promise<InvoiceRecord>
   delete(id: string): Promise<void>
 }

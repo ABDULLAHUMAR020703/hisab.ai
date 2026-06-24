@@ -41,8 +41,9 @@ export interface InvoiceResponseView {
 export function resolveSubmissionRoute(
   invoiceType: InvoiceType,
   environment: ZatcaEnvironment = 'SANDBOX',
+  invoiceTypeCodeName?: string,
 ): ZatcaSubmissionRoute {
-  return resolveZatcaSubmissionRoute(invoiceType, environment)
+  return resolveZatcaSubmissionRoute(invoiceType, environment, invoiceTypeCodeName)
 }
 
 export const TERMINAL_ZATCA_STATUSES: ZatcaInvoiceStatus[] = [

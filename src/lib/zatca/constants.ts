@@ -105,6 +105,9 @@ export function resolveZatcaProfileId(
 export function resolveZatcaSubmissionRoute(
   invoiceType: InvoiceType,
   _environment: ZatcaEnvironment = 'SANDBOX',
+  invoiceTypeCodeName?: string,
 ): 'clearance' | 'reporting' {
-  return invoiceType === 'STANDARD' ? 'clearance' : 'reporting'
+  const codeName = invoiceTypeCodeName ?? ZATCA_INVOICE_TYPE_NAME[invoiceType as InvoiceTypeKey]
+  if (codeName.startsWith('01')) return 'clearance'
+  return 'reporting'
 }

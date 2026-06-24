@@ -15,8 +15,9 @@ import {
   validateFullSubmissionPipeline,
   validateSubmissionReadiness,
 } from '../validation/hardening'
-import { getSubmissionRoute } from './router'
 import { TERMINAL_ZATCA_STATUSES, type InvoiceSubmissionResult } from './types'
+import { resolveInvoiceTypeCodeName } from '../constants'
+import { getSubmissionRoute } from './router'
 
 export interface SubmitAuditContext {
   userId?: string
@@ -134,7 +135,8 @@ export async function submitInvoice(
     }
 
     const uuid = processed.document.uuid
-    const route = getSubmissionRoute(loaded.input.invoiceType as InvoiceType, environment)
+    const typeCodeName = resolveInvoiceTypeCodeName(loaded.input)
+    const route = getSubmissionRoute(loaded.input.invoiceType as InvoiceType, environment, typeCodeName)
     const submittedAt = new Date()
     const submissionHash = invoiceHashHex
 

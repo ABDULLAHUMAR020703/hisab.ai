@@ -1,6 +1,6 @@
 import 'server-only'
 import type { InvoiceType } from '@/lib/db/prisma-types'
-import { classifySalesInvoiceType } from '@/lib/zatca/classification'
+import { classifySalesInvoiceType, isAdjustableTaxInvoice, resolveZatcaInvoiceType } from '@/lib/zatca/classification'
 import { randomUUID } from 'crypto'
 import {
   mapChartOfAccountRow,
@@ -13,6 +13,7 @@ import type { InvoiceRecord } from '../entities'
 import { isUuid, queryByIdOrLegacy, resolveCompanyId, supabaseDb } from '../repository-utils'
 import { resolveSequenceRepository } from '../sequence-resolver'
 import type {
+  InvoiceAdjustmentCreateInput,
   InvoiceCreateInput,
   InvoiceLineInput,
   InvoiceListOptions,
@@ -215,6 +216,14 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
     if (paymentsRes.error) throw paymentsRes.error
     if (profileRes.error) throw profileRes.error
 
+    let referencedInvoiceNo: string | null = null
+    let referencedInvoiceType: string | null = null
+    if (invoice.referencedInvoiceId) {
+      const refRow = await queryByIdOrLegacy(db, 'invoices', invoice.referencedInvoiceId, companyId)
+      referencedInvoiceNo = refRow ? String(refRow.invoice_no) : null
+      referencedInvoiceType = refRow ? String(refRow.invoice_type) : null
+    }
+
     const accountIds = [...new Set((linesRes.data ?? []).map((l) => l.account_id).filter(Boolean))]
     const accounts = new Map<string, ReturnType<typeof mapChartOfAccountRow>>()
 
@@ -232,6 +241,8 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
 
     return {
       ...invoice,
+      referencedInvoiceNo,
+      referencedInvoiceType,
       customer: customerRes.data ? mapCustomerRow(customerRes.data) : undefined,
       lines: (linesRes.data ?? []).map((line) => ({
         ...mapInvoiceLineRow(line),
@@ -275,6 +286,64 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
         terms: input.terms ?? null,
         is_recurring: input.isRecurring ?? false,
         recurring_day: input.recurringDay ?? null,
+        created_by_id: createdById,
+      })
+      .select('*')
+      .single()
+
+    if (error) throw error
+
+    const invoiceId = String(data.id)
+    const lineRows = await buildLineRows(processedLines, invoiceId, companyId)
+    if (lineRows.length > 0) {
+      const { error: lineError } = await db.from('invoice_lines').insert(lineRows)
+      if (lineError) throw lineError
+    }
+
+    const created = await this.findById(invoiceId)
+    if (!created) throw new Error('Invoice not found')
+    return created
+  },
+
+  async createAdjustment(input: InvoiceAdjustmentCreateInput) {
+    const db = supabaseDb()
+    const companyId = await resolveCompanyId()
+    const sourceInvoiceId = await resolveScopedUuid('invoices', input.sourceInvoiceId, companyId)
+    if (!sourceInvoiceId) throw new Error('Source invoice not found')
+
+    const source = await this.findById(sourceInvoiceId)
+    if (!source) throw new Error('Source invoice not found')
+    if (!isAdjustableTaxInvoice(source.invoiceType)) {
+      throw new Error('Credit/debit notes can only be created from a standard or simplified tax invoice')
+    }
+    if (!source.customer) throw new Error('Source invoice customer not found')
+
+    const { processedLines, subtotal, taxAmount, total } = processLines(input.lines)
+    if (total <= 0) throw new Error('Adjustment total must be greater than zero')
+
+    const invoiceNo = await resolveSequenceRepository().next('INVOICE', 'INV-')
+    const issueDate = new Date(input.date)
+    const createdById = await resolveProfileUuid(input.createdById)
+    const defaultNote = input.adjustmentType === 'CREDIT_NOTE' ? 'Credit note' : 'Debit note'
+
+    const { data, error } = await db
+      .from('invoices')
+      .insert({
+        company_id: companyId,
+        invoice_no: invoiceNo,
+        invoice_uuid: randomUUID(),
+        customer_id: source.customerId,
+        invoice_type: input.adjustmentType,
+        referenced_invoice_id: sourceInvoiceId,
+        date: issueDate.toISOString(),
+        issue_time: formatIssueTime(issueDate),
+        due_date: new Date(input.dueDate).toISOString(),
+        subtotal,
+        tax_amount: taxAmount,
+        total,
+        balance: total,
+        notes: input.notes?.trim() || `${defaultNote} for ${source.invoiceNo}`,
+        terms: source.terms ?? null,
         created_by_id: createdById,
       })
       .select('*')

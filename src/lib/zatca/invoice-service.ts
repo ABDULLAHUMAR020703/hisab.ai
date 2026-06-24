@@ -9,7 +9,7 @@ import {
   invoiceHashHexToPihBase64,
 } from './hash'
 import { loadInvoiceForZatca, syncInvoiceClassification, updateInvoiceZatcaFields } from './persistence'
-import { resolveZatcaInvoiceType } from './classification'
+import { resolveZatcaInvoiceType, resolveZatcaInvoiceTypeCodeName } from './classification'
 import type { ZatcaCustomerInput, ZatcaInvoiceInput, ZatcaXmlGenerationResult } from './types'
 
 export interface LoadedZatcaInvoice {
@@ -39,11 +39,13 @@ export async function loadZatcaInvoiceById(invoiceId: string) {
     taxId: rawCustomer.taxId ?? null,
   }
 
+  const resolvedType = resolveZatcaInvoiceType(invoice.invoiceType, customer)
+
   const input: ZatcaInvoiceInput = {
     id: invoice.id,
     invoiceNo: invoice.invoiceNo,
     invoiceUUID: invoice.invoiceUUID,
-    invoiceType: resolveZatcaInvoiceType(invoice.invoiceType, customer),
+    invoiceType: resolvedType,
     date: invoice.date,
     issueTime: invoice.issueTime,
     currency: invoice.currency,
@@ -62,9 +64,19 @@ export async function loadZatcaInvoiceById(invoiceId: string) {
     customer,
     companySettings,
     zatcaEnvironment: companySettings.zatcaEnvironment,
+    billingReferenceId: invoice.referencedInvoiceNo ?? undefined,
+    invoiceTypeCodeNameOverride: resolveZatcaInvoiceTypeCodeName({
+      invoiceType: resolvedType,
+      customer,
+      referencedSourceInvoiceType: invoice.referencedInvoiceType,
+    }),
   }
 
-  if (input.invoiceType !== invoice.invoiceType) {
+  if (
+    input.invoiceType !== invoice.invoiceType
+    && input.invoiceType !== 'CREDIT_NOTE'
+    && input.invoiceType !== 'DEBIT_NOTE'
+  ) {
     await syncInvoiceClassification(invoice.id, input.invoiceType)
   }
 

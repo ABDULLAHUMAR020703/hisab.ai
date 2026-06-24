@@ -89,6 +89,10 @@ export interface InvoiceRecord {
   invoiceHash: string | null
   previousInvoiceHash: string | null
   invoiceType: string
+  referencedInvoiceId: string | null
+  referencedInvoiceNo?: string | null
+  /** Parent tax invoice type, joined at read time for credit/debit notes. */
+  referencedInvoiceType?: string | null
   customerId: string
   date: Date
   issueTime: string | null

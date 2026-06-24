@@ -4,8 +4,9 @@ import { resolveSubmissionRoute, type ZatcaSubmissionRoute } from './types'
 export function getSubmissionRoute(
   invoiceType: InvoiceType,
   environment: ZatcaEnvironment = 'SANDBOX',
+  invoiceTypeCodeName?: string,
 ): ZatcaSubmissionRoute {
-  return resolveSubmissionRoute(invoiceType, environment)
+  return resolveSubmissionRoute(invoiceType, environment, invoiceTypeCodeName)
 }
 
 export function getSubmissionRouteLabel(route: ZatcaSubmissionRoute): string {

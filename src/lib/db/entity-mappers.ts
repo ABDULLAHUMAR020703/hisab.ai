@@ -85,6 +85,7 @@ export function mapInvoiceRow(row: Record<string, unknown>): InvoiceRecord {
     invoiceHash: (row.invoice_hash as string | null) ?? null,
     previousInvoiceHash: (row.previous_invoice_hash as string | null) ?? null,
     invoiceType: String(row.invoice_type ?? 'STANDARD'),
+    referencedInvoiceId: (row.referenced_invoice_id as string | null) ?? null,
     customerId: String(row.customer_id),
     date: requireDate(String(row.date)),
     issueTime: (row.issue_time as string | null) ?? null,

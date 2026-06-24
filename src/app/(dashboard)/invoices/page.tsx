@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Plus, RefreshCw, Send, DollarSign, RotateCcw, Eye, Shield, FileDown } from 'lucide-react'
+import { Plus, RefreshCw, Send, DollarSign, RotateCcw, Eye, Shield, FileDown, FileMinus, FilePlus } from 'lucide-react'
 import { formatDate, formatCurrency, cn } from '@/lib/utils'
 import { readApiError } from '@/lib/api-client'
 import { Badge } from '@/components/ui/badge'
@@ -16,7 +16,7 @@ interface InvoiceLine { description: string; quantity: number; unitPrice: number
 interface Invoice {
   id: string; invoiceNo: string; customer: { name: string }; date: string; dueDate: string
   total: number; balance: number; amountPaid: number; status: string; isRecurring: boolean
-  invoiceType?: string; zatcaStatus?: string
+  invoiceType?: string; zatcaStatus?: string; referencedInvoiceNo?: string | null
 }
 
 interface ZatcaInvoiceStatus {
@@ -51,6 +51,15 @@ export default function InvoicesPage() {
   const [zatcaErr, setZatcaErr] = useState<string | null>(null)
   const [qrPreview, setQrPreview] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [showAdjustmentModal, setShowAdjustmentModal] = useState(false)
+  const [adjustmentType, setAdjustmentType] = useState<'CREDIT_NOTE' | 'DEBIT_NOTE'>('CREDIT_NOTE')
+  const [adjustmentSource, setAdjustmentSource] = useState<{ id: string; invoiceNo: string } | null>(null)
+  const [adjustmentForm, setAdjustmentForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    dueDate: '',
+    notes: '',
+    lines: [{ ...EMPTY_LINE }],
+  })
 
   const [form, setForm] = useState({
     customerId: '', date: new Date().toISOString().split('T')[0],
@@ -128,15 +137,25 @@ export default function InvoicesPage() {
   }
 
   async function openView(inv: Invoice) {
-    setSelectedInvoice(inv)
     setZatcaMsg(null)
     setZatcaErr(null)
     setQrPreview(null)
     setShowViewModal(true)
-    const [statusRes, qrRes] = await Promise.all([
+    const [detailRes, statusRes, qrRes] = await Promise.all([
+      fetch(`/api/invoices/${inv.id}`),
       fetch(`/api/zatca/invoices/${inv.id}/status`),
       fetch(`/api/zatca/invoices/${inv.id}/qr`),
     ])
+    if (detailRes.ok) {
+      const full = await detailRes.json()
+      setSelectedInvoice({
+        ...inv,
+        ...full,
+        customer: full.customer ?? inv.customer,
+      })
+    } else {
+      setSelectedInvoice(inv)
+    }
     if (statusRes.ok) setZatcaStatus(await statusRes.json())
     else setZatcaStatus(null)
     if (qrRes.ok) {
@@ -173,6 +192,77 @@ export default function InvoicesPage() {
     }
     setSubmittingZatca(false)
   }
+
+  function canCreateAdjustment(inv: Invoice | null, status: ZatcaInvoiceStatus | null) {
+    if (!inv || !status) return false
+    const type = inv.invoiceType ?? 'STANDARD'
+    if (type !== 'STANDARD' && type !== 'SIMPLIFIED') return false
+    return status.zatcaStatus === 'CLEARED' || status.zatcaStatus === 'REPORTED'
+  }
+
+  function updateAdjustmentLine(idx: number, field: string, value: string | number) {
+    setAdjustmentForm(f => ({
+      ...f,
+      lines: f.lines.map((l, i) => i === idx ? { ...l, [field]: value } : l),
+    }))
+  }
+
+  async function openAdjustment(type: 'CREDIT_NOTE' | 'DEBIT_NOTE', inv: Invoice) {
+    setAdjustmentType(type)
+    setAdjustmentSource({ id: inv.id, invoiceNo: inv.invoiceNo })
+    const res = await fetch(`/api/invoices/${inv.id}`)
+    if (!res.ok) {
+      alert(await readApiError(res))
+      return
+    }
+    const full = await res.json()
+    const today = new Date().toISOString().split('T')[0]
+    setAdjustmentForm({
+      date: today,
+      dueDate: today,
+      notes: type === 'CREDIT_NOTE' ? `Credit note for ${inv.invoiceNo}` : `Debit note for ${inv.invoiceNo}`,
+      lines: (full.lines ?? []).map((line: InvoiceLine) => ({
+        description: line.description,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        taxRate: line.taxRate,
+        accountId: line.accountId ?? '',
+      })),
+    })
+    setShowAdjustmentModal(true)
+  }
+
+  async function handleSaveAdjustment() {
+    if (!adjustmentSource) return
+    setSaving(true)
+    const endpoint = adjustmentType === 'CREDIT_NOTE' ? 'credit-note' : 'debit-note'
+    const res = await fetch(`/api/invoices/${adjustmentSource.id}/${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(adjustmentForm),
+    })
+    if (!res.ok) {
+      alert(await readApiError(res))
+      setSaving(false)
+      return
+    }
+    const created = await res.json()
+    setShowAdjustmentModal(false)
+    setSaving(false)
+    await load()
+    const detailRes = await fetch(`/api/invoices/${created.id}`)
+    if (detailRes.ok) {
+      const full = await detailRes.json()
+      await openView({
+        ...full,
+        customer: full.customer ?? { name: '' },
+      })
+    }
+  }
+
+  const adjustmentSubtotal = adjustmentForm.lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0)
+  const adjustmentTax = adjustmentForm.lines.reduce((s, l) => s + l.quantity * l.unitPrice * (l.taxRate / 100), 0)
+  const adjustmentTotal = adjustmentSubtotal + adjustmentTax
 
   const stats = {
     total: invoices.length,
@@ -254,6 +344,9 @@ export default function InvoicesPage() {
                 <tr key={inv.id} className="hover:bg-slate-50/60 transition-colors">
                   <td className="px-4 py-3">
                     <span className="font-mono text-xs font-semibold text-indigo-600">{inv.invoiceNo}</span>
+                    {inv.invoiceType && inv.invoiceType !== 'STANDARD' && (
+                      <span className="block text-[10px] font-medium text-slate-500 mt-0.5">{inv.invoiceType.replaceAll('_', ' ')}</span>
+                    )}
                     {inv.isRecurring && <RotateCcw size={10} className="inline ml-1.5 text-violet-400" />}
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-700 font-medium">{inv.customer.name}</td>
@@ -449,9 +542,32 @@ export default function InvoicesPage() {
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div><p className="text-xs text-slate-400">Date</p><p className="font-medium">{formatDate(selectedInvoice.date)}</p></div>
               <div><p className="text-xs text-slate-400">Due</p><p className="font-medium">{formatDate(selectedInvoice.dueDate)}</p></div>
+              <div><p className="text-xs text-slate-400">Type</p><p className="font-medium">{(selectedInvoice.invoiceType ?? 'STANDARD').replaceAll('_', ' ')}</p></div>
+              {selectedInvoice.referencedInvoiceNo && (
+                <div><p className="text-xs text-slate-400">References</p><p className="font-medium">{selectedInvoice.referencedInvoiceNo}</p></div>
+              )}
               <div><p className="text-xs text-slate-400">Total</p><p className="font-semibold text-indigo-600">{formatCurrency(selectedInvoice.total)}</p></div>
               <div><p className="text-xs text-slate-400">Balance</p><p className="font-medium">{formatCurrency(selectedInvoice.balance)}</p></div>
             </div>
+
+            {canCreateAdjustment(selectedInvoice, zatcaStatus) && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+                <div>
+                  <h3 className="font-semibold text-slate-800">Adjustments</h3>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Create a ZATCA credit or debit note linked to this invoice via BillingReference.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" onClick={() => openAdjustment('CREDIT_NOTE', selectedInvoice)}>
+                    <FileMinus size={14} /> Create Credit Note
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => openAdjustment('DEBIT_NOTE', selectedInvoice)}>
+                    <FilePlus size={14} /> Create Debit Note
+                  </Button>
+                </div>
+              </div>
+            )}
 
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
               <div className="flex items-center gap-2">
@@ -506,6 +622,104 @@ export default function InvoicesPage() {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Credit / Debit Note Modal */}
+      <Modal
+        open={showAdjustmentModal}
+        onClose={() => setShowAdjustmentModal(false)}
+        title={adjustmentType === 'CREDIT_NOTE' ? 'Create Credit Note' : 'Create Debit Note'}
+        subtitle={adjustmentSource ? `Adjustment for ${adjustmentSource.invoiceNo}` : ''}
+        size="xl"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setShowAdjustmentModal(false)}>Cancel</Button>
+            <Button onClick={handleSaveAdjustment} loading={saving}>
+              {adjustmentType === 'CREDIT_NOTE' ? 'Save Credit Note' : 'Save Debit Note'}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Input label="Date" type="date" required value={adjustmentForm.date}
+              onChange={e => setAdjustmentForm({ ...adjustmentForm, date: e.target.value })} />
+            <Input label="Due Date" type="date" required value={adjustmentForm.dueDate}
+              onChange={e => setAdjustmentForm({ ...adjustmentForm, dueDate: e.target.value })} />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">Line Items</label>
+            <div className="border border-slate-200 rounded-xl overflow-hidden">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    {['Description', 'Qty', 'Unit Price', 'Tax %', 'Amount', ''].map((h, i) => (
+                      <th key={i} className="px-3 py-2.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider text-left">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {adjustmentForm.lines.map((line, idx) => (
+                    <tr key={idx}>
+                      <td className="px-2 py-2">
+                        <input value={line.description} onChange={e => updateAdjustmentLine(idx, 'description', e.target.value)}
+                          placeholder="Description" className="input-base text-xs py-1.5" />
+                      </td>
+                      <td className="px-2 py-2 w-20">
+                        <input type="number" min="0" step="0.01" value={line.quantity}
+                          onChange={e => updateAdjustmentLine(idx, 'quantity', parseFloat(e.target.value) || 0)}
+                          className="input-base text-xs py-1.5 text-right" />
+                      </td>
+                      <td className="px-2 py-2 w-28">
+                        <input type="number" min="0" step="0.01" value={line.unitPrice}
+                          onChange={e => updateAdjustmentLine(idx, 'unitPrice', parseFloat(e.target.value) || 0)}
+                          className="input-base text-xs py-1.5 text-right" />
+                      </td>
+                      <td className="px-2 py-2 w-20">
+                        <input type="number" min="0" max="100" value={line.taxRate}
+                          onChange={e => updateAdjustmentLine(idx, 'taxRate', parseFloat(e.target.value) || 0)}
+                          className="input-base text-xs py-1.5 text-right" />
+                      </td>
+                      <td className="px-3 py-2 text-right text-sm font-semibold text-slate-700 tabular whitespace-nowrap">
+                        {formatCurrency(line.quantity * line.unitPrice * (1 + line.taxRate / 100))}
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <button onClick={() => setAdjustmentForm(f => ({ ...f, lines: f.lines.filter((_, i) => i !== idx) }))}
+                          className="w-6 h-6 rounded-lg bg-red-50 text-red-400 hover:bg-red-100 hover:text-red-600 flex items-center justify-center transition-colors text-base leading-none">
+                          ×
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="bg-slate-50 border-t border-slate-200 px-4 py-3 flex flex-col items-end gap-1">
+                <div className="flex gap-8 text-sm">
+                  <span className="text-slate-500">Subtotal:</span>
+                  <span className="font-medium text-slate-700 tabular w-28 text-right">{formatCurrency(adjustmentSubtotal)}</span>
+                </div>
+                <div className="flex gap-8 text-sm">
+                  <span className="text-slate-500">VAT:</span>
+                  <span className="font-medium text-slate-700 tabular w-28 text-right">{formatCurrency(adjustmentTax)}</span>
+                </div>
+                <div className="flex gap-8 text-base font-bold border-t border-slate-200 pt-1 mt-1">
+                  <span className="text-slate-800">Total:</span>
+                  <span className="text-indigo-600 tabular w-28 text-right">{formatCurrency(adjustmentTotal)}</span>
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => setAdjustmentForm(f => ({ ...f, lines: [...f.lines, { ...EMPTY_LINE }] }))}
+              className="mt-2 flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+            >
+              <Plus size={14} /> Add Line Item
+            </button>
+          </div>
+
+          <Textarea label="Notes" value={adjustmentForm.notes}
+            onChange={e => setAdjustmentForm({ ...adjustmentForm, notes: e.target.value })} rows={2} />
+        </div>
       </Modal>
 
       {/* Payment Modal */}
