@@ -8,6 +8,7 @@ import {
   type ZatcaApiResponseBody,
 } from './client'
 import { postZatcaJson, zatcaResponseMessage } from './http-client'
+import { resolveZatcaTraceId } from './api-log'
 
 export interface ReportingSubmissionInput {
   environment: ZatcaEnvironment
@@ -19,6 +20,7 @@ export interface ReportingSubmissionInput {
 
 export interface ReportingSubmissionResult {
   requestId: string | null
+  globalTransactionId: string | null
   reportingStatus: string
   responseCode: string
   responseMessage: string
@@ -31,6 +33,7 @@ export interface ReportingSubmissionResult {
 function mockReportingResponse(input: ReportingSubmissionInput): ReportingSubmissionResult {
   return {
     requestId: null,
+    globalTransactionId: null,
     reportingStatus: 'REPORTED',
     responseCode: 'REPORTED',
     responseMessage: 'Mock reporting submission accepted',
@@ -84,7 +87,8 @@ export async function submitReportingInvoice(
   const reportingStatus = body.reportingStatus ?? body.validationResults?.status ?? 'REPORTED'
 
   return {
-    requestId: response.requestId || body.requestID || null,
+    requestId: resolveZatcaTraceId(response.requestId, response.globalTransactionId) || null,
+    globalTransactionId: response.globalTransactionId || null,
     reportingStatus,
     responseCode: reportingStatus,
     responseMessage: body.validationResults?.infoMessages?.[0]?.message ?? reportingStatus,

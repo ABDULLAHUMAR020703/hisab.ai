@@ -12,6 +12,7 @@ import { generateEgsIdentity } from './egs-identity'
 import { companySettingsToCsrInput, generateCSR } from './generate-csr-company'
 import { csrPemToZatcaBase64 } from './generate-csr'
 import { requestProductionCsid } from './production-client'
+import { resolveOnboardingStatusAfterProductionFailure } from './onboarding-status'
 import type { OnboardingAuditContext } from './types'
 
 export type { OnboardingAuditContext }
@@ -202,13 +203,14 @@ export async function requestAndStoreProductionCsid(auditContext?: OnboardingAud
       userId: auditContext?.userId,
       userName: auditContext?.userName,
       companyName: settings.companyName,
-      metadata: { requestId: response.requestId, environment },
+      metadata: { requestId: response.requestId, globalTransactionId: response.globalTransactionId, environment },
     })
 
     return {
       environment,
       dispositionMessage: response.dispositionMessage,
       requestId: response.requestId,
+      globalTransactionId: response.globalTransactionId,
       status: await getOnboardingStatus(environment),
     }
   } catch (error) {
@@ -217,7 +219,10 @@ export async function requestAndStoreProductionCsid(auditContext?: OnboardingAud
     await storeCredentials({
       environment,
       companySettingsId: settings.id,
-      onboardingStatus: priorStatus.hasComplianceCsid ? 'COMPLIANCE_ISSUED' : 'FAILED',
+      onboardingStatus: resolveOnboardingStatusAfterProductionFailure(
+        priorStatus.onboardingStatus,
+        priorStatus.hasComplianceCsid,
+      ),
       lastError: message,
     })
     await logZatcaAudit({
@@ -227,6 +232,7 @@ export async function requestAndStoreProductionCsid(auditContext?: OnboardingAud
       userId: auditContext?.userId,
       userName: auditContext?.userName,
       companyName: settings.companyName,
+      metadata: { environment, preservedStatus: priorStatus.onboardingStatus },
     })
     throw error
   }

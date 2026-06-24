@@ -1,9 +1,13 @@
 import 'server-only'
 import { randomUUID } from 'crypto'
 import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
-import { getDefaultCompanyId } from '@/lib/db/company.repository'
-import { createAdminClient } from '@/lib/supabase/admin'
 import type { ZatcaApiResponseBody } from './client'
+import {
+  extractBodyRequestId,
+  extractGlobalTransactionId,
+  persistZatcaApiLog,
+  sanitizeZatcaResponsePayload,
+} from './api-log'
 
 const DEFAULT_TIMEOUT_MS = Number(process.env.ZATCA_HTTP_TIMEOUT_MS ?? 30000)
 const DEFAULT_RETRIES = Number(process.env.ZATCA_HTTP_RETRIES ?? 2)
@@ -25,6 +29,7 @@ export interface ZatcaHttpResponse {
   ok: boolean
   body: ZatcaApiResponseBody
   requestId: string
+  globalTransactionId: string
   correlationId: string
   durationMs: number
   warningCount: number
@@ -46,57 +51,6 @@ function responseMessage(body: ZatcaApiResponseBody): string | null {
     ?? body.validationResults?.warningMessages?.[0]?.message
     ?? body.validationResults?.infoMessages?.[0]?.message
     ?? null
-}
-
-function extractRequestId(body: ZatcaApiResponseBody, headers: Headers): string {
-  return body.requestID
-    ?? body.requestId
-    ?? body.request_id
-    ?? headers.get('x-request-id')
-    ?? headers.get('request-id')
-    ?? headers.get('x-correlation-id')
-    ?? headers.get('correlation-id')
-    ?? ''
-}
-
-async function persistApiLog(input: {
-  environment: ZatcaEnvironment
-  endpoint: string
-  invoiceId?: string | null
-  status: number
-  ok: boolean
-  requestId: string
-  correlationId: string
-  durationMs: number
-  errorMessage: string | null
-  attempt: number
-  warningCount: number
-  errorCount: number
-}) {
-  try {
-    const supabase = createAdminClient()
-    const companyId = await getDefaultCompanyId(supabase)
-    await supabase.from('zatca_api_logs').insert({
-      company_id: companyId,
-      environment: input.environment,
-      endpoint: input.endpoint,
-      http_method: 'POST',
-      request_id: input.requestId || input.correlationId,
-      response_code: String(input.status),
-      success: input.ok,
-      error_message: input.errorMessage,
-      duration_ms: input.durationMs,
-      invoice_id: input.invoiceId ?? null,
-      metadata: {
-        correlationId: input.correlationId,
-        attempt: input.attempt,
-        warningCount: input.warningCount,
-        errorCount: input.errorCount,
-      },
-    })
-  } catch {
-    // API log persistence must never break invoice submission.
-  }
 }
 
 export async function postZatcaJson(request: ZatcaHttpRequest): Promise<ZatcaHttpResponse> {
@@ -124,21 +78,25 @@ export async function postZatcaJson(request: ZatcaHttpRequest): Promise<ZatcaHtt
       const durationMs = Date.now() - startedAt
       const warningCount = countMessages(body, 'warning')
       const errorCount = countMessages(body, 'error')
-      const requestId = extractRequestId(body, response.headers)
+      const requestId = extractBodyRequestId(body)
+      const globalTransactionId = extractGlobalTransactionId(response.headers)
+      const responsePayload = sanitizeZatcaResponsePayload(body)
 
-      await persistApiLog({
+      await persistZatcaApiLog({
         environment: request.environment,
         endpoint: request.endpoint,
         invoiceId: request.invoiceId,
         status: response.status,
         ok: response.ok,
         requestId,
+        globalTransactionId,
         correlationId,
         durationMs,
         errorMessage: response.ok ? null : responseMessage(body),
         attempt,
         warningCount,
         errorCount,
+        responsePayload,
       })
 
       if (response.ok || attempt >= retries || !RETRYABLE_STATUSES.has(response.status)) {
@@ -147,6 +105,7 @@ export async function postZatcaJson(request: ZatcaHttpRequest): Promise<ZatcaHtt
           ok: response.ok,
           body,
           requestId,
+          globalTransactionId,
           correlationId,
           durationMs,
           warningCount,
@@ -156,19 +115,21 @@ export async function postZatcaJson(request: ZatcaHttpRequest): Promise<ZatcaHtt
     } catch (error) {
       lastError = error
       const durationMs = Date.now() - startedAt
-      await persistApiLog({
+      await persistZatcaApiLog({
         environment: request.environment,
         endpoint: request.endpoint,
         invoiceId: request.invoiceId,
         status: 0,
         ok: false,
         requestId: '',
+        globalTransactionId: '',
         correlationId,
         durationMs,
         errorMessage: error instanceof Error ? error.message : String(error),
         attempt,
         warningCount: 0,
         errorCount: 1,
+        responsePayload: null,
       })
       if (attempt >= retries) break
     } finally {

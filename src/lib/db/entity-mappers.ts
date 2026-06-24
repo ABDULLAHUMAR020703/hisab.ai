@@ -102,6 +102,7 @@ export function mapInvoiceRow(row: Record<string, unknown>): InvoiceRecord {
     zatcaResponseMessage: (row.zatca_response_message as string | null) ?? null,
     zatcaFailureCode: (row.zatca_failure_code as string | null) ?? null,
     zatcaRequestId: (row.zatca_request_id as string | null) ?? null,
+    zatcaGlobalTransactionId: (row.zatca_global_transaction_id as string | null) ?? null,
     zatcaWarningCount: Number(row.zatca_warning_count ?? 0),
     zatcaErrorCount: Number(row.zatca_error_count ?? 0),
     zatcaResponsePayload: jsonToString(row.zatca_response_payload),

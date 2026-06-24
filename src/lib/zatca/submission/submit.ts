@@ -140,6 +140,7 @@ export async function submitInvoice(
 
     let zatcaStatus: ZatcaInvoiceStatus = 'SUBMITTED'
     let requestId: string | null = null
+    let globalTransactionId: string | null = null
     let responseCode: string | null = null
     let responseMessage: string | null = null
     let clearanceStatus: string | null = null
@@ -158,6 +159,7 @@ export async function submitInvoice(
           invoiceId,
         })
         requestId = result.requestId
+        globalTransactionId = result.globalTransactionId
         responseCode = result.responseCode
         responseMessage = result.responseMessage
         clearanceStatus = result.clearanceStatus
@@ -175,6 +177,7 @@ export async function submitInvoice(
           invoiceId,
         })
         requestId = result.requestId
+        globalTransactionId = result.globalTransactionId
         responseCode = result.responseCode
         responseMessage = result.responseMessage
         zatcaStatus = result.reportingStatus === 'REPORTED' ? 'REPORTED' : 'SUBMITTED'
@@ -189,6 +192,7 @@ export async function submitInvoice(
     await updateInvoiceZatcaFields(invoiceId, {
         zatcaStatus,
         zatcaRequestId: requestId,
+        zatcaGlobalTransactionId: globalTransactionId,
         zatcaResponseCode: responseCode,
         zatcaResponseMessage: responseMessage,
         zatcaWarningCount: warningCount,
@@ -209,7 +213,7 @@ export async function submitInvoice(
       userName: auditContext?.userName,
       companyName,
       invoiceId,
-      metadata: { route, requestId, zatcaStatus, warningCount, errorCount },
+      metadata: { route, requestId, globalTransactionId, zatcaStatus, warningCount, errorCount },
     })
 
     if (zatcaStatus === 'CLEARED') {

@@ -8,6 +8,7 @@ import {
   type ZatcaApiResponseBody,
 } from './client'
 import { postZatcaJson, zatcaResponseMessage } from './http-client'
+import { resolveZatcaTraceId } from './api-log'
 
 export interface ClearanceSubmissionInput {
   environment: ZatcaEnvironment
@@ -19,6 +20,7 @@ export interface ClearanceSubmissionInput {
 
 export interface ClearanceSubmissionResult {
   requestId: string | null
+  globalTransactionId: string | null
   clearanceStatus: string
   responseCode: string
   responseMessage: string
@@ -33,6 +35,7 @@ function mockClearanceResponse(input: ClearanceSubmissionInput): ClearanceSubmis
   const cleared = Buffer.from(input.signedXml, 'utf8').toString('base64')
   return {
     requestId: null,
+    globalTransactionId: null,
     clearanceStatus: 'CLEARED',
     responseCode: 'CLEARED',
     responseMessage: 'Mock clearance submission accepted',
@@ -88,7 +91,8 @@ export async function submitClearanceInvoice(
   const clearanceStatus = body.clearanceStatus ?? body.validationResults?.status ?? 'CLEARED'
 
   return {
-    requestId: response.requestId || body.requestID || null,
+    requestId: resolveZatcaTraceId(response.requestId, response.globalTransactionId) || null,
+    globalTransactionId: response.globalTransactionId || null,
     clearanceStatus,
     responseCode: clearanceStatus,
     responseMessage: body.validationResults?.infoMessages?.[0]?.message ?? clearanceStatus,

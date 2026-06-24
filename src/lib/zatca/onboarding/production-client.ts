@@ -10,6 +10,7 @@ import {
 } from './credential-store'
 import type { ProductionCsidResponse } from './types'
 import { postZatcaJson, zatcaResponseMessage } from '../api/http-client'
+import { resolveZatcaTraceId } from '../api/api-log'
 
 function pemToBase64Der(pem: string): string {
   return pem
@@ -41,6 +42,7 @@ function mockProductionResponse(environment: ZatcaEnvironment): ProductionCsidRe
   const token = Buffer.from(`MOCK-PROD-CSID-${environment}-${Date.now()}`).toString('base64')
   return {
     requestId: `MOCK-PROD-${Date.now()}`,
+    globalTransactionId: '',
     dispositionMessage: 'ISSUED',
     binarySecurityToken: token,
     secret: `mock-production-secret-${Date.now()}`,
@@ -114,7 +116,8 @@ export async function requestProductionCsid(
   }
 
   return {
-    requestId: body.requestID ?? '',
+    requestId: resolveZatcaTraceId(String(body.requestID ?? response.requestId), response.globalTransactionId),
+    globalTransactionId: response.globalTransactionId,
     dispositionMessage: body.dispositionMessage ?? 'ISSUED',
     binarySecurityToken: body.binarySecurityToken,
     secret: body.secret,

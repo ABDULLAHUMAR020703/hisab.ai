@@ -39,6 +39,7 @@ export interface ComplianceCsidResponse {
 
 export interface ProductionCsidResponse {
   requestId: string
+  globalTransactionId: string
   dispositionMessage: string
   binarySecurityToken: string
   secret: string

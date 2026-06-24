@@ -8,6 +8,7 @@ import {
 } from '../onboarding/credential-store'
 import { isMockSubmission, normalizeInvoiceHashForApi, resolveApiPath, type ZatcaApiResponseBody } from './client'
 import { postZatcaJson, zatcaResponseMessage } from './http-client'
+import { resolveZatcaTraceId } from './api-log'
 
 function pemToBase64Der(pem: string): string {
   return pem
@@ -39,10 +40,12 @@ export interface ComplianceInvoiceSubmissionInput {
   invoiceHash: string
   uuid: string
   signedXml: string
+  invoiceId?: string
 }
 
 export interface ComplianceInvoiceSubmissionResult {
   requestId: string
+  globalTransactionId: string
   validationStatus: string
   responseMessage: string
   rawResponse: ZatcaApiResponseBody
@@ -57,6 +60,7 @@ function mockComplianceInvoiceResponse(
 ): ComplianceInvoiceSubmissionResult {
   return {
     requestId: `MOCK-CMP-INV-${Date.now()}`,
+    globalTransactionId: '',
     validationStatus: 'PASS',
     responseMessage: 'Mock compliance invoice check passed',
       rawResponse: {
@@ -96,6 +100,7 @@ export async function submitComplianceInvoice(
   const response = await postZatcaJson({
     environment: input.environment,
     endpoint: '/compliance/invoices',
+    invoiceId: input.invoiceId,
     url,
     headers: {
       ...headers,
@@ -117,6 +122,7 @@ export async function submitComplianceInvoice(
     ok: response.ok,
     durationMs: response.durationMs,
     requestId: response.requestId || body.requestID || null,
+    globalTransactionId: response.globalTransactionId || null,
     validationStatus: body.validationResults?.status ?? null,
     errorCode: body.errors?.[0]?.code ?? body.validationResults?.errorMessages?.[0]?.code ?? null,
   })
@@ -126,7 +132,8 @@ export async function submitComplianceInvoice(
       && body.validationResults?.errorMessages?.some((m) => m.code === 'Submitted before')
     if (alreadyCompleted) {
       return {
-        requestId: response.requestId || body.requestID || '',
+        requestId: resolveZatcaTraceId(response.requestId, response.globalTransactionId),
+        globalTransactionId: response.globalTransactionId,
         validationStatus: 'PASS',
         responseMessage: 'Compliance check already completed for this invoice type',
         rawResponse: body,
@@ -142,7 +149,8 @@ export async function submitComplianceInvoice(
   const validationStatus = body.validationResults?.status ?? 'PASS'
 
   return {
-    requestId: response.requestId || body.requestID || '',
+    requestId: resolveZatcaTraceId(response.requestId, response.globalTransactionId),
+    globalTransactionId: response.globalTransactionId,
     validationStatus,
     responseMessage: body.validationResults?.infoMessages?.[0]?.message ?? validationStatus,
     rawResponse: body,

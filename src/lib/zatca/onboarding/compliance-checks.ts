@@ -27,6 +27,7 @@ export interface ComplianceCheckResult {
   passed: boolean
   validationStatus: string
   requestId?: string
+  globalTransactionId?: string
   invoiceNo?: string
   error?: string
 }
@@ -174,6 +175,7 @@ async function runSingleComplianceCheck(
       invoiceHash: invoiceHashHex,
       uuid: xmlResult.document.uuid,
       signedXml,
+      invoiceId: invoice.id,
     })
 
     const passed = submission.validationStatus === 'PASS' || submission.validationStatus === 'WARNING'
@@ -186,6 +188,7 @@ async function runSingleComplianceCheck(
         zatcaStatus: passed ? 'SUBMITTED' : 'REJECTED',
         zatcaSubmissionDate: new Date(),
         zatcaRequestId: submission.requestId,
+        zatcaGlobalTransactionId: submission.globalTransactionId || null,
         zatcaResponseCode: submission.responseCode,
         zatcaResponseMessage: submission.responseMessage,
         zatcaResponsePayload: JSON.stringify(submission.rawResponse),
@@ -199,6 +202,7 @@ async function runSingleComplianceCheck(
       passed,
       validationStatus: submission.validationStatus,
       requestId: submission.requestId,
+      globalTransactionId: submission.globalTransactionId,
       invoiceNo: invoice.invoiceNo,
     }
   } catch (error) {

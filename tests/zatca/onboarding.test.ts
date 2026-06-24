@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { generateEgsIdentity } from '../../src/lib/zatca/onboarding/egs-identity'
 import { mapOnboardingError } from '../../src/lib/zatca/onboarding/onboarding-errors'
+import { resolveOnboardingStatusAfterProductionFailure } from '../../src/lib/zatca/onboarding/onboarding-status'
 import { verifyZatcaCsr } from '../../src/lib/zatca/onboarding/verify-csr'
 import {
   isAlreadyConnected,
@@ -143,6 +144,25 @@ describe('connection helpers', () => {
     assert.equal(resolveConnectionLabel(false, 'CSR_GENERATED'), 'PENDING')
     assert.equal(resolveConnectionLabel(false, 'NOT_STARTED'), 'NOT_CONNECTED')
     assert.equal(resolveConnectionLabel(false, 'FAILED'), 'FAILED')
+  })
+
+  it('preserves valid onboarding status after production CSID failure', () => {
+    assert.equal(
+      resolveOnboardingStatusAfterProductionFailure('PRODUCTION_ISSUED', true),
+      'PRODUCTION_ISSUED',
+    )
+    assert.equal(
+      resolveOnboardingStatusAfterProductionFailure('COMPLIANCE_ISSUED', true),
+      'COMPLIANCE_ISSUED',
+    )
+    assert.equal(
+      resolveOnboardingStatusAfterProductionFailure('CSR_GENERATED', false),
+      'FAILED',
+    )
+    assert.equal(
+      resolveOnboardingStatusAfterProductionFailure('CSR_GENERATED', true),
+      'COMPLIANCE_ISSUED',
+    )
   })
 })
 
