@@ -1,4 +1,5 @@
 import type { InvoiceType } from '@/lib/db/prisma-types'
+import { isStandardTaxInvoice } from '../constants'
 import {
   mergeValidationResults,
   validateZatcaDocument,
@@ -57,10 +58,11 @@ export function validateCompanyForZatca(settings: ZatcaCompanySettingsInput): Za
 export function validateCustomerForZatca(
   customer: ZatcaCustomerInput,
   invoiceType: InvoiceType,
+  invoiceTypeCodeNameOverride?: string,
 ): ZatcaValidationResult {
   const errors: ZatcaValidationIssue[] = []
 
-  if (invoiceType === 'STANDARD') {
+  if (isStandardTaxInvoice({ invoiceType, invoiceTypeCodeNameOverride })) {
     if (!customer.taxId?.trim()) {
       errors.push(error('CUSTOMER_VAT_REQUIRED', 'customer.taxId', 'Customer VAT TRN is required for standard invoices'))
     } else if (!isSaudiVatTrn(customer.taxId)) {
@@ -147,7 +149,7 @@ export function validateFullSubmissionPipeline(
   return mergeValidationResults(
     validateZatcaInvoiceInput(input),
     validateCompanyForZatca(input.companySettings),
-    validateCustomerForZatca(input.customer, input.invoiceType),
+    validateCustomerForZatca(input.customer, input.invoiceType, input.invoiceTypeCodeNameOverride),
     validateInvoiceFieldsForSubmission(input),
     documentValidation,
   )

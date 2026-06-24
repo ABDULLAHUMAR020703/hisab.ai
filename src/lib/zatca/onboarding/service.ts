@@ -213,10 +213,11 @@ export async function requestAndStoreProductionCsid(auditContext?: OnboardingAud
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
+    const priorStatus = await getOnboardingStatus(environment)
     await storeCredentials({
       environment,
       companySettingsId: settings.id,
-      onboardingStatus: 'FAILED',
+      onboardingStatus: priorStatus.hasComplianceCsid ? 'COMPLIANCE_ISSUED' : 'FAILED',
       lastError: message,
     })
     await logZatcaAudit({

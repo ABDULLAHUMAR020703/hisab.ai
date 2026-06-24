@@ -11,9 +11,16 @@ import { enrichZatcaInvoiceInput, loadZatcaInvoiceById } from '../invoice-servic
 import { signAndEmbedPhase2Qr } from '../invoice-signing'
 import { loadComplianceSigningCredentials } from '../signature/certificate'
 import { validateFullSubmissionPipeline } from '../validation/hardening'
+import type { ZatcaDocumentProfile } from '../types'
 import type { OnboardingAuditContext } from './types'
 
-export type ComplianceCheckScenario = 'STANDARD' | 'SIMPLIFIED' | 'CREDIT_NOTE' | 'DEBIT_NOTE'
+export type ComplianceCheckScenario =
+  | 'STANDARD'
+  | 'SIMPLIFIED'
+  | 'CREDIT_NOTE'
+  | 'DEBIT_NOTE'
+  | 'STANDARD_CREDIT_NOTE'
+  | 'STANDARD_DEBIT_NOTE'
 
 export interface ComplianceCheckResult {
   scenario: ComplianceCheckScenario
@@ -29,13 +36,60 @@ export interface ComplianceChecksSummary {
   results: ComplianceCheckResult[]
 }
 
-const SCENARIOS: ComplianceCheckScenario[] = ['STANDARD', 'SIMPLIFIED', 'CREDIT_NOTE', 'DEBIT_NOTE']
+interface ComplianceScenarioConfig {
+  dbInvoiceType: InvoiceType
+  invoiceTypeCodeName: string
+  profileIdOverride?: ZatcaDocumentProfile
+  billingReferenceFrom?: 'STANDARD' | 'SIMPLIFIED'
+}
+
+const SCENARIO_CONFIG: Record<ComplianceCheckScenario, ComplianceScenarioConfig> = {
+  STANDARD: {
+    dbInvoiceType: 'STANDARD',
+    invoiceTypeCodeName: '0100000',
+    profileIdOverride: 'reporting:1.0',
+  },
+  SIMPLIFIED: {
+    dbInvoiceType: 'SIMPLIFIED',
+    invoiceTypeCodeName: '0200000',
+  },
+  CREDIT_NOTE: {
+    dbInvoiceType: 'CREDIT_NOTE',
+    invoiceTypeCodeName: '0200000',
+    billingReferenceFrom: 'SIMPLIFIED',
+  },
+  DEBIT_NOTE: {
+    dbInvoiceType: 'DEBIT_NOTE',
+    invoiceTypeCodeName: '0200000',
+    billingReferenceFrom: 'SIMPLIFIED',
+  },
+  STANDARD_CREDIT_NOTE: {
+    dbInvoiceType: 'CREDIT_NOTE',
+    invoiceTypeCodeName: '0100000',
+    profileIdOverride: 'reporting:1.0',
+    billingReferenceFrom: 'STANDARD',
+  },
+  STANDARD_DEBIT_NOTE: {
+    dbInvoiceType: 'DEBIT_NOTE',
+    invoiceTypeCodeName: '0100000',
+    profileIdOverride: 'reporting:1.0',
+    billingReferenceFrom: 'STANDARD',
+  },
+}
+
+const SCENARIOS: ComplianceCheckScenario[] = [
+  'STANDARD',
+  'SIMPLIFIED',
+  'CREDIT_NOTE',
+  'DEBIT_NOTE',
+  'STANDARD_CREDIT_NOTE',
+  'STANDARD_DEBIT_NOTE',
+]
 
 async function createComplianceTestInvoice(
   invoiceType: InvoiceType,
   userId: string,
   customerId: string,
-  billingReferenceId?: string,
 ) {
   const now = new Date()
   const seq = await prisma.sequence.upsert({
@@ -81,13 +135,13 @@ async function runSingleComplianceCheck(
   customerId: string,
   billingReferenceId?: string,
 ): Promise<ComplianceCheckResult> {
+  const config = SCENARIO_CONFIG[scenario]
   let invoiceNo: string | undefined
   try {
     const invoice = await createComplianceTestInvoice(
-      scenario,
+      config.dbInvoiceType,
       userId,
       customerId,
-      billingReferenceId,
     )
     invoiceNo = invoice.invoiceNo
     const loaded = await loadZatcaInvoiceById(invoice.id)
@@ -96,10 +150,11 @@ async function runSingleComplianceCheck(
     const enrichedInput = await enrichZatcaInvoiceInput({
       ...loaded.input,
       billingReferenceId,
-      profileIdOverride: scenario === 'STANDARD' ? 'reporting:1.0' : undefined,
+      profileIdOverride: config.profileIdOverride,
+      invoiceTypeCodeNameOverride: config.invoiceTypeCodeName,
     }, invoice.id)
     const xmlResult = generateZatcaInvoiceXml(enrichedInput)
-    const validation = validateFullSubmissionPipeline(loaded.input, xmlResult.validation)
+    const validation = validateFullSubmissionPipeline(enrichedInput, xmlResult.validation)
     if (!validation.valid) {
       throw new Error(validation.errors.map((e) => e.message).join('; '))
     }
@@ -158,7 +213,7 @@ async function runSingleComplianceCheck(
 }
 
 /**
- * Submits sample Standard, Simplified, Credit, and Debit invoices to ZATCA /compliance/invoices.
+ * Submits sample invoices to ZATCA /compliance/invoices for all required compliance steps.
  */
 export async function runComplianceChecks(
   environment: ZatcaEnvironment,
@@ -170,10 +225,6 @@ export async function runComplianceChecks(
   const user = await prisma.user.findFirst({ where: { isActive: true } })
   if (!user) throw new Error('No active user found for compliance checks')
 
-  // Standard tax invoices require a buyer with a valid 15-digit VAT TRN. Reuse an
-  // existing customer only if it already has one; otherwise create/ensure a
-  // dedicated compliance customer with a valid buyer TRN so the STANDARD scenario
-  // passes (a precondition for issuing the Production CSID).
   const COMPLIANCE_BUYER_VAT = '399999999900003'
   let customer = await prisma.customer.findFirst({
     where: { isActive: true, taxId: { not: null } },
@@ -208,15 +259,22 @@ export async function runComplianceChecks(
   })
 
   const results: ComplianceCheckResult[] = []
+  let standardReferenceInvoiceNo: string | undefined
   let simplifiedReferenceInvoiceNo: string | undefined
 
   for (const scenario of SCENARIOS) {
-    const billingReferenceId = scenario === 'CREDIT_NOTE' || scenario === 'DEBIT_NOTE'
-      ? simplifiedReferenceInvoiceNo
-      : undefined
+    const config = SCENARIO_CONFIG[scenario]
+    let billingReferenceId: string | undefined
+    if (config.billingReferenceFrom === 'STANDARD') {
+      billingReferenceId = standardReferenceInvoiceNo
+    } else if (config.billingReferenceFrom === 'SIMPLIFIED') {
+      billingReferenceId = simplifiedReferenceInvoiceNo
+    }
 
-    if (billingReferenceId === undefined && (scenario === 'CREDIT_NOTE' || scenario === 'DEBIT_NOTE')) {
-      throw new Error('SIMPLIFIED compliance invoice must be created before credit/debit checks')
+    if (config.billingReferenceFrom && !billingReferenceId) {
+      throw new Error(
+        `${config.billingReferenceFrom} compliance invoice must be created before ${scenario}`,
+      )
     }
 
     const result = await runSingleComplianceCheck(
@@ -228,6 +286,9 @@ export async function runComplianceChecks(
     )
     results.push(result)
 
+    if (scenario === 'STANDARD' && result.invoiceNo) {
+      standardReferenceInvoiceNo = result.invoiceNo
+    }
     if (scenario === 'SIMPLIFIED' && result.invoiceNo) {
       simplifiedReferenceInvoiceNo = result.invoiceNo
     }
@@ -255,5 +316,76 @@ export async function runComplianceChecks(
     metadata: { environment, passed, results },
   })
 
+  return { passed, results }
+}
+
+/** Runs only the standard credit/debit note compliance scenarios (for incremental ZATCA steps). */
+export async function runStandardNoteComplianceChecks(
+  environment: ZatcaEnvironment,
+  auditContext?: OnboardingAuditContext,
+): Promise<ComplianceChecksSummary> {
+  const settings = await getSettingsRepository().findFirst()
+  if (!settings) throw new Error('Company settings not found')
+
+  const user = await prisma.user.findFirst({ where: { isActive: true } })
+  if (!user) throw new Error('No active user found for compliance checks')
+
+  const COMPLIANCE_BUYER_VAT = '399999999900003'
+  let customer = await prisma.customer.findFirst({
+    where: { isActive: true, taxId: { not: null } },
+  })
+  if (customer && (customer.taxId?.replace(/\D/g, '').length ?? 0) !== 15) {
+    customer = null
+  }
+  if (!customer) {
+    customer = await prisma.customer.upsert({
+      where: { customerNo: 'ZATCA-COMPLIANCE' },
+      update: { taxId: COMPLIANCE_BUYER_VAT, isActive: true },
+      create: {
+        customerNo: 'ZATCA-COMPLIANCE',
+        name: 'ZATCA Compliance Test Customer',
+        taxId: COMPLIANCE_BUYER_VAT,
+        streetAddress: settings.streetAddress || 'King Fahd Road',
+        city: settings.city || 'Riyadh',
+        postalCode: settings.postalCode || '12345',
+        country: 'Saudi Arabia',
+      },
+    })
+  }
+
+  const standardReference = await prisma.invoice.findFirst({
+    where: { invoiceType: 'STANDARD', zatcaResponseCode: 'PASS' },
+    orderBy: { zatcaSubmissionDate: 'desc' },
+    select: { invoiceNo: true },
+  })
+  if (!standardReference?.invoiceNo) {
+    throw new Error('A passed STANDARD compliance invoice is required before standard credit/debit checks')
+  }
+
+  const noteScenarios: ComplianceCheckScenario[] = ['STANDARD_CREDIT_NOTE', 'STANDARD_DEBIT_NOTE']
+  const results: ComplianceCheckResult[] = []
+
+  for (const scenario of noteScenarios) {
+    const result = await runSingleComplianceCheck(
+      scenario,
+      environment,
+      user.id,
+      customer.id,
+      standardReference.invoiceNo,
+    )
+    results.push(result)
+
+    await logZatcaAudit({
+      action: 'COMPLIANCE_CHECK_SCENARIO',
+      result: result.passed ? 'SUCCESS' : 'FAILED',
+      message: `${scenario}: ${result.validationStatus}`,
+      userId: auditContext?.userId,
+      userName: auditContext?.userName,
+      companyName: settings.companyName,
+      metadata: { ...result },
+    })
+  }
+
+  const passed = results.every((r) => r.passed)
   return { passed, results }
 }

@@ -380,9 +380,9 @@ export default function SettingsPage() {
             )}
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
-            {(['STANDARD', 'SIMPLIFIED', 'CREDIT_NOTE', 'DEBIT_NOTE'] as const).map((scenario) => {
+            {(['STANDARD', 'SIMPLIFIED', 'CREDIT_NOTE', 'DEBIT_NOTE', 'STANDARD_CREDIT_NOTE', 'STANDARD_DEBIT_NOTE'] as const).map((scenario) => {
               const result = onboarding?.compliance?.results.find((item) => item.scenario === scenario)
-              const label = scenario.replace('_', ' ')
+              const label = scenario.replaceAll('_', ' ')
               const status = result?.validationStatus || (result?.passed ? 'PASS' : result ? 'FAIL' : 'NOT RUN')
               return (
                 <div key={scenario} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs">

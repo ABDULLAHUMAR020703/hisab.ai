@@ -2,9 +2,10 @@ import { randomUUID } from 'crypto'
 import {
   ZATCA_FIRST_PIH_BASE64,
   ZATCA_INVOICE_TYPE_CODE,
-  ZATCA_INVOICE_TYPE_NAME,
   ZATCA_PROFILE_BY_TYPE,
   DEFAULT_UNIT_CODE,
+  isStandardTaxInvoice,
+  resolveInvoiceTypeCodeName,
   SAUDI_COUNTRY_CODE,
   SAUDI_VAT_RATE,
 } from './constants'
@@ -101,9 +102,9 @@ function buildSupplierParty(settings: ZatcaCompanySettingsInput): ZatcaParty {
 
 function buildCustomerParty(
   customer: ZatcaCustomerInput,
-  invoiceType: ZatcaInvoiceInput['invoiceType'],
+  input: Pick<ZatcaInvoiceInput, 'invoiceType' | 'invoiceTypeCodeNameOverride'>,
 ): ZatcaParty {
-  const isStandard = invoiceType === 'STANDARD'
+  const isStandard = isStandardTaxInvoice(input)
 
   return {
     registrationName: customer.name.trim(),
@@ -199,12 +200,12 @@ export function mapInvoiceToZatcaDocument(input: ZatcaInvoiceInput): ZatcaInvoic
     issueDate: formatDate(input.date),
     issueTime: formatIssueTime(input.date, input.issueTime),
     invoiceTypeCode: ZATCA_INVOICE_TYPE_CODE[invoiceType],
-    invoiceTypeCodeName: ZATCA_INVOICE_TYPE_NAME[invoiceType],
+    invoiceTypeCodeName: resolveInvoiceTypeCodeName(input),
     documentCurrencyCode: currency,
     taxCurrencyCode: currency,
     additionalDocumentReferences,
     supplier: buildSupplierParty(input.companySettings),
-    customer: buildCustomerParty(input.customer, invoiceType),
+    customer: buildCustomerParty(input.customer, input),
     taxTotal: {
       taxAmount,
       subtotals: taxSubtotals.length

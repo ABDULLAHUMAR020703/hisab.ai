@@ -60,3 +60,28 @@ export const AMOUNT_TOLERANCE = 0.02
 
 /** Saudi VAT TRN length */
 export const SAUDI_VAT_TRN_LENGTH = 15
+
+type InvoiceTypeKey = keyof typeof ZATCA_INVOICE_TYPE_NAME
+
+export function resolveInvoiceTypeCodeName(input: {
+  invoiceType: InvoiceTypeKey
+  invoiceTypeCodeNameOverride?: string
+}): string {
+  return input.invoiceTypeCodeNameOverride ?? ZATCA_INVOICE_TYPE_NAME[input.invoiceType]
+}
+
+/** True when InvoiceTypeCode @name is 0100000 (standard tax invoice family). */
+export function isStandardTaxInvoice(input: {
+  invoiceType: InvoiceTypeKey
+  invoiceTypeCodeNameOverride?: string
+}): boolean {
+  return resolveInvoiceTypeCodeName(input).startsWith('01')
+}
+
+/** True when InvoiceTypeCode @name is 0200000 (simplified tax invoice family). */
+export function isSimplifiedTaxInvoice(input: {
+  invoiceType: InvoiceTypeKey
+  invoiceTypeCodeNameOverride?: string
+}): boolean {
+  return resolveInvoiceTypeCodeName(input).startsWith('02')
+}

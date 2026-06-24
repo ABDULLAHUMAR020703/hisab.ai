@@ -191,4 +191,6 @@ export interface ZatcaInvoiceInput {
   billingReferenceId?: string
   /** Optional profile override (e.g. compliance API requires reporting:1.0 for standard samples). */
   profileIdOverride?: ZatcaDocumentProfile
+  /** Optional InvoiceTypeCode @name override (e.g. 0100000 standard credit/debit notes). */
+  invoiceTypeCodeNameOverride?: string
 }

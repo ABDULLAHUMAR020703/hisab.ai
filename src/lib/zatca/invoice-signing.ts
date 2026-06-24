@@ -1,4 +1,5 @@
 import type { ZatcaInvoiceInput } from './types'
+import { isSimplifiedTaxInvoice } from './constants'
 import {
   embedQrInInvoiceXml,
   generatePhase2QrPayload,
@@ -11,8 +12,8 @@ export interface SignedInvoiceWithQrResult {
   qrPayload: string | null
 }
 
-function shouldEmbedQrInXml(invoiceType: ZatcaInvoiceInput['invoiceType']): boolean {
-  return invoiceType === 'SIMPLIFIED' || invoiceType === 'CREDIT_NOTE' || invoiceType === 'DEBIT_NOTE'
+function shouldEmbedQrInXml(input: ZatcaInvoiceInput): boolean {
+  return isSimplifiedTaxInvoice(input)
 }
 
 const QR_PLACEHOLDER = 'UEFSQ0VIT0xERVI='
@@ -26,13 +27,13 @@ export function signAndEmbedPhase2Qr(
   certificatePem: string,
   privateKeyPem: string,
 ): SignedInvoiceWithQrResult {
-  const xmlToSign = shouldEmbedQrInXml(input.invoiceType)
+  const xmlToSign = shouldEmbedQrInXml(input)
     ? embedQrInInvoiceXml(unsignedXml, QR_PLACEHOLDER)
     : unsignedXml
 
   const signResult = signInvoiceXmlDetailed(xmlToSign, certificatePem, privateKeyPem)
 
-  if (!shouldEmbedQrInXml(input.invoiceType)) {
+  if (!shouldEmbedQrInXml(input)) {
     return {
       signedXml: signResult.signedXml,
       invoiceHashHex: signResult.invoiceHashHex,
