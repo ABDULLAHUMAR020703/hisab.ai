@@ -22,6 +22,7 @@ import { submitClearanceInvoice } from '../api/clearance'
 import { submitReportingInvoice } from '../api/reporting'
 import { getSubmissionRoute } from '../submission/router'
 import { validateFullSubmissionPipeline } from '../validation/hardening'
+import { updateInvoiceZatcaFields } from '../persistence'
 
 export type SandboxScenario = 'STANDARD' | 'SIMPLIFIED' | 'CREDIT_NOTE' | 'DEBIT_NOTE'
 
@@ -255,13 +256,26 @@ export async function runSandboxScenario(scenario: SandboxScenario): Promise<San
     const uuid = xmlResult.document.uuid
 
     let actualStatus: string
+    let requestId: string | null = null
+    let responseCode: string | null = null
+    let responseMessage: string | null = null
+    let rawResponse: Record<string, unknown> = {}
+    let warningCount = 0
+    let errorCount = 0
     if (route === 'clearance') {
       const result = await submitClearanceInvoice({
         environment: settings.zatcaEnvironment,
         invoiceHash: invoiceHashHex,
         uuid,
         signedXml,
+        invoiceId: invoice.id,
       })
+      requestId = result.requestId
+      responseCode = result.responseCode
+      responseMessage = result.responseMessage
+      rawResponse = result.rawResponse as Record<string, unknown>
+      warningCount = result.warningCount
+      errorCount = result.errorCount
       actualStatus = result.clearanceStatus === 'CLEARED' ? 'CLEARED' : 'SUBMITTED'
       steps.push({ step: 'Clearance', passed: actualStatus === 'CLEARED', detail: result.clearanceStatus })
     } else {
@@ -270,7 +284,14 @@ export async function runSandboxScenario(scenario: SandboxScenario): Promise<San
         invoiceHash: invoiceHashHex,
         uuid,
         signedXml,
+        invoiceId: invoice.id,
       })
+      requestId = result.requestId
+      responseCode = result.responseCode
+      responseMessage = result.responseMessage
+      rawResponse = result.rawResponse as Record<string, unknown>
+      warningCount = result.warningCount
+      errorCount = result.errorCount
       actualStatus = result.reportingStatus === 'REPORTED' ? 'REPORTED' : 'SUBMITTED'
       steps.push({ step: 'Reporting', passed: actualStatus === 'REPORTED', detail: result.reportingStatus })
     }
@@ -278,14 +299,17 @@ export async function runSandboxScenario(scenario: SandboxScenario): Promise<San
     const expectedStatus = EXPECTED_STATUS[scenario]
     const passed = actualStatus === expectedStatus
 
-    await prisma.invoice.update({
-      where: { id: invoice.id },
-      data: {
-        invoiceHash: invoiceHashHex,
-        signedXml,
-        zatcaStatus: actualStatus as 'CLEARED' | 'REPORTED',
-        zatcaSubmissionDate: new Date(),
-      },
+    await updateInvoiceZatcaFields(invoice.id, {
+      invoiceHash: invoiceHashHex,
+      signedXml,
+      zatcaStatus: actualStatus as 'CLEARED' | 'REPORTED',
+      zatcaRequestId: requestId,
+      zatcaResponseCode: responseCode,
+      zatcaResponseMessage: responseMessage,
+      zatcaResponsePayload: JSON.stringify(rawResponse),
+      zatcaWarningCount: warningCount,
+      zatcaErrorCount: errorCount,
+      zatcaSubmissionDate: new Date(),
     })
 
     steps.push({ step: 'Status', passed, detail: `${actualStatus} (expected ${expectedStatus})` })

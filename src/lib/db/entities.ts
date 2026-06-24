@@ -106,6 +106,8 @@ export interface InvoiceRecord {
   zatcaResponseMessage: string | null
   zatcaFailureCode: string | null
   zatcaRequestId: string | null
+  zatcaWarningCount: number
+  zatcaErrorCount: number
   zatcaResponsePayload: string | null
   clearedInvoicePayload: string | null
   signedXml: string | null

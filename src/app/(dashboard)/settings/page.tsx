@@ -1,7 +1,7 @@
 ﻿'use client'
 
 import { useEffect, useState } from 'react'
-import { Save, Building2, Shield, Link2, Loader2 } from 'lucide-react'
+import { Save, Building2, Shield, Link2, Loader2, Wifi } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
@@ -33,6 +33,17 @@ interface OnboardingStatus {
   onboardingStatus: string
   onboardedAt: string | null
   lastError: string | null
+  compliance?: {
+    passed: boolean | null
+    createdAt: string | null
+    results: Array<{
+      scenario: string
+      passed: boolean
+      validationStatus?: string
+      error?: string
+      requestId?: string
+    }>
+  }
 }
 
 const CONNECTION_BADGES: Record<OnboardingStatus['connectionStatus'], { label: string; className: string }> = {
@@ -69,6 +80,16 @@ export default function SettingsPage() {
   const [connecting, setConnecting] = useState(false)
   const [onboardingMsg, setOnboardingMsg] = useState<string | null>(null)
   const [onboardingErr, setOnboardingErr] = useState<string | null>(null)
+  const [testingConnection, setTestingConnection] = useState(false)
+  const [connectionTest, setConnectionTest] = useState<{
+    ok: boolean
+    message: string
+    environment: string
+    timestamp: string
+    hasPrivateKey?: boolean
+    hasCertificate?: boolean
+    hasSecret?: boolean
+  } | null>(null)
 
   async function loadOnboardingStatus() {
     const res = await fetch('/api/zatca/onboarding/status')
@@ -194,6 +215,39 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleTestConnection() {
+    setTestingConnection(true)
+    setConnectionTest(null)
+
+    try {
+      const res = await fetch('/api/zatca/onboarding/test-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ environment: settings.zatcaEnvironment }),
+      })
+      const data = await res.json().catch(() => ({}))
+      setConnectionTest({
+        ok: res.ok && Boolean(data.ok),
+        message: data.message || data.error || 'Connection test failed',
+        environment: data.environment || settings.zatcaEnvironment,
+        timestamp: new Date().toISOString(),
+        hasPrivateKey: data.hasPrivateKey,
+        hasCertificate: data.hasCertificate,
+        hasSecret: data.hasSecret,
+      })
+      await loadOnboardingStatus()
+    } catch (error) {
+      setConnectionTest({
+        ok: false,
+        message: error instanceof Error ? error.message : 'Connection test failed',
+        environment: settings.zatcaEnvironment,
+        timestamp: new Date().toISOString(),
+      })
+    } finally {
+      setTestingConnection(false)
+    }
+  }
+
   const f = (field: keyof Settings, val: string) => setSettings((s) => ({ ...s, [field]: val }))
 
   return (
@@ -287,6 +341,65 @@ export default function SettingsPage() {
             )}
           </div>
         )}
+
+        <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">Connection Test</h3>
+              <p className="text-xs text-slate-400">Checks stored credentials can be decrypted for the selected environment.</p>
+            </div>
+            <Button variant="outline" onClick={handleTestConnection} loading={testingConnection}>
+              {testingConnection ? <Loader2 size={15} className="animate-spin" /> : <Wifi size={15} />}
+              Test ZATCA Connection
+            </Button>
+          </div>
+          {connectionTest && (
+            <div className={`rounded-lg border px-3 py-2 text-sm ${connectionTest.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'}`}>
+              <p className="font-medium">{connectionTest.ok ? 'Success' : 'Failure'} - {connectionTest.environment}</p>
+              <p className="text-xs mt-1">{connectionTest.message}</p>
+              <p className="text-[11px] mt-1 opacity-80">
+                {new Date(connectionTest.timestamp).toLocaleString()} - key {connectionTest.hasPrivateKey ? 'ok' : 'missing'}, certificate {connectionTest.hasCertificate ? 'ok' : 'missing'}, secret {connectionTest.hasSecret ? 'ok' : 'missing'}
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">Compliance Status</h3>
+              <p className="text-xs text-slate-400">
+                Latest ZATCA compliance invoice suite
+                {onboarding?.compliance?.createdAt ? ` - ${new Date(onboarding.compliance.createdAt).toLocaleString()}` : ''}
+              </p>
+            </div>
+            {onboarding?.compliance?.passed !== null && onboarding?.compliance?.passed !== undefined && (
+              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${onboarding.compliance.passed ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                {onboarding.compliance.passed ? 'PASS' : 'FAIL'}
+              </span>
+            )}
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {(['STANDARD', 'SIMPLIFIED', 'CREDIT_NOTE', 'DEBIT_NOTE'] as const).map((scenario) => {
+              const result = onboarding?.compliance?.results.find((item) => item.scenario === scenario)
+              const label = scenario.replace('_', ' ')
+              const status = result?.validationStatus || (result?.passed ? 'PASS' : result ? 'FAIL' : 'NOT RUN')
+              return (
+                <div key={scenario} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-slate-700">{label}</span>
+                    <span className={result?.passed ? 'font-semibold text-emerald-600' : result ? 'font-semibold text-red-600' : 'font-semibold text-slate-400'}>
+                      {status}
+                    </span>
+                  </div>
+                  <p className="mt-1 truncate text-slate-500" title={result?.error || result?.requestId || ''}>
+                    {result?.error || result?.requestId || 'No result yet'}
+                  </p>
+                </div>
+              )
+            })}
+          </div>
+        </div>
 
         <Input
           label="OTP from Fatoora Portal"

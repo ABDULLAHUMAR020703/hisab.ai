@@ -1,8 +1,13 @@
 import 'server-only'
 import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
 import { buildBasicAuthHeader } from '../signature/certificate'
-import { getDecryptedCertificate, getDecryptedSecret } from '../onboarding/credential-store'
-import { isMockSubmission, resolveApiPath, type ZatcaApiResponseBody } from './client'
+import {
+  getDecryptedBinarySecurityToken,
+  getDecryptedCertificate,
+  getDecryptedSecret,
+} from '../onboarding/credential-store'
+import { isMockSubmission, normalizeInvoiceHashForApi, resolveApiPath, type ZatcaApiResponseBody } from './client'
+import { postZatcaJson, zatcaResponseMessage } from './http-client'
 
 function pemToBase64Der(pem: string): string {
   return pem
@@ -20,7 +25,7 @@ async function buildComplianceAuthHeaders(environment: ZatcaEnvironment) {
   if (!secret) {
     throw new Error('Compliance secret required for compliance invoice checks')
   }
-  const csidToken = pemToBase64Der(certificatePem)
+  const csidToken = await getDecryptedBinarySecurityToken(environment) ?? pemToBase64Der(certificatePem)
   return {
     Authorization: buildBasicAuthHeader(csidToken, secret),
     Accept: 'application/json',
@@ -42,6 +47,9 @@ export interface ComplianceInvoiceSubmissionResult {
   responseMessage: string
   rawResponse: ZatcaApiResponseBody
   submittedAt: Date
+  responseCode: string
+  warningCount: number
+  errorCount: number
 }
 
 function mockComplianceInvoiceResponse(
@@ -51,11 +59,14 @@ function mockComplianceInvoiceResponse(
     requestId: `MOCK-CMP-INV-${Date.now()}`,
     validationStatus: 'PASS',
     responseMessage: 'Mock compliance invoice check passed',
-    rawResponse: {
-      validationResults: { status: 'PASS' },
-      requestID: `MOCK-CMP-INV-${Date.now()}`,
-    },
-    submittedAt: new Date(),
+      rawResponse: {
+        validationResults: { status: 'PASS' },
+        requestID: `MOCK-CMP-INV-${Date.now()}`,
+      },
+      submittedAt: new Date(),
+      responseCode: 'PASS',
+      warningCount: 0,
+      errorCount: 0,
   }
 }
 
@@ -74,35 +85,56 @@ export async function submitComplianceInvoice(
   const headers = await buildComplianceAuthHeaders(input.environment)
   const invoiceBase64 = Buffer.from(input.signedXml, 'utf8').toString('base64')
 
-  const response = await fetch(url, {
-    method: 'POST',
+  console.log('[ZATCA] Compliance invoice request started', {
+    endpoint: '/compliance/invoices',
+    environment: input.environment,
+    uuid: input.uuid,
+    invoiceHashPrefix: normalizeInvoiceHashForApi(input.invoiceHash).slice(0, 12),
+    invoiceBytes: invoiceBase64.length,
+  })
+
+  const response = await postZatcaJson({
+    environment: input.environment,
+    endpoint: '/compliance/invoices',
+    url,
     headers: {
       ...headers,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      invoiceHash: input.invoiceHash,
+    body: {
+      invoiceHash: normalizeInvoiceHashForApi(input.invoiceHash),
       uuid: input.uuid,
       invoice: invoiceBase64,
-    }),
+    },
   })
 
-  const body = (await response.json().catch(() => ({}))) as ZatcaApiResponseBody
+  const body = response.body
+
+  console.log('[ZATCA] Compliance invoice response received', {
+    endpoint: '/compliance/invoices',
+    environment: input.environment,
+    status: response.status,
+    ok: response.ok,
+    durationMs: response.durationMs,
+    requestId: response.requestId || body.requestID || null,
+    validationStatus: body.validationResults?.status ?? null,
+    errorCode: body.errors?.[0]?.code ?? body.validationResults?.errorMessages?.[0]?.code ?? null,
+  })
 
   if (!response.ok) {
-    const message = body.errors?.[0]?.message
-      ?? body.validationResults?.errorMessages?.[0]?.message
-      ?? `Compliance invoice check failed (${response.status})`
-    throw new Error(message)
+    throw new Error(zatcaResponseMessage(body, `Compliance invoice check failed (${response.status})`))
   }
 
   const validationStatus = body.validationResults?.status ?? 'PASS'
 
   return {
-    requestId: body.requestID ?? '',
+    requestId: response.requestId || body.requestID || '',
     validationStatus,
     responseMessage: body.validationResults?.infoMessages?.[0]?.message ?? validationStatus,
     rawResponse: body,
     submittedAt: new Date(),
+    responseCode: validationStatus,
+    warningCount: response.warningCount,
+    errorCount: response.errorCount,
   }
 }

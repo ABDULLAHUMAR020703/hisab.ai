@@ -57,6 +57,12 @@ export async function upsertCredential(
   if (input.requestId !== undefined) row.request_id = input.requestId
   if (input.complianceCsid !== undefined) row.compliance_csid = input.complianceCsid
   if (input.productionCsid !== undefined) row.production_csid = input.productionCsid
+  if (input.complianceCertIssuedAt !== undefined) row.compliance_cert_issued_at = input.complianceCertIssuedAt
+  if (input.complianceCertValidFrom !== undefined) row.compliance_cert_valid_from = input.complianceCertValidFrom
+  if (input.complianceCertValidTo !== undefined) row.compliance_cert_valid_to = input.complianceCertValidTo
+  if (input.productionCertIssuedAt !== undefined) row.production_cert_issued_at = input.productionCertIssuedAt
+  if (input.productionCertValidFrom !== undefined) row.production_cert_valid_from = input.productionCertValidFrom
+  if (input.productionCertValidTo !== undefined) row.production_cert_valid_to = input.productionCertValidTo
   if (input.onboardingStatus !== undefined) row.onboarding_status = input.onboardingStatus
   if (input.lastError !== undefined) row.last_error = input.lastError
   if (input.onboardedAt !== undefined) row.onboarded_at = input.onboardedAt
@@ -77,6 +83,9 @@ export async function upsertCredential(
   if (input.secretEnc !== undefined) row.secret_enc = input.secretEnc
   if (input.binarySecurityTokenEnc !== undefined) {
     row.binary_security_token_enc = input.binarySecurityTokenEnc
+  }
+  if (input.productionBinarySecurityTokenEnc !== undefined) {
+    row.production_binary_security_token_enc = input.productionBinarySecurityTokenEnc
   }
 
   const { data, error } = await supabase

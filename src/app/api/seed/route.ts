@@ -1,13 +1,13 @@
-import { ensureDemoSupabaseUsers } from '@/lib/supabase/auth-users'
+import { seedQaData } from '@/lib/qa-seed'
 
 export async function POST() {
   try {
-    await ensureDemoSupabaseUsers()
+    const qa = await seedQaData()
 
     return Response.json({
       success: true,
-      message: 'Supabase is configured. Demo users are available; business data is stored in Supabase.',
-      qa: { status: 'supabase-ready', customers: 0, inventory: 0, invoices: 0, vendors: 0 },
+      message: qa.message,
+      qa,
     })
   } catch (error) {
     console.error('Seed error:', error)

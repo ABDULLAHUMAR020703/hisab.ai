@@ -62,7 +62,7 @@ async function assertSubmissionReady(invoiceId: string) {
   const cred = await getCredential(settings.zatcaEnvironment)
   const readiness = validateSubmissionReadiness({
     zatcaEnabled: settings.zatcaEnabled,
-    hasCertificate: Boolean(cred?.certificate || cred?.productionCertificate),
+    hasCertificate: Boolean(cred?.certificateEnc || cred?.certificate || cred?.productionCertificateEnc || cred?.productionCertificate),
     environment: settings.zatcaEnvironment,
   })
 
@@ -113,8 +113,9 @@ export async function submitInvoice(
     let signingCreds
     try {
       signingCreds = await loadSigningCredentials(environment)
-    } catch {
-      throw new ZatcaError('MISSING_CREDENTIALS', 'Unable to load signing credentials')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to load signing credentials'
+      throw new ZatcaError('MISSING_CREDENTIALS', message)
     }
 
     const { signedXml, invoiceHashHex } = signAndEmbedPhase2Qr(
@@ -144,6 +145,8 @@ export async function submitInvoice(
     let clearanceStatus: string | null = null
     let clearedInvoicePayload: string | null = null
     let rawResponse: Record<string, unknown> = {}
+    let warningCount = 0
+    let errorCount = 0
 
     try {
       if (route === 'clearance') {
@@ -152,6 +155,7 @@ export async function submitInvoice(
           invoiceHash: submissionHash,
           uuid,
           signedXml,
+          invoiceId,
         })
         requestId = result.requestId
         responseCode = result.responseCode
@@ -160,18 +164,23 @@ export async function submitInvoice(
         clearedInvoicePayload = result.clearedInvoice ?? null
         zatcaStatus = result.clearanceStatus === 'CLEARED' ? 'CLEARED' : 'SUBMITTED'
         rawResponse = result.rawResponse as Record<string, unknown>
+        warningCount = result.warningCount
+        errorCount = result.errorCount
       } else {
         const result = await submitReportingInvoice({
           environment,
           invoiceHash: submissionHash,
           uuid,
           signedXml,
+          invoiceId,
         })
         requestId = result.requestId
         responseCode = result.responseCode
         responseMessage = result.responseMessage
         zatcaStatus = result.reportingStatus === 'REPORTED' ? 'REPORTED' : 'SUBMITTED'
         rawResponse = result.rawResponse as Record<string, unknown>
+        warningCount = result.warningCount
+        errorCount = result.errorCount
       }
     } catch (apiError) {
       throw mapToZatcaError(apiError)
@@ -182,6 +191,8 @@ export async function submitInvoice(
         zatcaRequestId: requestId,
         zatcaResponseCode: responseCode,
         zatcaResponseMessage: responseMessage,
+        zatcaWarningCount: warningCount,
+        zatcaErrorCount: errorCount,
         zatcaFailureCode: null,
         clearanceStatus,
         clearedInvoicePayload,
@@ -198,7 +209,7 @@ export async function submitInvoice(
       userName: auditContext?.userName,
       companyName,
       invoiceId,
-      metadata: { route, requestId, zatcaStatus },
+      metadata: { route, requestId, zatcaStatus, warningCount, errorCount },
     })
 
     if (zatcaStatus === 'CLEARED') {

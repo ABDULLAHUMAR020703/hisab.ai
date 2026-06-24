@@ -117,7 +117,11 @@ async function runSingleComplianceCheck(
         zatcaStatus: passed ? 'SUBMITTED' : 'REJECTED',
         zatcaSubmissionDate: new Date(),
         zatcaRequestId: submission.requestId,
+        zatcaResponseCode: submission.responseCode,
         zatcaResponseMessage: submission.responseMessage,
+        zatcaResponsePayload: JSON.stringify(submission.rawResponse),
+        zatcaWarningCount: submission.warningCount,
+        zatcaErrorCount: submission.errorCount,
       },
     })
 

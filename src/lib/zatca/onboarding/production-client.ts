@@ -2,8 +2,14 @@ import 'server-only'
 import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
 import { buildBasicAuthHeader } from '../signature/certificate'
 import { getApiBaseUrl, isMockMode } from './compliance-client'
-import { getDecryptedCertificate, getDecryptedSecret, getCredential } from './credential-store'
+import {
+  getCredential,
+  getDecryptedBinarySecurityToken,
+  getDecryptedCertificate,
+  getDecryptedSecret,
+} from './credential-store'
 import type { ProductionCsidResponse } from './types'
+import { postZatcaJson, zatcaResponseMessage } from '../api/http-client'
 
 function pemToBase64Der(pem: string): string {
   return pem
@@ -75,14 +81,16 @@ export async function requestProductionCsid(
     throw new Error('ZATCA secret not found in credential store.')
   }
 
-  const csidToken = pemToBase64Der(complianceCertificate)
+  const csidToken = await getDecryptedBinarySecurityToken(environment) ?? pemToBase64Der(complianceCertificate)
   const productionPath = environment === 'SANDBOX'
     ? '/e-invoicing/simulation/production/csids'
     : '/e-invoicing/core/production/csids'
   const url = `${getApiBaseUrl()}${productionPath}`
 
-  const response = await fetch(url, {
-    method: 'POST',
+  const response = await postZatcaJson({
+    environment,
+    endpoint: productionPath,
+    url,
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
@@ -90,18 +98,15 @@ export async function requestProductionCsid(
       Authorization: buildBasicAuthHeader(csidToken, secret),
       'compliance-request-id': cred.complianceCsid,
     },
-    body: JSON.stringify({
+    body: {
       compliance_request_id: cred.complianceCsid,
-    }),
+    },
   })
 
-  const body = (await response.json().catch(() => ({}))) as ZatcaProductionApiResponse
+  const body = response.body as ZatcaProductionApiResponse
 
   if (!response.ok) {
-    const message = body.errors?.[0]?.message
-      ?? body.dispositionMessage
-      ?? `Production CSID request failed (${response.status})`
-    throw new Error(message)
+    throw new Error(zatcaResponseMessage(body, `Production CSID request failed (${response.status})`))
   }
 
   if (!body.binarySecurityToken || !body.secret) {

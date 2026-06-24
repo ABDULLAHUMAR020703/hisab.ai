@@ -19,6 +19,14 @@ export function resolveApiPath(environment: ZatcaEnvironment, suffix: string): s
   return `${getZatcaApiBaseUrl()}${API_PREFIX[environment]}${suffix}`
 }
 
+export function normalizeInvoiceHashForApi(invoiceHash: string): string {
+  const trimmed = invoiceHash.trim()
+  if (/^[a-f0-9]{64}$/i.test(trimmed)) {
+    return Buffer.from(trimmed, 'hex').toString('base64')
+  }
+  return trimmed
+}
+
 export async function buildZatcaAuthHeaders(environment: ZatcaEnvironment) {
   const creds = await loadSigningCredentials(environment)
   return {
@@ -47,5 +55,8 @@ export interface ZatcaApiResponseBody {
   qrSellertStatus?: string
   qrBuyertStatus?: string
   requestID?: string
+  requestId?: string
+  request_id?: string
+  mock?: boolean
   errors?: ZatcaApiError[] | null
 }

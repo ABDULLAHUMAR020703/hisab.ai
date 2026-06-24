@@ -1,2 +1,2 @@
-export { getZatcaDashboardStats, getZatcaRecentActivity } from './dashboard'
-export type { ZatcaDashboardStats, ZatcaRecentActivity } from './dashboard'
+export { getZatcaDashboardStats, getZatcaOperationalSummary, getZatcaRecentActivity } from './dashboard'
+export type { ZatcaDashboardStats, ZatcaOperationalSummary, ZatcaRecentActivity } from './dashboard'

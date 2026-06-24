@@ -189,6 +189,7 @@ export async function requestAndStoreProductionCsid(auditContext?: OnboardingAud
       companySettingsId: settings.id,
       productionCsid: response.requestId || response.binarySecurityToken.slice(0, 64),
       productionCertificate: response.certificatePem,
+      productionBinarySecurityToken: response.binarySecurityToken,
       secret: response.secret,
       onboardingStatus: 'PRODUCTION_ISSUED',
       lastError: null,

@@ -5,7 +5,9 @@ import {
   getDecryptedPrivateKey,
   getDecryptedSecret,
   getDecryptedCertificate,
+  getDecryptedBinarySecurityToken,
   getDecryptedProductionCertificate,
+  getDecryptedProductionBinarySecurityToken,
 } from '../onboarding/credential-store'
 
 export interface SigningCredentials {
@@ -15,13 +17,6 @@ export interface SigningCredentials {
   csidToken: string
   environment: ZatcaEnvironment
   useProduction: boolean
-}
-
-function pemToBase64Der(pem: string): string {
-  return pem
-    .replace(/-----BEGIN CERTIFICATE-----/g, '')
-    .replace(/-----END CERTIFICATE-----/g, '')
-    .replace(/\s+/g, '')
 }
 
 /**
@@ -44,11 +39,16 @@ export async function loadComplianceSigningCredentials(
     throw new Error('ZATCA private key or secret missing from credential store.')
   }
 
+  const csidToken = await getDecryptedBinarySecurityToken(environment)
+  if (!csidToken) {
+    throw new Error('Compliance binary security token missing from credential store.')
+  }
+
   return {
     certificatePem,
     privateKeyPem,
     secret,
-    csidToken: pemToBase64Der(certificatePem),
+    csidToken,
     environment,
     useProduction: false,
   }
@@ -62,10 +62,12 @@ export async function loadSigningCredentials(
     throw new Error('ZATCA credentials not found. Complete onboarding first.')
   }
 
-  const useProduction = Boolean(cred.productionCsid && (cred.productionCertificateEnc || cred.productionCertificate))
-  const certificatePem = useProduction
-    ? await getDecryptedProductionCertificate(environment)
-    : await getDecryptedCertificate(environment)
+  const hasProductionCertificate = Boolean(cred.productionCertificateEnc || cred.productionCertificate)
+  if (!cred.productionCsid || !hasProductionCertificate || !cred.productionBinarySecurityTokenEnc) {
+    throw new Error('Production CSID credentials required for reporting/clearance submission. Request Production CSID after compliance validation.')
+  }
+
+  const certificatePem = await getDecryptedProductionCertificate(environment)
 
   if (!certificatePem) {
     throw new Error('ZATCA certificate not found. Complete compliance onboarding first.')
@@ -78,7 +80,10 @@ export async function loadSigningCredentials(
     throw new Error('ZATCA private key or secret missing from credential store.')
   }
 
-  const csidToken = pemToBase64Der(certificatePem)
+  const csidToken = await getDecryptedProductionBinarySecurityToken(environment)
+  if (!csidToken) {
+    throw new Error('Production binary security token missing from credential store.')
+  }
 
   return {
     certificatePem,
@@ -86,7 +91,7 @@ export async function loadSigningCredentials(
     secret,
     csidToken,
     environment,
-    useProduction,
+    useProduction: true,
   }
 }
 

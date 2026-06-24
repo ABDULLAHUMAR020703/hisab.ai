@@ -79,6 +79,7 @@ export interface SaveCredentialInput {
   requestId?: string
   productionCsid?: string
   productionCertificate?: string
+  productionBinarySecurityToken?: string
   onboardingStatus?: ZatcaOnboardingStatus
   lastError?: string | null
   onboardedAt?: Date | null

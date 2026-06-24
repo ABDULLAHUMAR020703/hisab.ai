@@ -1,5 +1,5 @@
 import 'server-only'
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto'
+import { createCipheriv, createDecipheriv, randomBytes, scryptSync, X509Certificate } from 'crypto'
 import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
 import { getSettingsRepository } from '@/lib/db/provider'
 import {
@@ -48,6 +48,24 @@ export function decryptSecret(ciphertext: string): string {
 function decryptField(enc: string | null | undefined, plain: string | null | undefined): string | null {
   if (enc) return decryptSecret(enc)
   return plain ?? null
+}
+
+export function extractCertificateDates(certificatePem: string): {
+  issuedAt: Date
+  validFrom: Date
+  validTo: Date
+} | null {
+  try {
+    const cert = new X509Certificate(certificatePem)
+    const validFrom = new Date(cert.validFrom)
+    return {
+      issuedAt: validFrom,
+      validFrom,
+      validTo: new Date(cert.validTo),
+    }
+  } catch {
+    return null
+  }
 }
 
 export async function getCredential(environment: ZatcaEnvironment) {
@@ -108,15 +126,33 @@ export async function saveCredential(input: SaveCredentialInput) {
   }
   if (input.certificate !== undefined) {
     const certificateEnc = encryptSecret(input.certificate)
+    const dates = extractCertificateDates(input.certificate)
     updateData.certificateEnc = certificateEnc
     updateData.certificate = null
     supabaseInput.certificateEnc = certificateEnc
+    if (dates) {
+      updateData.complianceCertIssuedAt = dates.issuedAt
+      updateData.complianceCertValidFrom = dates.validFrom
+      updateData.complianceCertValidTo = dates.validTo
+      supabaseInput.complianceCertIssuedAt = dates.issuedAt
+      supabaseInput.complianceCertValidFrom = dates.validFrom
+      supabaseInput.complianceCertValidTo = dates.validTo
+    }
   }
   if (input.productionCertificate !== undefined) {
     const productionCertificateEnc = encryptSecret(input.productionCertificate)
+    const dates = extractCertificateDates(input.productionCertificate)
     updateData.productionCertificateEnc = productionCertificateEnc
     updateData.productionCertificate = null
     supabaseInput.productionCertificateEnc = productionCertificateEnc
+    if (dates) {
+      updateData.productionCertIssuedAt = dates.issuedAt
+      updateData.productionCertValidFrom = dates.validFrom
+      updateData.productionCertValidTo = dates.validTo
+      supabaseInput.productionCertIssuedAt = dates.issuedAt
+      supabaseInput.productionCertValidFrom = dates.validFrom
+      supabaseInput.productionCertValidTo = dates.validTo
+    }
   }
   if (input.privateKeyPem !== undefined) {
     const privateKeyEnc = encryptSecret(input.privateKeyPem)
@@ -132,6 +168,11 @@ export async function saveCredential(input: SaveCredentialInput) {
     const binarySecurityTokenEnc = encryptSecret(input.binarySecurityToken)
     updateData.binarySecurityTokenEnc = binarySecurityTokenEnc
     supabaseInput.binarySecurityTokenEnc = binarySecurityTokenEnc
+  }
+  if (input.productionBinarySecurityToken !== undefined) {
+    const productionBinarySecurityTokenEnc = encryptSecret(input.productionBinarySecurityToken)
+    updateData.productionBinarySecurityTokenEnc = productionBinarySecurityTokenEnc
+    supabaseInput.productionBinarySecurityTokenEnc = productionBinarySecurityTokenEnc
   }
 
   if (isSupabaseEnabled()) {
@@ -149,6 +190,61 @@ export async function saveCredential(input: SaveCredentialInput) {
   })
 }
 
+export async function backfillCertificateValidity(environment: ZatcaEnvironment) {
+  const cred = await getCredential(environment)
+  if (!cred) return null
+
+  const supabaseInput: DbSaveCredentialInput = {
+    environment,
+    companyId: cred.companyId,
+  }
+  const prismaData: Record<string, Date> = {}
+
+  const complianceCertificate = decryptField(cred.certificateEnc, cred.certificate)
+  if (
+    complianceCertificate
+    && (!cred.complianceCertIssuedAt || !cred.complianceCertValidFrom || !cred.complianceCertValidTo)
+  ) {
+    const dates = extractCertificateDates(complianceCertificate)
+    if (dates) {
+      supabaseInput.complianceCertIssuedAt = dates.issuedAt
+      supabaseInput.complianceCertValidFrom = dates.validFrom
+      supabaseInput.complianceCertValidTo = dates.validTo
+      prismaData.complianceCertIssuedAt = dates.issuedAt
+      prismaData.complianceCertValidFrom = dates.validFrom
+      prismaData.complianceCertValidTo = dates.validTo
+    }
+  }
+
+  const productionCertificate = decryptField(cred.productionCertificateEnc, cred.productionCertificate)
+  if (
+    productionCertificate
+    && (!cred.productionCertIssuedAt || !cred.productionCertValidFrom || !cred.productionCertValidTo)
+  ) {
+    const dates = extractCertificateDates(productionCertificate)
+    if (dates) {
+      supabaseInput.productionCertIssuedAt = dates.issuedAt
+      supabaseInput.productionCertValidFrom = dates.validFrom
+      supabaseInput.productionCertValidTo = dates.validTo
+      prismaData.productionCertIssuedAt = dates.issuedAt
+      prismaData.productionCertValidFrom = dates.validFrom
+      prismaData.productionCertValidTo = dates.validTo
+    }
+  }
+
+  if (Object.keys(prismaData).length === 0) return cred
+
+  if (isSupabaseEnabled()) {
+    return upsertSupabaseCredential(supabaseInput)
+  }
+
+  await prisma.zatcaCredential.update({
+    where: { environment },
+    data: prismaData,
+  })
+  return getCredential(environment)
+}
+
 export async function getDecryptedPrivateKey(environment: ZatcaEnvironment): Promise<string | null> {
   const cred = await getCredential(environment)
   if (!cred?.privateKeyEnc) return null
@@ -159,6 +255,18 @@ export async function getDecryptedSecret(environment: ZatcaEnvironment): Promise
   const cred = await getCredential(environment)
   if (!cred?.secretEnc) return null
   return decryptSecret(cred.secretEnc)
+}
+
+export async function getDecryptedBinarySecurityToken(environment: ZatcaEnvironment): Promise<string | null> {
+  const cred = await getCredential(environment)
+  if (!cred?.binarySecurityTokenEnc) return null
+  return decryptSecret(cred.binarySecurityTokenEnc)
+}
+
+export async function getDecryptedProductionBinarySecurityToken(environment: ZatcaEnvironment): Promise<string | null> {
+  const cred = await getCredential(environment)
+  if (!cred?.productionBinarySecurityTokenEnc) return null
+  return decryptSecret(cred.productionBinarySecurityTokenEnc)
 }
 
 export async function getDecryptedCsr(environment: ZatcaEnvironment): Promise<string | null> {

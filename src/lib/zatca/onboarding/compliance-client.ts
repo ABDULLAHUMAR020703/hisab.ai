@@ -98,26 +98,14 @@ export async function requestComplianceCsid(
     OTP: otp,
   }
   const requestBody = JSON.stringify({ csr: request.csrBase64 })
+  const requestStartedAt = Date.now()
 
-  let decodedCsrPem = ''
-  try {
-    decodedCsrPem = Buffer.from(request.csrBase64, 'base64').toString('utf8')
-  } catch {
-    decodedCsrPem = '(could not base64-decode csr)'
-  }
-
-  console.log('========== [ZATCA] OUTGOING COMPLIANCE REQUEST ==========')
-  console.log('URL:        ', url)
-  console.log('Method:     ', 'POST')
-  console.log('Environment:', request.environment)
-  console.log('Headers:    ', JSON.stringify(headers, null, 2))
-  console.log('OTP:        ', otp)
-  console.log('Body (raw): ', requestBody)
-  console.log('csr (base64 sent):')
-  console.log(request.csrBase64)
-  console.log('csr (base64 decoded back to PEM):')
-  console.log(decodedCsrPem)
-  console.log('=========================================================')
+  console.log('[ZATCA] Compliance CSID request started', {
+    endpoint: ZATCA_API_PATHS[request.environment],
+    environment: request.environment,
+    csrBytes: Buffer.byteLength(request.csrBase64, 'utf8'),
+    otpPresent: Boolean(otp),
+  })
 
   const response = await fetch(url, {
     method: 'POST',
@@ -133,10 +121,15 @@ export async function requestComplianceCsid(
     // non-JSON response
   }
 
-  console.log('[ZATCA] Compliance response', {
+  console.log('[ZATCA] Compliance CSID response received', {
     status: response.status,
     ok: response.ok,
-    rawBody: rawText.slice(0, 1000),
+    durationMs: Date.now() - requestStartedAt,
+    requestId: body.requestID ?? null,
+    dispositionMessage: body.dispositionMessage ?? null,
+    hasBinarySecurityToken: Boolean(body.binarySecurityToken),
+    hasSecret: Boolean(body.secret),
+    errorCode: body.errorCode ?? body.errors?.[0]?.code ?? null,
   })
 
   if (!response.ok) {

@@ -63,7 +63,9 @@ function mockCertificateInfo(certificatePem: string): ZatcaCertificateInfo {
   return {
     hash: getCertificateHash(bodyBase64),
     issuer: 'CN=Mock ZATCA CA',
+    subject: 'CN=Mock ZATCA CSID',
     serialNumber: '1',
+    fingerprint256: '00:00:00:00',
     publicKey: Buffer.alloc(48, 0xab),
     certificateSignature: Buffer.alloc(64, 0xcd),
     bodyBase64,
@@ -161,6 +163,8 @@ export function signInvoiceXmlDetailed(
   privateKeyPem: string,
 ): InvoiceSignResult {
   const unsignedXml = stripSignatureBlock(xml)
+    .replace(/^\s*<\?xml[\s\S]*?\?>\s*/i, '')
+    .trim()
   const invoiceHashHex = generateZatcaInvoiceHash(unsignedXml)
   const invoiceHashBase64 = invoiceHashHexToBase64(invoiceHashHex)
   const invoiceHashBytes = Buffer.from(invoiceHashBase64, 'base64')
@@ -197,7 +201,7 @@ export function signInvoiceXmlDetailed(
 
   const signedXml = unsignedXml.replace(
     /<Invoice([^>]*)>/,
-    `<Invoice$1>\n${signatureBlock}`,
+    `<Invoice$1>${signatureBlock}`,
   )
 
   return {

@@ -122,11 +122,18 @@ export interface ZatcaCredentialRecord {
   certificateEnc: string | null
   secretEnc: string | null
   binarySecurityTokenEnc: string | null
+  productionBinarySecurityTokenEnc: string | null
   complianceCsid: string | null
   requestId: string | null
   productionCsid: string | null
   productionCertificate: string | null
   productionCertificateEnc: string | null
+  complianceCertIssuedAt: Date | null
+  complianceCertValidFrom: Date | null
+  complianceCertValidTo: Date | null
+  productionCertIssuedAt: Date | null
+  productionCertValidFrom: Date | null
+  productionCertValidTo: Date | null
   onboardingStatus: ZatcaOnboardingStatus
   lastError: string | null
   onboardedAt: Date | null
@@ -148,6 +155,7 @@ export interface SaveCredentialInput {
   requestId?: string
   productionCsid?: string
   productionCertificate?: string
+  productionBinarySecurityToken?: string
   onboardingStatus?: ZatcaOnboardingStatus
   lastError?: string | null
   onboardedAt?: Date | null
@@ -157,6 +165,13 @@ export interface SaveCredentialInput {
   secretEnc?: string
   binarySecurityTokenEnc?: string
   productionCertificateEnc?: string
+  productionBinarySecurityTokenEnc?: string
+  complianceCertIssuedAt?: Date | null
+  complianceCertValidFrom?: Date | null
+  complianceCertValidTo?: Date | null
+  productionCertIssuedAt?: Date | null
+  productionCertValidFrom?: Date | null
+  productionCertValidTo?: Date | null
 }
 
 export interface ZatcaOnboardingRequestRecord {

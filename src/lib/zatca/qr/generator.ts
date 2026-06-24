@@ -89,7 +89,9 @@ export function generatePhase2QrPayload(input: Phase2QrInput): {
       certInfo = {
         hash: getCertificateHash(bodyBase64),
         issuer: 'CN=Mock',
+        subject: 'CN=Mock',
         serialNumber: '1',
+        fingerprint256: '00:00:00:00',
         publicKey: Buffer.alloc(48, 0xab),
         certificateSignature: Buffer.alloc(64, 0xcd),
         bodyBase64,
@@ -152,7 +154,7 @@ export function embedQrInInvoiceXml(xml: string, qrPayloadBase64: string): strin
 
   return xml.replace(
     /(<cbc:TaxCurrencyCode>[^<]+<\/cbc:TaxCurrencyCode>)/,
-    `$1\n  ${qrBlock}`,
+    `$1${qrBlock}`,
   )
 }
 

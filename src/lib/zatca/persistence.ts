@@ -118,6 +118,8 @@ export async function updateInvoiceZatcaFields(
   if (fields.zatcaResponseMessage !== undefined) patch.zatca_response_message = fields.zatcaResponseMessage
   if (fields.zatcaRequestId !== undefined) patch.zatca_request_id = fields.zatcaRequestId
   if (fields.zatcaResponseCode !== undefined) patch.zatca_response_code = fields.zatcaResponseCode
+  if (fields.zatcaWarningCount !== undefined) patch.zatca_warning_count = fields.zatcaWarningCount
+  if (fields.zatcaErrorCount !== undefined) patch.zatca_error_count = fields.zatcaErrorCount
   if (fields.clearanceStatus !== undefined) patch.clearance_status = fields.clearanceStatus
   if (fields.clearedInvoicePayload !== undefined) patch.cleared_invoice_payload = fields.clearedInvoicePayload
   if (fields.signedXml !== undefined) patch.signed_xml = fields.signedXml
@@ -129,6 +131,18 @@ export async function updateInvoiceZatcaFields(
     .update(patch)
     .eq('id', invoice.id)
     .eq('company_id', companyId)
+
+  if (error && (patch.zatca_warning_count !== undefined || patch.zatca_error_count !== undefined)) {
+    const legacyPatch = { ...patch }
+    delete legacyPatch.zatca_warning_count
+    delete legacyPatch.zatca_error_count
+    const retry = await db
+      .from('invoices')
+      .update(legacyPatch)
+      .eq('id', invoice.id)
+      .eq('company_id', companyId)
+    if (!retry.error) return
+  }
 
   if (error) throw error
 }

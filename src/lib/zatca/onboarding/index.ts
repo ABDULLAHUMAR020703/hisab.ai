@@ -1,8 +1,10 @@
 export { requestComplianceCsid } from './compliance-client'
 export { generatePrivateKey } from './crypto-keys'
 export {
+  backfillCertificateValidity,
   decryptSecret,
   encryptSecret,
+  extractCertificateDates,
   getCredential,
   getDecryptedCsr,
   getDecryptedCertificate,
