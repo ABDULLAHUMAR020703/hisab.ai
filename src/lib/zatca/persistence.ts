@@ -1,4 +1,5 @@
 import 'server-only'
+import type { InvoiceType } from '@/lib/db/prisma-types'
 import { getInvoiceRepository } from '@/lib/db/provider'
 import { queryByIdOrLegacy, resolveCompanyId, supabaseDb } from '@/lib/db/repository-utils'
 import type { InvoiceRecord } from '@/lib/db/entities'
@@ -158,6 +159,32 @@ export async function updateInvoiceZatcaFields(
       .eq('company_id', companyId)
     if (!retry.error) return
   }
+
+  if (error) throw error
+}
+
+export async function syncInvoiceClassification(
+  invoiceId: string,
+  invoiceType: InvoiceType,
+): Promise<void> {
+  if (!isSupabaseEnabled()) {
+    await prisma.invoice.update({
+      where: { id: invoiceId },
+      data: { invoiceType },
+    })
+    return
+  }
+
+  const db = supabaseDb()
+  const companyId = await resolveCompanyId()
+  const invoice = await queryByIdOrLegacy(db, 'invoices', invoiceId, companyId)
+  if (!invoice) throw new Error('Invoice not found')
+
+  const { error } = await db
+    .from('invoices')
+    .update({ invoice_type: invoiceType })
+    .eq('id', invoice.id)
+    .eq('company_id', companyId)
 
   if (error) throw error
 }

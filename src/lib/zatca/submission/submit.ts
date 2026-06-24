@@ -134,7 +134,7 @@ export async function submitInvoice(
     }
 
     const uuid = processed.document.uuid
-    const route = getSubmissionRoute(invoice.invoiceType as InvoiceType, environment)
+    const route = getSubmissionRoute(loaded.input.invoiceType as InvoiceType, environment)
     const submittedAt = new Date()
     const submissionHash = invoiceHashHex
 

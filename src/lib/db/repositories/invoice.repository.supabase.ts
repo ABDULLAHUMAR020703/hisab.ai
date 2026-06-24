@@ -1,4 +1,6 @@
 import 'server-only'
+import type { InvoiceType } from '@/lib/db/prisma-types'
+import { classifySalesInvoiceType } from '@/lib/zatca/classification'
 import { randomUUID } from 'crypto'
 import {
   mapChartOfAccountRow,
@@ -43,6 +45,38 @@ function processLines(lines: InvoiceLineInput[]) {
     }
   })
   return { processedLines, subtotal, taxAmount, total: subtotal + taxAmount }
+}
+
+async function resolveInvoiceTypeForCustomer(
+  customerId: string,
+  companyId: string,
+): Promise<'STANDARD' | 'SIMPLIFIED'> {
+  const db = supabaseDb()
+  const { data, error } = await db
+    .from('customers')
+    .select('tax_id')
+    .eq('id', customerId)
+    .eq('company_id', companyId)
+    .maybeSingle()
+  if (error) throw error
+  return classifySalesInvoiceType({ taxId: data?.tax_id as string | null | undefined })
+}
+
+async function resolveStoredNoteInvoiceType(
+  invoiceId: string,
+  companyId: string,
+): Promise<InvoiceType | null> {
+  const db = supabaseDb()
+  const { data, error } = await db
+    .from('invoices')
+    .select('invoice_type')
+    .eq('id', invoiceId)
+    .eq('company_id', companyId)
+    .maybeSingle()
+  if (error) throw error
+  const type = String(data?.invoice_type ?? '')
+  if (type === 'CREDIT_NOTE' || type === 'DEBIT_NOTE') return type
+  return null
 }
 
 async function resolveScopedUuid(
@@ -220,6 +254,7 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
     const invoiceNo = await resolveSequenceRepository().next('INVOICE', 'INV-')
     const issueDate = new Date(input.date)
     const createdById = await resolveProfileUuid(input.createdById)
+    const invoiceType = await resolveInvoiceTypeForCustomer(customerId, companyId)
 
     const { data, error } = await db
       .from('invoices')
@@ -228,6 +263,7 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
         invoice_no: invoiceNo,
         invoice_uuid: randomUUID(),
         customer_id: customerId,
+        invoice_type: invoiceType,
         date: issueDate.toISOString(),
         issue_time: formatIssueTime(issueDate),
         due_date: new Date(input.dueDate).toISOString(),
@@ -280,6 +316,14 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
     if (input.notes !== undefined) patch.notes = input.notes
     if (input.terms !== undefined) patch.terms = input.terms
     if (input.status !== undefined) patch.status = input.status
+
+    const noteType = await resolveStoredNoteInvoiceType(invoiceId, companyId)
+    const customerIdForClassification = input.customerId !== undefined
+      ? (patch.customer_id as string)
+      : String(existingRow.customer_id)
+    if (!noteType && customerIdForClassification) {
+      patch.invoice_type = await resolveInvoiceTypeForCustomer(customerIdForClassification, companyId)
+    }
 
     if (input.lines !== undefined) {
       const { processedLines, subtotal, taxAmount, total } = processLines(input.lines)

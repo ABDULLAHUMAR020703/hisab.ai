@@ -8,7 +8,8 @@ import {
   getPreviousInvoiceHash,
   invoiceHashHexToPihBase64,
 } from './hash'
-import { loadInvoiceForZatca, updateInvoiceZatcaFields } from './persistence'
+import { loadInvoiceForZatca, syncInvoiceClassification, updateInvoiceZatcaFields } from './persistence'
+import { resolveZatcaInvoiceType } from './classification'
 import type { ZatcaCustomerInput, ZatcaInvoiceInput, ZatcaXmlGenerationResult } from './types'
 
 export interface LoadedZatcaInvoice {
@@ -42,7 +43,7 @@ export async function loadZatcaInvoiceById(invoiceId: string) {
     id: invoice.id,
     invoiceNo: invoice.invoiceNo,
     invoiceUUID: invoice.invoiceUUID,
-    invoiceType: invoice.invoiceType as ZatcaInvoiceInput['invoiceType'],
+    invoiceType: resolveZatcaInvoiceType(invoice.invoiceType, customer),
     date: invoice.date,
     issueTime: invoice.issueTime,
     currency: invoice.currency,
@@ -63,7 +64,11 @@ export async function loadZatcaInvoiceById(invoiceId: string) {
     zatcaEnvironment: companySettings.zatcaEnvironment,
   }
 
-  return { invoice, input, companySettings }
+  if (input.invoiceType !== invoice.invoiceType) {
+    await syncInvoiceClassification(invoice.id, input.invoiceType)
+  }
+
+  return { invoice: { ...invoice, invoiceType: input.invoiceType }, input, companySettings }
 }
 
 export interface ZatcaProcessedInvoice extends ZatcaXmlGenerationResult {

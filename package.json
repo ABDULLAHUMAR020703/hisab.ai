@@ -10,7 +10,7 @@
     "build": "next build",
     "db:seed": "npx tsx -r dotenv/config scripts/qa/qa-seed.mjs",
     "qa:seed": "npx tsx -r dotenv/config scripts/qa/qa-seed.mjs",
-    "test:zatca": "npx --yes tsx --test tests/zatca/onboarding.test.ts",
+    "test:zatca": "npx --yes tsx --test tests/zatca/onboarding.test.ts tests/zatca/classification.test.ts",
     "zatca:sandbox": "npx tsx -r dotenv/config -r ./scripts/zatca/setup-server-only.cjs scripts/zatca/run-zatca-sandbox.mjs",
     "zatca:verify": "npx tsx -r dotenv/config -r ./scripts/zatca/setup-server-only.cjs scripts/zatca/zatca-phase7-verify.mjs",
     "db:test-customer-vendor-write": "npx tsx -r dotenv/config -r ./scripts/zatca/setup-server-only.cjs scripts/db/test-customer-vendor-write.ts",
