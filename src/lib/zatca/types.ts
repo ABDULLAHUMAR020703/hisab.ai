@@ -3,6 +3,8 @@
  * Internal representation before XML serialization (Day 2 — no signing/API).
  */
 
+import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
+
 export type ZatcaDocumentProfile = 'clearance:1.0' | 'reporting:1.0'
 
 export type ZatcaInvoiceTypeCode = '388' | '381' | '383'
@@ -193,4 +195,6 @@ export interface ZatcaInvoiceInput {
   profileIdOverride?: ZatcaDocumentProfile
   /** Optional InvoiceTypeCode @name override (e.g. 0100000 standard credit/debit notes). */
   invoiceTypeCodeNameOverride?: string
+  /** Active ZATCA environment — drives BT-23 ProfileID and submission route. */
+  zatcaEnvironment?: ZatcaEnvironment
 }

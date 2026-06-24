@@ -252,7 +252,7 @@ export async function runSandboxScenario(scenario: SandboxScenario): Promise<San
     })
     steps.push({ step: 'Sign', passed: signedXml.includes('ds:Signature'), detail: 'XAdES-BES signature embedded' })
 
-    const route = getSubmissionRoute(scenario)
+    const route = getSubmissionRoute(scenario, settings.zatcaEnvironment)
     const uuid = xmlResult.document.uuid
 
     let actualStatus: string

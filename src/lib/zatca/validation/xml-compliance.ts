@@ -1,5 +1,5 @@
-import type { InvoiceType } from '@/lib/db/prisma-types'
-import { ZATCA_PROFILE_BY_TYPE } from '../constants'
+import type { InvoiceType, ZatcaEnvironment } from '@/lib/db/prisma-types'
+import { resolveZatcaProfileId } from '../constants'
 import type { ZatcaValidationIssue, ZatcaValidationResult } from '../types'
 
 function issue(
@@ -14,6 +14,7 @@ function issue(
 export interface XmlComplianceInput {
   xml: string
   invoiceType: InvoiceType
+  environment?: ZatcaEnvironment
 }
 
 /**
@@ -34,7 +35,10 @@ export function validateXmlCompliance(input: XmlComplianceInput): ZatcaValidatio
     errors.push(issue('XML_NS_CBC', 'xml', 'Missing cbc namespace'))
   }
 
-  const expectedProfile = ZATCA_PROFILE_BY_TYPE[invoiceType]
+  const expectedProfile = resolveZatcaProfileId(
+    invoiceType,
+    input.environment ?? 'SANDBOX',
+  )
   if (!xml.includes(`<cbc:ProfileID>${expectedProfile}</cbc:ProfileID>`)) {
     errors.push(issue(
       'XML_PROFILE_MISMATCH',

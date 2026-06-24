@@ -1,4 +1,5 @@
 import type { InvoiceType, ZatcaEnvironment, ZatcaInvoiceStatus } from '@/lib/db/prisma-types'
+import { resolveZatcaSubmissionRoute } from '../constants'
 
 export type ZatcaSubmissionRoute = 'clearance' | 'reporting'
 
@@ -37,8 +38,11 @@ export interface InvoiceResponseView {
   hasClearedPayload: boolean
 }
 
-export function resolveSubmissionRoute(invoiceType: InvoiceType): ZatcaSubmissionRoute {
-  return invoiceType === 'STANDARD' ? 'clearance' : 'reporting'
+export function resolveSubmissionRoute(
+  invoiceType: InvoiceType,
+  environment: ZatcaEnvironment = 'SANDBOX',
+): ZatcaSubmissionRoute {
+  return resolveZatcaSubmissionRoute(invoiceType, environment)
 }
 
 export const TERMINAL_ZATCA_STATUSES: ZatcaInvoiceStatus[] = [

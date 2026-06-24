@@ -2,10 +2,10 @@ import { randomUUID } from 'crypto'
 import {
   ZATCA_FIRST_PIH_BASE64,
   ZATCA_INVOICE_TYPE_CODE,
-  ZATCA_PROFILE_BY_TYPE,
   DEFAULT_UNIT_CODE,
   isStandardTaxInvoice,
   resolveInvoiceTypeCodeName,
+  resolveZatcaProfileId,
   SAUDI_COUNTRY_CODE,
   SAUDI_VAT_RATE,
 } from './constants'
@@ -194,7 +194,11 @@ export function mapInvoiceToZatcaDocument(input: ZatcaInvoiceInput): ZatcaInvoic
 
   return {
     ublVersionId: '2.1',
-    profileId: input.profileIdOverride ?? ZATCA_PROFILE_BY_TYPE[invoiceType],
+    profileId: resolveZatcaProfileId(
+      invoiceType,
+      input.zatcaEnvironment ?? 'SANDBOX',
+      input.profileIdOverride,
+    ),
     invoiceNumber: input.invoiceNo.trim(),
     uuid,
     issueDate: formatDate(input.date),

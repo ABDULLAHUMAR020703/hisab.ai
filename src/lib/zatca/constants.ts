@@ -1,3 +1,4 @@
+import type { InvoiceType, ZatcaEnvironment } from '@/lib/db/prisma-types'
 import type { ZatcaDocumentProfile, ZatcaInvoiceTypeCode } from './types'
 
 /** UBL 2.1 root namespace */
@@ -84,4 +85,26 @@ export function isSimplifiedTaxInvoice(input: {
   invoiceTypeCodeNameOverride?: string
 }): boolean {
   return resolveInvoiceTypeCodeName(input).startsWith('02')
+}
+
+/**
+ * ZATCA simulation validates BT-23 as reporting:1.0 for all invoice types (including 0100000 standard).
+ * Production uses clearance:1.0 for standard tax invoices only.
+ */
+export function resolveZatcaProfileId(
+  invoiceType: InvoiceTypeKey,
+  environment: ZatcaEnvironment = 'SANDBOX',
+  profileIdOverride?: ZatcaDocumentProfile,
+): ZatcaDocumentProfile {
+  if (profileIdOverride) return profileIdOverride
+  if (environment === 'SANDBOX') return 'reporting:1.0'
+  return ZATCA_PROFILE_BY_TYPE[invoiceType]
+}
+
+/** Production routes standard invoices to clearance; simplified/credit/debit use reporting. */
+export function resolveZatcaSubmissionRoute(
+  invoiceType: InvoiceType,
+  _environment: ZatcaEnvironment = 'SANDBOX',
+): 'clearance' | 'reporting' {
+  return invoiceType === 'STANDARD' ? 'clearance' : 'reporting'
 }

@@ -60,6 +60,7 @@ export async function loadZatcaInvoiceById(invoiceId: string) {
     })),
     customer,
     companySettings,
+    zatcaEnvironment: companySettings.zatcaEnvironment,
   }
 
   return { invoice, input, companySettings }
