@@ -53,19 +53,47 @@ export const supabaseCustomerRepository: CustomerRepository = {
       .select('*')
       .eq('company_id', companyId)
       .is('deleted_at', null)
-      .order('name', { ascending: true })
 
     if (search) {
       query = query.or(
         `name.ilike.%${search}%,email.ilike.%${search}%,customer_no.ilike.%${search}%`,
       )
     }
+    if (options.country) query = query.ilike('country', `%${options.country}%`)
+    if (options.city) query = query.ilike('city', `%${options.city}%`)
+    if (options.hasVat === true) query = query.not('tax_id', 'is', null).neq('tax_id', '')
+    if (options.hasVat === false) query = query.or('tax_id.is.null,tax_id.eq.')
+
+    const sortAsc = options.sortDir === 'asc'
+    if (options.sortBy === 'createdAt') {
+      query = query.order('created_at', { ascending: sortAsc })
+    } else {
+      query = query.order('name', { ascending: options.sortBy === 'name' ? sortAsc : true })
+    }
 
     const { data, error } = await query
     if (error) throw error
 
-    const customers = (data ?? []).map(mapCustomerRow)
-    return attachOutstanding(customers, companyId)
+    let customers = (data ?? []).map(mapCustomerRow)
+    customers = await attachOutstanding(customers, companyId)
+
+    if (options.hasOutstanding === true) {
+      customers = customers.filter((c) => (c.outstandingBalance ?? 0) > 0)
+    }
+    if (options.hasOutstanding === false) {
+      customers = customers.filter((c) => (c.outstandingBalance ?? 0) <= 0)
+    }
+    if (options.creditLimitExceeded) {
+      customers = customers.filter((c) => (c.outstandingBalance ?? 0) > (c.creditLimit ?? 0) && (c.creditLimit ?? 0) > 0)
+    }
+    if (options.sortBy === 'outstanding') {
+      customers.sort((a, b) => {
+        const cmp = (a.outstandingBalance ?? 0) - (b.outstandingBalance ?? 0)
+        return sortAsc ? cmp : -cmp
+      })
+    }
+
+    return customers
   },
 
   async findById(id: string) {

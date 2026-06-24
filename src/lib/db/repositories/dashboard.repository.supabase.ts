@@ -183,6 +183,7 @@ export const supabaseDashboardRepository: DashboardRepository = {
       recentEmployeesRes,
       recentInventoryRes,
       recentReceiptsRes,
+      zatcaAuditRes,
     ] = await Promise.all([
       db
         .from('invoices')
@@ -190,7 +191,7 @@ export const supabaseDashboardRepository: DashboardRepository = {
         .eq('company_id', companyId)
         .is('deleted_at', null)
         .order('updated_at', { ascending: false })
-        .limit(5),
+        .limit(8),
       db
         .from('bills')
         .select('*, vendors(name)')
@@ -261,6 +262,12 @@ export const supabaseDashboardRepository: DashboardRepository = {
         .is('deleted_at', null)
         .order('created_at', { ascending: false })
         .limit(3),
+      db
+        .from('zatca_audit_logs')
+        .select('id, action, result, message, invoice_id, created_at')
+        .eq('company_id', companyId)
+        .order('created_at', { ascending: false })
+        .limit(10),
     ])
 
     for (const res of [
@@ -275,6 +282,7 @@ export const supabaseDashboardRepository: DashboardRepository = {
       recentEmployeesRes,
       recentInventoryRes,
       recentReceiptsRes,
+      zatcaAuditRes,
     ]) {
       if (res.error) throw res.error
     }
@@ -284,7 +292,10 @@ export const supabaseDashboardRepository: DashboardRepository = {
       invoiceNo: String(row.invoice_no),
       total: toNumber(row.total),
       status: String(row.status),
+      invoiceType: String(row.invoice_type ?? 'STANDARD'),
+      zatcaStatus: String(row.zatca_status ?? 'DRAFT'),
       updatedAt: new Date(String(row.updated_at)),
+      createdAt: new Date(String(row.created_at)),
       customer: { name: String((row.customers as { name?: string } | null)?.name ?? '') },
     }))
 
@@ -379,6 +390,15 @@ export const supabaseDashboardRepository: DashboardRepository = {
       createdAt: new Date(String(row.created_at)),
     }))
 
+    const zatcaAudit = (zatcaAuditRes.data ?? []).map((row) => ({
+      id: String(row.id),
+      action: String(row.action),
+      result: String(row.result),
+      message: (row.message as string | null) ?? null,
+      invoiceId: (row.invoice_id as string | null) ?? null,
+      createdAt: new Date(String(row.created_at)),
+    }))
+
     const activity = buildActivityFeed({
       recentInvoices,
       recentBills,
@@ -391,6 +411,7 @@ export const supabaseDashboardRepository: DashboardRepository = {
       recentEmployees,
       recentInventory,
       recentReceipts,
+      zatcaAudit,
     })
 
     const totalRevenue = invoiceAgg._sum.subtotal

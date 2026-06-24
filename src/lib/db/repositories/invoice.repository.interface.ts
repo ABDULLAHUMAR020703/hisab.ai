@@ -1,8 +1,34 @@
 import type { InvoiceRecord } from '../entities'
 
+export type InvoiceSortField =
+  | 'createdAt'
+  | 'date'
+  | 'dueDate'
+  | 'invoiceNo'
+  | 'total'
+  | 'customerName'
+
 export interface InvoiceListOptions {
   search?: string
   status?: string
+  zatcaStatus?: string
+  invoiceType?: string
+  customerId?: string
+  datePreset?: 'today' | 'week' | 'month' | 'custom'
+  dateFrom?: string
+  dateTo?: string
+  overdue?: boolean
+  sortBy?: InvoiceSortField
+  sortDir?: 'asc' | 'desc'
+  page?: number
+  limit?: number
+}
+
+export interface InvoiceListResult {
+  items: InvoiceRecord[]
+  total: number
+  page: number
+  limit: number
 }
 
 export interface InvoiceLineInput {
@@ -47,7 +73,7 @@ export interface InvoiceAdjustmentCreateInput {
 }
 
 export interface InvoiceRepository {
-  findMany(options?: InvoiceListOptions): Promise<InvoiceRecord[]>
+  findMany(options?: InvoiceListOptions): Promise<InvoiceListResult>
   findById(id: string): Promise<InvoiceRecord | null>
   create(input: InvoiceCreateInput): Promise<InvoiceRecord>
   createAdjustment(input: InvoiceAdjustmentCreateInput): Promise<InvoiceRecord>

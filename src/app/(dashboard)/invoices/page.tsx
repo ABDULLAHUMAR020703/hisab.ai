@@ -1,14 +1,15 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Plus, RefreshCw, Send, DollarSign, RotateCcw, Eye, Shield, FileDown, FileMinus, FilePlus } from 'lucide-react'
+import { Plus, RefreshCw, Send, DollarSign, RotateCcw, Eye, Shield, FileDown, FileMinus, FilePlus, ChevronLeft, ChevronRight } from 'lucide-react'
 import { formatDate, formatCurrency, cn } from '@/lib/utils'
 import { readApiError } from '@/lib/api-client'
-import { Badge } from '@/components/ui/badge'
+import { BusinessBadge, ZatcaBadge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { Input, Select, Textarea } from '@/components/ui/input'
 import { PageHeader, SearchBar, FilterBar } from '@/components/ui/page-header'
+import { computeDisplayBusinessStatus, formatInvoiceTypeLabel } from '@/lib/ui/invoice-status'
 
 interface Customer { id: string; name: string }
 interface Account { id: string; accountNo: string; name: string }
@@ -24,10 +25,13 @@ interface ZatcaInvoiceStatus {
   invoiceNo: string
   zatcaStatus: string
   requestId: string | null
+  globalTransactionId: string | null
   responseCode: string | null
   responseMessage: string | null
   clearanceStatus: string | null
   submittedAt: string | null
+  environment: string
+  submissionRoute: string | null
   canSubmit: boolean
 }
 
@@ -36,10 +40,20 @@ const EMPTY_LINE: InvoiceLine = { description: '', quantity: 1, unitPrice: 0, ta
 
 export default function InvoicesPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([])
+  const [listTotal, setListTotal] = useState(0)
   const [customers, setCustomers] = useState<Customer[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [zatcaFilter, setZatcaFilter] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
+  const [customerFilter, setCustomerFilter] = useState('')
+  const [datePreset, setDatePreset] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [sortBy, setSortBy] = useState('createdAt')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [showPayModal, setShowPayModal] = useState(false)
@@ -71,23 +85,41 @@ export default function InvoicesPage() {
     date: new Date().toISOString().split('T')[0]
   })
 
+  const limit = 50
+
   async function load() {
     setLoading(true)
     const params = new URLSearchParams()
     if (search) params.set('search', search)
     if (statusFilter) params.set('status', statusFilter)
+    if (zatcaFilter) params.set('zatcaStatus', zatcaFilter)
+    if (typeFilter) params.set('invoiceType', typeFilter)
+    if (customerFilter) params.set('customerId', customerFilter)
+    if (datePreset) params.set('datePreset', datePreset)
+    if (datePreset === 'custom') {
+      if (dateFrom) params.set('dateFrom', dateFrom)
+      if (dateTo) params.set('dateTo', dateTo)
+    }
+    params.set('sortBy', sortBy)
+    params.set('sortDir', sortDir)
+    params.set('page', String(page))
+    params.set('limit', String(limit))
     const [invRes, custRes, accRes] = await Promise.all([
       fetch(`/api/invoices?${params}`),
       fetch('/api/customers'),
       fetch('/api/accounts'),
     ])
-    if (invRes.ok) setInvoices(await invRes.json())
+    if (invRes.ok) {
+      const payload = await invRes.json()
+      setInvoices(payload.items ?? payload)
+      setListTotal(payload.total ?? (payload.items?.length ?? 0))
+    }
     if (custRes.ok) setCustomers(await custRes.json())
     if (accRes.ok) setAccounts(await accRes.json())
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [search, statusFilter])
+  useEffect(() => { load() }, [search, statusFilter, zatcaFilter, typeFilter, customerFilter, datePreset, dateFrom, dateTo, sortBy, sortDir, page])
 
   function updateLine(idx: number, field: string, value: string | number) {
     setForm(f => ({ ...f, lines: f.lines.map((l, i) => i === idx ? { ...l, [field]: value } : l) }))
@@ -264,10 +296,12 @@ export default function InvoicesPage() {
   const adjustmentTax = adjustmentForm.lines.reduce((s, l) => s + l.quantity * l.unitPrice * (l.taxRate / 100), 0)
   const adjustmentTotal = adjustmentSubtotal + adjustmentTax
 
+  const totalPages = Math.max(1, Math.ceil(listTotal / limit))
+
   const stats = {
-    total: invoices.length,
-    paid: invoices.filter(i => i.status === 'PAID').length,
-    outstanding: invoices.filter(i => ['SENT', 'PARTIAL', 'OVERDUE'].includes(i.status)).length,
+    total: listTotal,
+    paid: invoices.filter(i => computeDisplayBusinessStatus(i) === 'PAID').length,
+    outstanding: invoices.filter(i => ['SENT', 'PARTIAL', 'OVERDUE'].includes(computeDisplayBusinessStatus(i)) && i.balance > 0).length,
     totalValue: invoices.reduce((s, i) => s + i.total, 0),
   }
 
@@ -300,14 +334,48 @@ export default function InvoicesPage() {
       </div>
 
       <FilterBar>
-        <SearchBar value={search} onChange={setSearch} placeholder="Search by invoice no or customer..." className="flex-1 max-w-sm" />
-        <select
-          value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}
-          className="input-base w-auto min-w-[140px]"
-        >
-          <option value="">All Statuses</option>
-          {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+        <SearchBar value={search} onChange={(v) => { setPage(1); setSearch(v) }} placeholder="Search invoice # or customer..." className="flex-1 max-w-sm" />
+        <select value={statusFilter} onChange={e => { setPage(1); setStatusFilter(e.target.value) }} className="input-base w-auto min-w-[130px]">
+          <option value="">All Business</option>
+          {['DRAFT', 'SENT', 'PAID', 'PARTIAL', 'OVERDUE', 'VOID'].map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select value={zatcaFilter} onChange={e => { setPage(1); setZatcaFilter(e.target.value) }} className="input-base w-auto min-w-[130px]">
+          <option value="">All ZATCA</option>
+          <option value="DRAFT">Not Submitted</option>
+          {['PENDING', 'SUBMITTED', 'CLEARED', 'REPORTED', 'FAILED', 'REJECTED'].map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select value={typeFilter} onChange={e => { setPage(1); setTypeFilter(e.target.value) }} className="input-base w-auto min-w-[120px]">
+          <option value="">All Types</option>
+          {['STANDARD', 'SIMPLIFIED', 'CREDIT_NOTE', 'DEBIT_NOTE'].map(t => <option key={t} value={t}>{formatInvoiceTypeLabel(t)}</option>)}
+        </select>
+        <select value={customerFilter} onChange={e => { setPage(1); setCustomerFilter(e.target.value) }} className="input-base w-auto min-w-[140px]">
+          <option value="">All Customers</option>
+          {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <select value={datePreset} onChange={e => { setPage(1); setDatePreset(e.target.value) }} className="input-base w-auto min-w-[120px]">
+          <option value="">All Dates</option>
+          <option value="today">Today</option>
+          <option value="week">This Week</option>
+          <option value="month">This Month</option>
+          <option value="custom">Custom</option>
+        </select>
+        {datePreset === 'custom' && (
+          <>
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input-base w-auto" />
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="input-base w-auto" />
+          </>
+        )}
+        <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="input-base w-auto min-w-[120px]">
+          <option value="createdAt">Newest</option>
+          <option value="date">Invoice Date</option>
+          <option value="dueDate">Due Date</option>
+          <option value="invoiceNo">Invoice #</option>
+          <option value="total">Amount</option>
+          <option value="customerName">Customer</option>
+        </select>
+        <select value={sortDir} onChange={e => setSortDir(e.target.value as 'asc' | 'desc')} className="input-base w-auto min-w-[90px]">
+          <option value="desc">Desc</option>
+          <option value="asc">Asc</option>
         </select>
         <button onClick={load} className="p-2 border border-slate-200 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-50 bg-white transition-colors">
           <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
@@ -320,10 +388,10 @@ export default function InvoicesPage() {
           <table className="w-full data-table">
             <thead>
               <tr className="border-b border-slate-100">
-                {['Invoice #', 'Customer', 'Date', 'Due Date', 'Total', 'Paid', 'Balance', 'Status', ''].map((h, i) => (
+                {['Invoice #', 'Customer', 'Date', 'Due Date', 'Total', 'Paid', 'Balance', 'Business', 'ZATCA', ''].map((h, i) => (
                   <th key={i} className={cn(
                     'px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap',
-                    ['Total', 'Paid', 'Balance'].includes(h) ? 'text-right' : h === 'Status' ? 'text-center' : 'text-left',
+                    ['Total', 'Paid', 'Balance'].includes(h) ? 'text-right' : 'text-left',
                     h === '' && 'w-24'
                   )}>{h}</th>
                 ))}
@@ -333,19 +401,19 @@ export default function InvoicesPage() {
               {loading ? (
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i}>
-                    {Array.from({ length: 9 }).map((_, j) => (
+                    {Array.from({ length: 10 }).map((_, j) => (
                       <td key={j} className="px-4 py-3"><div className="skeleton h-4 rounded" /></td>
                     ))}
                   </tr>
                 ))
               ) : invoices.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-16 text-center text-slate-400 text-sm">No invoices found</td></tr>
+                <tr><td colSpan={10} className="px-4 py-16 text-center text-slate-400 text-sm">No invoices found</td></tr>
               ) : invoices.map(inv => (
                 <tr key={inv.id} className="hover:bg-slate-50/60 transition-colors">
                   <td className="px-4 py-3">
                     <span className="font-mono text-xs font-semibold text-indigo-600">{inv.invoiceNo}</span>
                     {inv.invoiceType && inv.invoiceType !== 'STANDARD' && (
-                      <span className="block text-[10px] font-medium text-slate-500 mt-0.5">{inv.invoiceType.replaceAll('_', ' ')}</span>
+                      <span className="block text-[10px] font-medium text-slate-500 mt-0.5">{formatInvoiceTypeLabel(inv.invoiceType)}</span>
                     )}
                     {inv.isRecurring && <RotateCcw size={10} className="inline ml-1.5 text-violet-400" />}
                   </td>
@@ -359,13 +427,11 @@ export default function InvoicesPage() {
                       {inv.balance > 0 ? formatCurrency(inv.balance) : '—'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-center">
-                    <div className="flex flex-col items-center gap-1">
-                      <Badge status={inv.status} />
-                      {inv.zatcaStatus && inv.zatcaStatus !== 'DRAFT' && (
-                        <span className="text-[10px] font-medium text-emerald-600">{inv.zatcaStatus}</span>
-                      )}
-                    </div>
+                  <td className="px-4 py-3">
+                    <BusinessBadge status={computeDisplayBusinessStatus(inv)} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <ZatcaBadge status={inv.zatcaStatus ?? 'DRAFT'} />
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
@@ -396,9 +462,14 @@ export default function InvoicesPage() {
             </tbody>
           </table>
         </div>
+        <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between text-sm text-slate-500">
+          <span>Page {page} of {totalPages} · {listTotal} invoices</span>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}><ChevronLeft size={14} /></Button>
+            <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}><ChevronRight size={14} /></Button>
+          </div>
+        </div>
       </div>
-
-      {/* New Invoice Modal */}
       <Modal
         open={showModal}
         onClose={() => setShowModal(false)}
@@ -539,10 +610,16 @@ export default function InvoicesPage() {
       >
         {selectedInvoice && (
           <div className="space-y-5">
+            <div className="flex flex-wrap gap-2">
+              <BusinessBadge status={computeDisplayBusinessStatus(selectedInvoice)} />
+              <ZatcaBadge status={zatcaStatus?.zatcaStatus ?? selectedInvoice.zatcaStatus ?? 'DRAFT'} />
+              <span className="badge bg-slate-50 text-slate-600 border border-slate-200">{formatInvoiceTypeLabel(selectedInvoice.invoiceType)}</span>
+            </div>
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div><p className="text-xs text-slate-400">Date</p><p className="font-medium">{formatDate(selectedInvoice.date)}</p></div>
               <div><p className="text-xs text-slate-400">Due</p><p className="font-medium">{formatDate(selectedInvoice.dueDate)}</p></div>
-              <div><p className="text-xs text-slate-400">Type</p><p className="font-medium">{(selectedInvoice.invoiceType ?? 'STANDARD').replaceAll('_', ' ')}</p></div>
+              <div><p className="text-xs text-slate-400">Type</p><p className="font-medium">{formatInvoiceTypeLabel(selectedInvoice.invoiceType)}</p></div>
+              <div><p className="text-xs text-slate-400">Customer</p><p className="font-medium">{selectedInvoice.customer.name}</p></div>
               {selectedInvoice.referencedInvoiceNo && (
                 <div><p className="text-xs text-slate-400">References</p><p className="font-medium">{selectedInvoice.referencedInvoiceNo}</p></div>
               )}
@@ -578,7 +655,15 @@ export default function InvoicesPage() {
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
                     <p className="text-xs text-slate-400">ZATCA Status</p>
-                    <p className="font-medium">{zatcaStatus.zatcaStatus}</p>
+                    <ZatcaBadge status={zatcaStatus.zatcaStatus} />
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400">Environment</p>
+                    <p className="font-medium">{zatcaStatus.environment}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400">Submission Route</p>
+                    <p className="font-medium capitalize">{zatcaStatus.submissionRoute ?? '—'}</p>
                   </div>
                   <div>
                     <p className="text-xs text-slate-400">Last Submission</p>
@@ -589,12 +674,8 @@ export default function InvoicesPage() {
                     <p className="font-mono text-xs break-all">{zatcaStatus.requestId ?? '—'}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-slate-400">Clearance / Reporting</p>
-                    <p className="font-medium">{zatcaStatus.clearanceStatus ?? zatcaStatus.responseCode ?? '—'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-400">Response Code</p>
-                    <p className="font-medium">{zatcaStatus.responseCode ?? '—'}</p>
+                    <p className="text-xs text-slate-400">Global Transaction ID</p>
+                    <p className="font-mono text-xs break-all">{zatcaStatus.globalTransactionId ?? '—'}</p>
                   </div>
                   {zatcaStatus.responseMessage && (
                     <div className="col-span-2">

@@ -1,7 +1,16 @@
 import type { CustomerRecord } from '../entities'
 
+export type CustomerSortField = 'name' | 'createdAt' | 'outstanding' | 'invoiceCount'
+
 export interface CustomerListOptions {
   search?: string
+  country?: string
+  city?: string
+  hasVat?: boolean
+  hasOutstanding?: boolean
+  creditLimitExceeded?: boolean
+  sortBy?: CustomerSortField
+  sortDir?: 'asc' | 'desc'
 }
 
 export interface CustomerCreateInput {

@@ -10,11 +10,22 @@ import { PageHeader } from '@/components/ui/page-header'
 import { readApiError } from '@/lib/api-client'
 
 interface TaxRate { id: string; name: string; rate: number; type: string; isDefault: boolean; isActive: boolean }
-interface TaxReport { vatCollected: number; vatPaid: number; netVat: number; period: string }
+
+interface TaxReportApi {
+  period: { from: string; to: string }
+  sales: { amount: number; vatCollected: number; invoiceCount: number }
+  purchases: { amount: number; vatPaid: number; billCount: number }
+  vatPayable: number
+  summary: string
+}
+
+const DEFAULT_VAT_RATES: TaxRate[] = [
+  { id: 'default-vat', name: 'Standard VAT', rate: 15, type: 'VAT', isDefault: true, isActive: true },
+]
 
 export default function TaxPage() {
   const [taxRates, setTaxRates] = useState<TaxRate[]>([])
-  const [report, setReport] = useState<TaxReport | null>(null)
+  const [report, setReport] = useState<TaxReportApi | null>(null)
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -26,7 +37,12 @@ export default function TaxPage() {
       fetch('/api/tax'),
       fetch('/api/tax/report'),
     ])
-    if (ratesRes.ok) setTaxRates(await ratesRes.json())
+    if (ratesRes.ok) {
+      const rates = await ratesRes.json()
+      setTaxRates(rates.length > 0 ? rates : DEFAULT_VAT_RATES)
+    } else {
+      setTaxRates(DEFAULT_VAT_RATES)
+    }
     if (reportRes.ok) setReport(await reportRes.json())
     setLoading(false)
   }
@@ -41,9 +57,14 @@ export default function TaxPage() {
       setSaving(false)
       return
     }
-    if (res.ok) { setShowModal(false); load() }
+    setShowModal(false)
+    load()
     setSaving(false)
   }
+
+  const vatCollected = report?.sales?.vatCollected ?? 0
+  const vatPaid = report?.purchases?.vatPaid ?? 0
+  const netVat = report?.vatPayable ?? 0
 
   return (
     <div className="p-6 max-w-[1600px] mx-auto space-y-6">
@@ -54,28 +75,24 @@ export default function TaxPage() {
         action={<Button onClick={() => setShowModal(true)}><Plus size={15} /> Add Tax Rate</Button>}
       />
 
-      {/* VAT Summary */}
-      {report && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">VAT Collected (Output)</p>
-            <p className="text-2xl font-bold text-emerald-600 tabular">{formatCurrency(report.vatCollected)}</p>
-            <p className="text-xs text-slate-400 mt-1">From sales invoices</p>
-          </div>
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">VAT Paid (Input)</p>
-            <p className="text-2xl font-bold text-rose-600 tabular">{formatCurrency(report.vatPaid)}</p>
-            <p className="text-xs text-slate-400 mt-1">From purchase bills</p>
-          </div>
-          <div className={`rounded-2xl border shadow-sm p-5 ${report.netVat >= 0 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Net VAT {report.netVat >= 0 ? 'Payable' : 'Refundable'}</p>
-            <p className={`text-2xl font-bold tabular ${report.netVat >= 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{formatCurrency(Math.abs(report.netVat))}</p>
-            <p className="text-xs text-slate-500 mt-1">{report.netVat >= 0 ? 'Amount due to ZATCA' : 'Refund from ZATCA'}</p>
-          </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">VAT Collected (Output)</p>
+          <p className="text-2xl font-bold text-emerald-600 tabular">{formatCurrency(vatCollected)}</p>
+          <p className="text-xs text-slate-400 mt-1">{report ? `${report.sales.invoiceCount} invoices` : 'From sales invoices'}</p>
         </div>
-      )}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">VAT Paid (Input)</p>
+          <p className="text-2xl font-bold text-rose-600 tabular">{formatCurrency(vatPaid)}</p>
+          <p className="text-xs text-slate-400 mt-1">{report ? `${report.purchases.billCount} bills` : 'From purchase bills'}</p>
+        </div>
+        <div className={`rounded-2xl border shadow-sm p-5 ${netVat >= 0 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Net VAT {netVat >= 0 ? 'Payable' : 'Refundable'}</p>
+          <p className={`text-2xl font-bold tabular ${netVat >= 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{formatCurrency(Math.abs(netVat))}</p>
+          <p className="text-xs text-slate-500 mt-1">{report?.summary ?? (netVat >= 0 ? 'Amount due to ZATCA' : 'Refund from ZATCA')}</p>
+        </div>
+      </div>
 
-      {/* ZATCA Info */}
       <div className="bg-gradient-to-br from-indigo-900 to-violet-900 rounded-2xl p-6 text-white">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center">
@@ -101,7 +118,6 @@ export default function TaxPage() {
         </div>
       </div>
 
-      {/* Tax Rates */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-slate-900">Tax Rates</h2>
@@ -121,13 +137,11 @@ export default function TaxPage() {
             <tbody className="divide-y divide-slate-50">
               {loading ? Array.from({ length: 3 }).map((_, i) => (
                 <tr key={i}>{Array.from({ length: 5 }).map((_, j) => <td key={j} className="px-4 py-3"><div className="skeleton h-4 rounded" /></td>)}</tr>
-              )) : taxRates.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400 text-sm">No tax rates. Add tax rates above.</td></tr>
-              ) : taxRates.map(t => (
+              )) : taxRates.map(t => (
                 <tr key={t.id} className="hover:bg-slate-50/60">
                   <td className="px-4 py-3 font-semibold text-slate-800">{t.name}</td>
                   <td className="px-4 py-3"><span className="badge bg-indigo-50 text-indigo-700 border border-indigo-200">{t.type}</span></td>
-                  <td className="px-4 py-3 font-bold text-slate-900 tabular">{t.rate}%</td>
+                  <td className="px-4 py-3 font-bold text-slate-900 tabular">{Number(t.rate)}%</td>
                   <td className="px-4 py-3">{t.isDefault && <span className="badge bg-emerald-50 text-emerald-700 border border-emerald-200">Default</span>}</td>
                   <td className="px-4 py-3"><span className={`badge ${t.isActive ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-50 text-gray-500 border-gray-200'}`}>{t.isActive ? 'Active' : 'Inactive'}</span></td>
                 </tr>
@@ -139,8 +153,7 @@ export default function TaxPage() {
 
       <Modal open={showModal} onClose={() => setShowModal(false)}
         title="New Tax Rate" size="sm"
-        footer={<><Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button><Button onClick={handleSave} loading={saving}>Save</Button></>}
-      >
+        footer={<><Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button><Button onClick={handleSave} loading={saving}>Save</Button></>}>
         <div className="space-y-4">
           <Input label="Rate Name" required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="VAT 15%" />
           <div className="grid grid-cols-2 gap-3">

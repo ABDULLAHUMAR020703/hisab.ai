@@ -12,7 +12,7 @@ import {
 import {
   TrendingUp, TrendingDown, Clock, RefreshCw, FileText, Receipt,
   BookOpen, Users, Building2, DollarSign, UserCheck, Package,
-  Camera, MapPin, List, CreditCard, Activity, AlertCircle,
+  Camera, MapPin, List, CreditCard, Activity, AlertCircle, Shield,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 
@@ -61,7 +61,7 @@ interface DashboardData {
     netSalary: number; status: string; period: string
   }[]
   activity: {
-    id: string; type: string; label: string; detail: string
+    id: string; type: string; action?: string; label: string; detail: string
     amount?: number; status?: string; date: string; href: string
   }[]
 }
@@ -95,6 +95,7 @@ const ACTIVITY_ICONS: Record<string, typeof FileText> = {
   employee: UserCheck,
   inventory: Package,
   receipt: Camera,
+  zatca: Shield,
 }
 
 function CustomTooltip({ active, payload, label }: { active?: boolean; payload?: { name: string; value: number; color: string }[]; label?: string }) {
@@ -325,12 +326,13 @@ export default function DashboardPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-semibold text-indigo-600 font-mono">{item.label}</span>
+                      <span className="text-xs font-semibold text-slate-800">{item.action ?? item.type}</span>
                       {item.amount != null && (
                         <span className="text-xs font-semibold text-slate-800 tabular">{formatCurrency(item.amount)}</span>
                       )}
                     </div>
-                    <p className="text-xs text-slate-600 truncate mt-0.5">{item.detail}</p>
+                    <p className="text-xs text-indigo-600 font-mono truncate mt-0.5">{item.label}</p>
+                    <p className="text-xs text-slate-600 truncate">{item.detail}</p>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-[10px] text-slate-400">{formatDate(item.date)}</span>
                       {item.status && <Badge status={item.status} />}

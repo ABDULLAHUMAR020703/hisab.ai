@@ -12,12 +12,18 @@ import { readApiError } from '@/lib/api-client'
 interface Customer {
   id: string; customerNo: string; name: string; email?: string; phone?: string
   city?: string; country?: string; taxId?: string; creditLimit: number
-  paymentTerms: number; isActive: boolean
+  paymentTerms: number; isActive: boolean; outstandingBalance?: number
 }
 
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [search, setSearch] = useState('')
+  const [countryFilter, setCountryFilter] = useState('')
+  const [cityFilter, setCityFilter] = useState('')
+  const [vatFilter, setVatFilter] = useState('')
+  const [outstandingFilter, setOutstandingFilter] = useState('')
+  const [sortBy, setSortBy] = useState('name')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Customer | null>(null)
@@ -31,12 +37,20 @@ export default function CustomersPage() {
     setLoading(true)
     const params = new URLSearchParams()
     if (search) params.set('search', search)
+    if (countryFilter) params.set('country', countryFilter)
+    if (cityFilter) params.set('city', cityFilter)
+    if (vatFilter === 'yes') params.set('hasVat', 'true')
+    if (vatFilter === 'no') params.set('hasVat', 'false')
+    if (outstandingFilter === 'yes') params.set('hasOutstanding', 'true')
+    if (outstandingFilter === 'exceeded') params.set('creditLimitExceeded', 'true')
+    params.set('sortBy', sortBy)
+    params.set('sortDir', sortDir)
     const res = await fetch(`/api/customers?${params}`)
     if (res.ok) setCustomers(await res.json())
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [search])
+  useEffect(() => { load() }, [search, countryFilter, cityFilter, vatFilter, outstandingFilter, sortBy, sortDir])
 
   function openCreate() {
     setEditing(null)
@@ -84,6 +98,27 @@ export default function CustomersPage() {
 
       <FilterBar>
         <SearchBar value={search} onChange={setSearch} placeholder="Search customers..." className="flex-1 max-w-sm" />
+        <input value={countryFilter} onChange={e => setCountryFilter(e.target.value)} placeholder="Country" className="input-base w-32" />
+        <input value={cityFilter} onChange={e => setCityFilter(e.target.value)} placeholder="City" className="input-base w-28" />
+        <select value={vatFilter} onChange={e => setVatFilter(e.target.value)} className="input-base w-28">
+          <option value="">VAT</option>
+          <option value="yes">Has VAT</option>
+          <option value="no">No VAT</option>
+        </select>
+        <select value={outstandingFilter} onChange={e => setOutstandingFilter(e.target.value)} className="input-base w-36">
+          <option value="">Balance</option>
+          <option value="yes">Outstanding</option>
+          <option value="exceeded">Limit Exceeded</option>
+        </select>
+        <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="input-base w-36">
+          <option value="name">Alphabetical</option>
+          <option value="createdAt">Newest</option>
+          <option value="outstanding">Highest Outstanding</option>
+        </select>
+        <select value={sortDir} onChange={e => setSortDir(e.target.value as 'asc' | 'desc')} className="input-base w-24">
+          <option value="asc">Asc</option>
+          <option value="desc">Desc</option>
+        </select>
         <button onClick={load} className="p-2 border border-slate-200 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-50 bg-white transition-colors">
           <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
         </button>
@@ -94,16 +129,16 @@ export default function CustomersPage() {
           <table className="w-full data-table">
             <thead>
               <tr className="border-b border-slate-100">
-                {['#', 'Name', 'Contact', 'City', 'Tax ID', 'Credit Limit', 'Terms', 'Status', ''].map((h, i) => (
-                  <th key={i} className={cn('px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wider text-left', h === 'Credit Limit' && 'text-right', h === 'Status' && 'text-center', h === '' && 'w-20')}>{h}</th>
+                {['#', 'Name', 'Contact', 'City', 'Tax ID', 'Outstanding', 'Credit Limit', 'Terms', 'Status', ''].map((h, i) => (
+                  <th key={i} className={cn('px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wider text-left', ['Outstanding', 'Credit Limit'].includes(h) && 'text-right', h === 'Status' && 'text-center', h === '' && 'w-20')}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
               {loading ? Array.from({ length: 5 }).map((_, i) => (
-                <tr key={i}>{Array.from({ length: 9 }).map((_, j) => <td key={j} className="px-4 py-3"><div className="skeleton h-4 rounded" /></td>)}</tr>
+                <tr key={i}>{Array.from({ length: 10 }).map((_, j) => <td key={j} className="px-4 py-3"><div className="skeleton h-4 rounded" /></td>)}</tr>
               )) : customers.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-16 text-center text-slate-400 text-sm">No customers yet. Add your first customer.</td></tr>
+                <tr><td colSpan={10} className="px-4 py-16 text-center text-slate-400 text-sm">No customers yet. Add your first customer.</td></tr>
               ) : customers.map(c => (
                 <tr key={c.id} className="hover:bg-slate-50/60 transition-colors">
                   <td className="px-4 py-3 font-mono text-xs text-slate-500">{c.customerNo}</td>
@@ -117,6 +152,7 @@ export default function CustomersPage() {
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-600">{c.city || '—'}</td>
                   <td className="px-4 py-3 text-xs font-mono text-slate-500">{c.taxId || '—'}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-amber-700 tabular text-sm">{formatCurrency(c.outstandingBalance ?? 0)}</td>
                   <td className="px-4 py-3 text-right font-semibold text-slate-700 tabular text-sm">{formatCurrency(c.creditLimit)}</td>
                   <td className="px-4 py-3 text-sm text-slate-600">Net {c.paymentTerms}d</td>
                   <td className="px-4 py-3 text-center">

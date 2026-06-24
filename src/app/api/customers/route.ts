@@ -1,12 +1,29 @@
 ﻿import { requireAuth } from '@/lib/auth'
 import { getCustomerRepository } from '@/lib/db/provider'
+import type { CustomerListOptions } from '@/lib/db/repositories/customer.repository.interface'
+
+function pickBool(searchParams: URLSearchParams, key: string): boolean | undefined {
+  const value = searchParams.get(key)
+  if (value === 'true') return true
+  if (value === 'false') return false
+  return undefined
+}
 
 export async function GET(request: Request) {
   try {
     await requireAuth()
     const { searchParams } = new URL(request.url)
-    const search = searchParams.get('search') ?? undefined
-    const customers = await getCustomerRepository().findMany({ search })
+    const options: CustomerListOptions = {
+      search: searchParams.get('search') ?? undefined,
+      country: searchParams.get('country') ?? undefined,
+      city: searchParams.get('city') ?? undefined,
+      hasVat: pickBool(searchParams, 'hasVat'),
+      hasOutstanding: pickBool(searchParams, 'hasOutstanding'),
+      creditLimitExceeded: searchParams.get('creditLimitExceeded') === 'true' ? true : undefined,
+      sortBy: (searchParams.get('sortBy') as CustomerListOptions['sortBy']) ?? undefined,
+      sortDir: (searchParams.get('sortDir') as CustomerListOptions['sortDir']) ?? undefined,
+    }
+    const customers = await getCustomerRepository().findMany(options)
     return Response.json(customers)
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {

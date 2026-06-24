@@ -20,6 +20,7 @@ import type {
   InvoiceRepository,
   InvoiceUpdateInput,
 } from './invoice.repository.interface'
+import { mapInvoiceSortColumn, resolveInvoiceDateRange } from './invoice-list-utils'
 
 function formatIssueTime(date: Date): string {
   return date.toTimeString().split(' ')[0]
@@ -133,60 +134,83 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
   async findMany(options: InvoiceListOptions = {}) {
     const db = supabaseDb()
     const companyId = await resolveCompanyId()
-    const search = options.search?.trim()
+    const search = options.search?.trim().toLowerCase()
     const status = options.status?.trim()
+    const zatcaStatus = options.zatcaStatus?.trim()
+    const invoiceType = options.invoiceType?.trim()
+    const customerId = options.customerId?.trim()
+    const page = Math.max(1, options.page ?? 1)
+    const limit = Math.min(100, Math.max(1, options.limit ?? 50))
+    const sortColumn = mapInvoiceSortColumn(options.sortBy)
+    const ascending = options.sortDir === 'asc'
+    const { from: dateFrom, to: dateTo } = resolveInvoiceDateRange(options)
 
     let query = db
       .from('invoices')
-      .select('*, customers(name, email)')
+      .select('*, customers(name, email)', { count: 'exact' })
       .eq('company_id', companyId)
       .is('deleted_at', null)
-      .order('date', { ascending: false })
 
-    if (status) query = query.eq('status', status)
+    if (status && status !== 'OVERDUE') query = query.eq('status', status)
+    if (status === 'OVERDUE') {
+      query = query.in('status', ['SENT', 'PARTIAL']).lt('due_date', new Date().toISOString()).gt('balance', 0)
+    }
+    if (options.overdue) {
+      query = query.in('status', ['SENT', 'PARTIAL']).lt('due_date', new Date().toISOString()).gt('balance', 0)
+    }
+    if (zatcaStatus) query = query.eq('zatca_status', zatcaStatus)
+    if (invoiceType) query = query.eq('invoice_type', invoiceType)
+    if (customerId) {
+      const scopedCustomerId = await resolveScopedUuid('customers', customerId, companyId)
+      if (scopedCustomerId) query = query.eq('customer_id', scopedCustomerId)
+    }
+    if (dateFrom) query = query.gte('date', dateFrom)
+    if (dateTo) query = query.lte('date', dateTo)
+    if (search) query = query.ilike('invoice_no', `%${search}%`)
 
-    const { data, error } = await query
+    query = query.order(sortColumn, { ascending, nullsFirst: false })
+    if (sortColumn !== 'created_at') {
+      query = query.order('created_at', { ascending: false })
+    }
+
+    const offset = (page - 1) * limit
+    const { data, error, count } = await query.range(offset, offset + limit - 1)
     if (error) throw error
 
     let rows = data ?? []
     if (search) {
-      const needle = search.toLowerCase()
       rows = rows.filter((row) => {
         const invNo = String(row.invoice_no).toLowerCase()
         const cust = row.customers as { name?: string } | null
         const custName = cust?.name?.toLowerCase() ?? ''
-        return invNo.includes(needle) || custName.includes(needle)
+        return invNo.includes(search) || custName.includes(search)
       })
     }
 
-    const invoiceIds = rows.map((r) => String(r.id))
-    const linesByInvoice = new Map<string, ReturnType<typeof mapInvoiceLineRow>[]>()
-
-    if (invoiceIds.length > 0) {
-      const { data: lines, error: lineError } = await db
-        .from('invoice_lines')
-        .select('*')
-        .eq('company_id', companyId)
-        .in('invoice_id', invoiceIds)
-
-      if (lineError) throw lineError
-      for (const line of lines ?? []) {
-        const invoiceId = String(line.invoice_id)
-        const bucket = linesByInvoice.get(invoiceId) ?? []
-        bucket.push(mapInvoiceLineRow(line))
-        linesByInvoice.set(invoiceId, bucket)
-      }
+    if (options.sortBy === 'customerName') {
+      rows = [...rows].sort((a, b) => {
+        const aName = String((a.customers as { name?: string } | null)?.name ?? '')
+        const bName = String((b.customers as { name?: string } | null)?.name ?? '')
+        const cmp = aName.localeCompare(bName)
+        return ascending ? cmp : -cmp
+      })
     }
 
-    return rows.map((row) => {
+    const items = rows.map((row) => {
       const invoice = mapInvoiceRow(row)
       const cust = row.customers as { name?: string; email?: string | null } | null
       return {
         ...invoice,
         customer: cust ? { name: cust.name ?? '', email: cust.email ?? null } : undefined,
-        lines: linesByInvoice.get(invoice.id) ?? [],
       }
     })
+
+    return {
+      items,
+      total: count ?? items.length,
+      page,
+      limit,
+    }
   },
 
   async findById(id: string) {

@@ -18,7 +18,22 @@ const variants: Record<string, string> = {
   MATCHED:     'bg-green-50 text-green-700 border border-green-200',
   VAT:      'bg-indigo-50 text-indigo-700 border border-indigo-200',
   MONTHLY:  'bg-slate-50 text-slate-600 border border-slate-200',
+  CLEARED:  'bg-emerald-50 text-emerald-700 border border-emerald-200',
+  REPORTED: 'bg-blue-50 text-blue-700 border border-blue-200',
+  SUBMITTED:'bg-indigo-50 text-indigo-700 border border-indigo-200',
+  FAILED:   'bg-red-50 text-red-700 border border-red-200',
+  'NOT SUBMITTED': 'bg-slate-50 text-slate-600 border border-slate-200',
   default:  'bg-gray-100 text-gray-600 border border-gray-200',
+}
+
+const zatcaVariants: Record<string, string> = {
+  DRAFT: 'bg-slate-50 text-slate-600 border border-slate-200',
+  PENDING: 'bg-amber-50 text-amber-700 border border-amber-200',
+  SUBMITTED: 'bg-indigo-50 text-indigo-700 border border-indigo-200',
+  CLEARED: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+  REPORTED: 'bg-blue-50 text-blue-700 border border-blue-200',
+  FAILED: 'bg-red-50 text-red-700 border border-red-200',
+  REJECTED: 'bg-red-50 text-red-600 border border-red-200',
 }
 
 export function Badge({ status, label, className }: { status?: string; label?: string; className?: string }) {
@@ -29,6 +44,21 @@ export function Badge({ status, label, className }: { status?: string; label?: s
       {label || status}
     </span>
   )
+}
+
+export function ZatcaBadge({ status, className }: { status?: string | null; className?: string }) {
+  const key = (status || 'DRAFT').toUpperCase()
+  const label = key === 'DRAFT' ? 'Not Submitted' : key.replaceAll('_', ' ')
+  const style = zatcaVariants[key] || variants.default
+  return (
+    <span className={cn('badge', style, className)}>
+      {label}
+    </span>
+  )
+}
+
+export function BusinessBadge({ status, className }: { status?: string; className?: string }) {
+  return <Badge status={status} className={className} />
 }
 
 export function StatusDot({ status }: { status: string }) {

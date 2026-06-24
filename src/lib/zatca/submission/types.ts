@@ -19,10 +19,13 @@ export interface InvoiceStatusView {
   invoiceNo: string
   zatcaStatus: ZatcaInvoiceStatus
   requestId: string | null
+  globalTransactionId: string | null
   responseCode: string | null
   responseMessage: string | null
   clearanceStatus: string | null
   submittedAt: string | null
+  environment: ZatcaEnvironment
+  submissionRoute: ZatcaSubmissionRoute | null
   canSubmit: boolean
 }
 
