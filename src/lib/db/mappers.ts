@@ -50,6 +50,8 @@ export function mapCompanySettingsRows(
     country: String(company.country ?? 'Saudi Arabia'),
     phone: (company.phone as string | null) ?? null,
     email: (company.email as string | null) ?? null,
+    website: (company.website as string | null) ?? null,
+    logoUrl: (company.logo_url as string | null) ?? null,
     currency: String(company.currency ?? 'SAR'),
     fiscalYearStart: String(company.fiscal_year_start ?? '01-01'),
     zatcaEnabled: Boolean(zatca?.zatca_enabled ?? false),

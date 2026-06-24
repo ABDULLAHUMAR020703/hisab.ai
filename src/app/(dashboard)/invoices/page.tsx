@@ -196,8 +196,12 @@ export default function InvoicesPage() {
     }
   }
 
+  function viewPdf(inv: Invoice) {
+    window.open(`/api/invoices/${inv.id}/pdf?disposition=inline`, '_blank')
+  }
+
   function downloadPdf(inv: Invoice) {
-    window.open(`/api/invoices/${inv.id}/pdf`, '_blank')
+    window.open(`/api/invoices/${inv.id}/pdf?disposition=attachment`, '_blank')
   }
 
   function openArtifact(type: 'xml' | 'signed-xml' | 'qr') {
@@ -439,7 +443,7 @@ export default function InvoicesPage() {
                         className="flex items-center gap-1 text-[11px] font-semibold text-slate-500 hover:text-slate-700 hover:bg-slate-100 px-2 py-1 rounded-lg transition-colors">
                         <Eye size={10} /> View
                       </button>
-                      <button onClick={() => downloadPdf(inv)}
+                      <button onClick={() => viewPdf(inv)}
                         className="flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-2 py-1 rounded-lg transition-colors">
                         <FileDown size={10} /> PDF
                       </button>
@@ -596,6 +600,9 @@ export default function InvoicesPage() {
         size="md"
         footer={
           <>
+            <Button variant="outline" onClick={() => selectedInvoice && viewPdf(selectedInvoice)}>
+              <Eye size={14} /> View PDF
+            </Button>
             <Button variant="outline" onClick={() => selectedInvoice && downloadPdf(selectedInvoice)}>
               <FileDown size={14} /> Download PDF
             </Button>

@@ -35,6 +35,8 @@ export interface CompanySettingsRecord {
   country: string
   phone: string | null
   email: string | null
+  website: string | null
+  logoUrl: string | null
   currency: string
   fiscalYearStart: string
   zatcaEnabled: boolean
@@ -63,6 +65,8 @@ export interface CompanySettingsUpdateInput {
   country?: string
   phone?: string | null
   email?: string | null
+  website?: string | null
+  logoUrl?: string | null
   currency?: string
   fiscalYearStart?: string
   zatcaEnabled?: boolean

@@ -1,50 +1,38 @@
 import { requireAuth } from '@/lib/auth'
 import { generateInvoicePdf } from '@/lib/invoices/pdf'
-import { prisma } from '@/lib/prisma'
 
 /**
  * GET /api/invoices/:id/pdf
- * Downloads a printable PDF tax invoice with ZATCA QR when available.
+ * Generates a company-branded printable tax invoice PDF.
+ * ?disposition=inline — open in browser (View PDF)
+ * ?disposition=attachment — download (default)
  */
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     await requireAuth()
     const { id } = await params
+    const { searchParams } = new URL(request.url)
+    const inline = searchParams.get('disposition') === 'inline'
 
-    const invoice = await prisma.invoice.findUnique({
-      where: { id },
-      include: {
-        customer: true,
-        lines: { orderBy: { id: 'asc' } },
-      },
-    })
+    const { pdf: buffer, filename } = await generateInvoicePdf(id)
 
-    if (!invoice) {
-      return Response.json({ error: 'Invoice not found' }, { status: 404 })
-    }
-
-    const settings = await prisma.companySettings.findFirst()
-    if (!settings) {
-      return Response.json({ error: 'Company settings not found' }, { status: 404 })
-    }
-
-    const pdf = await generateInvoicePdf(invoice, settings)
-    const filename = `${invoice.invoiceNo.replace(/[^\w.-]+/g, '_')}.pdf`
-
-    return new Response(new Uint8Array(pdf), {
+    return new Response(new Uint8Array(buffer), {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="${filename}"`,
-        'Cache-Control': 'no-store',
+        'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename="${filename}"`,
+        'Cache-Control': 'private, no-cache',
       },
     })
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    if (error instanceof Error && error.message === 'Invoice not found') {
+      return Response.json({ error: 'Invoice not found' }, { status: 404 })
     }
     return Response.json({ error: String(error) }, { status: 500 })
   }

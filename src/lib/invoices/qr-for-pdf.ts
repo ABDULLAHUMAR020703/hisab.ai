@@ -30,8 +30,24 @@ export interface InvoiceQrForPdf {
   caption: string
 }
 
+function isSubmittedZatcaStatus(status: string): boolean {
+  const normalized = status.toUpperCase()
+  return normalized === 'CLEARED' || normalized === 'REPORTED' || normalized === 'SUBMITTED'
+}
+
+async function qrFromStoredXml(xml: string): Promise<InvoiceQrForPdf | null> {
+  const embedded = extractQrPayloadFromSignedXml(xml)
+  if (!embedded) return null
+  return {
+    png: await tlvPayloadToPngBuffer(embedded),
+    phase: 2,
+    caption: 'ZATCA E-Invoice QR',
+  }
+}
+
 /**
  * Resolves the best available ZATCA QR image for a printable invoice PDF.
+ * Submitted invoices use only stored cleared/signed XML — never regenerated.
  */
 export async function resolveInvoiceQrForPdf(invoiceId: string): Promise<InvoiceQrForPdf | null> {
   const loaded = await loadZatcaInvoiceById(invoiceId)
@@ -40,35 +56,25 @@ export async function resolveInvoiceQrForPdf(invoiceId: string): Promise<Invoice
   }
 
   const { invoice, input, companySettings } = loaded
+  const zatcaStatus = (invoice.zatcaStatus ?? 'DRAFT').toUpperCase()
 
-  if (invoice.signedXml) {
-    const embedded = extractQrPayloadFromSignedXml(invoice.signedXml)
-    if (embedded) {
-      return {
-        png: await tlvPayloadToPngBuffer(embedded),
-        phase: 2,
-        caption: 'ZATCA E-Invoice QR (Phase 2)',
+  if (isSubmittedZatcaStatus(zatcaStatus)) {
+    if (zatcaStatus === 'CLEARED' && invoice.clearedInvoicePayload) {
+      try {
+        const clearedXml = Buffer.from(invoice.clearedInvoicePayload, 'base64').toString('utf8')
+        const fromCleared = await qrFromStoredXml(clearedXml)
+        if (fromCleared) return fromCleared
+      } catch {
+        // Fall through to signed XML.
       }
     }
 
-    try {
-      const creds = await loadSigningCredentials(companySettings.zatcaEnvironment)
-      const phase2 = await generatePhase2QrDataUrl({
-        invoice: input,
-        signedXml: invoice.signedXml,
-        certificatePem: creds.certificatePem,
-      })
-      if (phase2.validation.valid && phase2.qrDataUrl) {
-        const base64 = phase2.qrDataUrl.replace(/^data:image\/png;base64,/, '')
-        return {
-          png: Buffer.from(base64, 'base64'),
-          phase: 2,
-          caption: 'ZATCA E-Invoice QR (Phase 2)',
-        }
-      }
-    } catch {
-      // Fall through to Phase 1 or ephemeral signing.
+    if (invoice.signedXml) {
+      const fromSigned = await qrFromStoredXml(invoice.signedXml)
+      if (fromSigned) return fromSigned
     }
+
+    return null
   }
 
   const needsPhase2Qr =
@@ -92,7 +98,7 @@ export async function resolveInvoiceQrForPdf(invoiceId: string): Promise<Invoice
           return {
             png: await tlvPayloadToPngBuffer(signed.qrPayload),
             phase: 2,
-            caption: 'ZATCA E-Invoice QR (Phase 2)',
+            caption: 'ZATCA E-Invoice QR (preview)',
           }
         }
       }
@@ -112,6 +118,6 @@ export async function resolveInvoiceQrForPdf(invoiceId: string): Promise<Invoice
     phase: 1,
     caption: needsPhase2Qr
       ? 'ZATCA QR (preview — submit invoice for Phase 2 stamp)'
-      : 'ZATCA E-Invoice QR',
+      : 'ZATCA E-Invoice QR (preview)',
   }
 }
