@@ -1,11 +1,10 @@
 import 'server-only'
-import { createHash, createSign, createVerify } from 'crypto'
+import { createHash, createPrivateKey, createSign, createVerify } from 'crypto'
 import forge from 'node-forge'
 import { generateZatcaInvoiceHash } from '../hash/zatca-hash'
 import { stripSignatureBlock } from './canonicalize'
 import {
-  buildSignedPropertiesForEmbedding,
-  buildSignedPropertiesForHashing,
+  buildSignedProperties,
   hashSignedProperties,
 } from './signed-properties'
 import { cleanCertificateBody, getCertificateHash, parseZatcaCertificate } from './x509'
@@ -13,6 +12,7 @@ import type { ZatcaCertificateInfo } from './x509'
 
 const DS_NS = 'http://www.w3.org/2000/09/xmldsig#'
 const XADES_NS = 'http://uri.etsi.org/01903/v1.3.2#'
+const SHA256_DIGEST_METHOD = 'http://www.w3.org/2001/04/xmlenc#sha256'
 
 export interface InvoiceSignResult {
   signedXml: string
@@ -44,14 +44,30 @@ function signInvoiceHashBytes(hashBytes: Buffer, privateKeyPem: string): string 
     const signer = createSign('SHA256')
     signer.update(hashBytes)
     signer.end()
-    return signer.sign(privateKeyPem, 'base64')
+    return signer.sign({ key: privateKeyPem, dsaEncoding: 'ieee-p1363' }, 'base64')
   } catch {
-    const privateKey = forge.pki.privateKeyFromPem(privateKeyPem)
-    const md = forge.md.sha256.create()
-    md.update(hashBytes.toString('binary'), 'raw')
-    const signature = privateKey.sign(md)
-    return Buffer.from(signature, 'binary').toString('base64')
+    const keyObject = createPrivateKey(privateKeyPem)
+    const derSignature = createSign('SHA256')
+      .update(hashBytes)
+      .end()
+      .sign(keyObject)
+    return derEcdsaSignatureToP1363(derSignature).toString('base64')
   }
+}
+
+function derEcdsaSignatureToP1363(signature: Buffer): Buffer {
+  const der = forge.asn1.fromDer(signature.toString('binary'))
+  const values = der.value as forge.asn1.Asn1[]
+  const r = Buffer.from(forge.util.hexToBytes((values[0].value as string)), 'binary')
+  const s = Buffer.from(forge.util.hexToBytes((values[1].value as string)), 'binary')
+  return Buffer.concat([normalizeEcdsaInteger(r), normalizeEcdsaInteger(s)])
+}
+
+function normalizeEcdsaInteger(value: Buffer): Buffer {
+  const trimmed = value.length > 32 && value[0] === 0 ? value.subarray(1) : value
+  if (trimmed.length > 32) return trimmed.subarray(trimmed.length - 32)
+  if (trimmed.length === 32) return trimmed
+  return Buffer.concat([Buffer.alloc(32 - trimmed.length), trimmed])
 }
 
 function isMockSigningEnabled(): boolean {
@@ -116,11 +132,11 @@ function buildUblExtensionsBlock(params: {
                     <ds:XPath>not(//ancestor-or-self::cac:AdditionalDocumentReference[cbc:ID='QR'])</ds:XPath>
                   </ds:Transform>
                 </ds:Transforms>
-                <ds:DigestMethod Algorithm="http://www.w3.org/2001/09/xmldsig#sha256"/>
+                <ds:DigestMethod Algorithm="${SHA256_DIGEST_METHOD}"/>
                 <ds:DigestValue>${invoiceHashBase64}</ds:DigestValue>
               </ds:Reference>
-              <ds:Reference Type="http://uri.etsi.org/01903#SignedProperties" URI="#xadesSignedProperties">
-                <ds:DigestMethod Algorithm="http://www.w3.org/2001/09/xmldsig#sha256"/>
+              <ds:Reference Type="http://www.w3.org/2000/09/xmldsig#SignatureProperties" URI="#xadesSignedProperties">
+                <ds:DigestMethod Algorithm="${SHA256_DIGEST_METHOD}"/>
                 <ds:DigestValue>${signedPropertiesHash}</ds:DigestValue>
               </ds:Reference>
             </ds:SignedInfo>
@@ -172,24 +188,17 @@ export function signInvoiceXmlDetailed(
   const certInfo = resolveCertificateInfo(certificatePem)
   const signingTime = formatZatcaSigningTime()
 
-  const signedPropertiesForHash = buildSignedPropertiesForHashing({
+  const signedPropertiesXml = buildSignedProperties({
     signingTime,
     certificateHash: certInfo.hash,
     certificateIssuer: certInfo.issuer,
     certificateSerialNumber: certInfo.serialNumber,
   })
-  const signedPropertiesHash = hashSignedProperties(signedPropertiesForHash)
+  const signedPropertiesHash = hashSignedProperties(signedPropertiesXml)
 
   const digitalSignature = isMockSigningEnabled()
     ? createHash('sha256').update(`mock:${invoiceHashBase64}`, 'utf8').digest('base64')
     : signInvoiceHashBytes(invoiceHashBytes, privateKeyPem)
-
-  const signedPropertiesXml = buildSignedPropertiesForEmbedding({
-    signingTime,
-    certificateHash: certInfo.hash,
-    certificateIssuer: certInfo.issuer,
-    certificateSerialNumber: certInfo.serialNumber,
-  })
 
   const signatureBlock = buildUblExtensionsBlock({
     invoiceHashBase64,
@@ -236,7 +245,11 @@ export function verifyInvoiceSignature(xml: string, certificatePem: string): boo
     const verifier = createVerify('SHA256')
     verifier.update(hashBytes)
     verifier.end()
-    return verifier.verify(certificatePem, signatureMatch[1], 'base64')
+    return verifier.verify(
+      { key: certificatePem, dsaEncoding: 'ieee-p1363' },
+      signatureMatch[1],
+      'base64',
+    )
   } catch {
     if (isMockSigningEnabled()) return true
     return false

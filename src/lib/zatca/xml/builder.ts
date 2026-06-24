@@ -52,19 +52,32 @@ function buildParty(party: ZatcaParty): string {
   const identifications = party.identifications
     .map((ident) => buildPartyIdentification(ident.schemeId, ident.id))
     .join('\n    ')
+  const vatIdentification = party.identifications.find((ident) => ident.schemeId === 'VAT')
 
   const contact = [
     party.telephone ? el('cbc:Telephone', party.telephone) : '',
     party.email ? el('cbc:ElectronicMail', party.email) : '',
   ].filter(Boolean)
 
+  const partyTaxScheme = vatIdentification
+    ? [
+        '<cac:PartyTaxScheme>',
+        el('cbc:CompanyID', vatIdentification.id),
+        '<cac:TaxScheme>',
+        el('cbc:ID', 'VAT'),
+        '</cac:TaxScheme>',
+        '</cac:PartyTaxScheme>',
+      ].join('\n      ')
+    : ''
+
   return [
     '<cac:Party>',
     identifications,
+    buildPostalAddressBlock(party),
+    partyTaxScheme,
     '<cac:PartyLegalEntity>',
     el('cbc:RegistrationName', party.registrationName),
     '</cac:PartyLegalEntity>',
-    buildPostalAddressBlock(party),
     contact.length ? '<cac:Contact>' + contact.join('\n      ') + '\n    </cac:Contact>' : '',
     '</cac:Party>',
   ]
@@ -123,7 +136,22 @@ function buildUblSignatureStub(): string {
   ].join('\n  ')
 }
 
+function buildPaymentMeans(document: ZatcaInvoiceDocument): string {
+  const instructionNote = document.invoiceTypeCode === '381' || document.invoiceTypeCode === '383'
+    ? el('cbc:InstructionNote', document.notes || 'Invoice adjustment')
+    : ''
+
+  return [
+    '<cac:PaymentMeans>',
+    el('cbc:PaymentMeansCode', '10'),
+    instructionNote,
+    '</cac:PaymentMeans>',
+  ].filter(Boolean).join('\n  ')
+}
+
 function buildInvoiceLine(line: ZatcaInvoiceLine, currency: string): string {
+  const lineInclusiveAmount = line.lineExtensionAmount + line.taxAmount
+
   return [
     '<cac:InvoiceLine>',
     el('cbc:ID', line.id),
@@ -131,7 +159,7 @@ function buildInvoiceLine(line: ZatcaInvoiceLine, currency: string): string {
     amountEl('cbc:LineExtensionAmount', line.lineExtensionAmount, currency),
     '<cac:TaxTotal>',
     amountEl('cbc:TaxAmount', line.taxAmount, currency),
-    amountEl('cbc:RoundingAmount', 0, currency),
+    amountEl('cbc:RoundingAmount', lineInclusiveAmount, currency),
     '</cac:TaxTotal>',
     '<cac:Item>',
     el('cbc:Name', line.itemName),
@@ -192,6 +220,10 @@ export function buildZatcaInvoiceXml(document: ZatcaInvoiceDocument): string {
     '<cac:AccountingCustomerParty>',
     buildParty(document.customer),
     '</cac:AccountingCustomerParty>',
+    buildPaymentMeans(document),
+    '<cac:TaxTotal>',
+    amountEl('cbc:TaxAmount', document.taxTotal.taxAmount, currency),
+    '</cac:TaxTotal>',
     '<cac:TaxTotal>',
     amountEl('cbc:TaxAmount', document.taxTotal.taxAmount, currency),
     taxSubtotals,
@@ -200,6 +232,7 @@ export function buildZatcaInvoiceXml(document: ZatcaInvoiceDocument): string {
     amountEl('cbc:LineExtensionAmount', monetary.lineExtensionAmount, currency),
     amountEl('cbc:TaxExclusiveAmount', monetary.taxExclusiveAmount, currency),
     amountEl('cbc:TaxInclusiveAmount', monetary.taxInclusiveAmount, currency),
+    amountEl('cbc:AllowanceTotalAmount', 0, currency),
     amountEl('cbc:PayableAmount', monetary.payableAmount, currency),
     '</cac:LegalMonetaryTotal>',
     invoiceLines,

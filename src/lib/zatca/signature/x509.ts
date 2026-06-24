@@ -8,7 +8,7 @@ export interface ZatcaCertificateInfo {
   subject: string
   serialNumber: string
   fingerprint256: string
-  /** Raw ECDSA public key bytes (SubjectPublicKeyInfo BIT STRING). */
+  /** DER-encoded SubjectPublicKeyInfo public key bytes (QR tag 8 source). */
   publicKey: Buffer
   /** ECDSA signature bytes from the certificate (Tag 9 source). */
   certificateSignature: Buffer
@@ -28,8 +28,7 @@ export function cleanCertificateBody(certificatePem: string): string {
  * @see ZATCA security features implementation standards §1.6.2.1.1.2
  */
 export function getCertificateHash(certBodyBase64: string): string {
-  const hexDigest = createHash('sha256').update(certBodyBase64, 'utf8').digest('hex')
-  return Buffer.from(hexDigest, 'utf8').toString('base64')
+  return createHash('sha256').update(Buffer.from(certBodyBase64, 'base64')).digest('base64')
 }
 
 function parseWithNodeCrypto(certificatePem: string, bodyBase64: string): ZatcaCertificateInfo | null {
@@ -103,12 +102,7 @@ function bitStringValue(buffer: Buffer, node: DerNode): Buffer {
 }
 
 function extractSubjectPublicKeyBytes(x509: X509Certificate): Buffer {
-  const spkiDer = x509.publicKey.export({ format: 'der', type: 'spki' }) as Buffer
-  const spki = readDerNode(spkiDer)
-  const children = readSequenceChildren(spki, spkiDer)
-  const publicKeyBitString = children.find((child) => child.tag === 0x03)
-  if (!publicKeyBitString) throw new Error('Certificate public key bit string not found')
-  return bitStringValue(spkiDer, publicKeyBitString)
+  return x509.publicKey.export({ format: 'der', type: 'spki' }) as Buffer
 }
 
 function extractCertificateSignatureBytes(certificateDer: Buffer): Buffer {

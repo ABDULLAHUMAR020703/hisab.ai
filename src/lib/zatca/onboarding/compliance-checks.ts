@@ -60,7 +60,7 @@ async function createComplianceTestInvoice(
       createdById: userId,
       lines: {
         create: [{
-          description: `ZATCA compliance check — ${invoiceType}`,
+          description: `ZATCA compliance check - ${invoiceType}`,
           quantity: 1,
           unitPrice: 1000,
           taxRate: 15,
