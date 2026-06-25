@@ -1,12 +1,23 @@
 ﻿'use client'
 
-import { useEffect, useState } from 'react'
-import { Plus, RefreshCw, Mail, Phone, Edit2, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Plus, Mail, Phone, Edit2, Trash2 } from 'lucide-react'
 import { formatCurrency, cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { Input } from '@/components/ui/input'
-import { PageHeader, SearchBar, FilterBar } from '@/components/ui/page-header'
+import { PageHeader } from '@/components/ui/page-header'
+import {
+  CustomerFilterCard,
+  type CustomerFilterFacets,
+} from '@/components/customers/customer-filter-card'
+import {
+  countActiveCustomerFilters,
+  CUSTOMER_FILTERS_STORAGE_KEY,
+  DEFAULT_CUSTOMER_FILTERS,
+  loadStoredCustomerFilters,
+  type CustomerFilterValues,
+} from '@/lib/ui/customer-filters'
 import { readApiError } from '@/lib/api-client'
 
 interface Customer {
@@ -15,15 +26,26 @@ interface Customer {
   paymentTerms: number; isActive: boolean; outstandingBalance?: number
 }
 
+const EMPTY_FACETS: CustomerFilterFacets = { countries: [], citiesByCountry: {} }
+
+function buildQueryParams(filters: CustomerFilterValues): URLSearchParams {
+  const params = new URLSearchParams()
+  if (filters.search.trim()) params.set('search', filters.search.trim())
+  if (filters.country) params.set('country', filters.country)
+  if (filters.city) params.set('city', filters.city)
+  if (filters.vatFilter) params.set('vatFilter', filters.vatFilter)
+  if (filters.balanceFilter) params.set('balanceFilter', filters.balanceFilter)
+  params.set('sortBy', filters.sortBy)
+  params.set('sortDir', filters.sortDir)
+  return params
+}
+
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([])
-  const [search, setSearch] = useState('')
-  const [countryFilter, setCountryFilter] = useState('')
-  const [cityFilter, setCityFilter] = useState('')
-  const [vatFilter, setVatFilter] = useState('')
-  const [outstandingFilter, setOutstandingFilter] = useState('')
-  const [sortBy, setSortBy] = useState('name')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [facets, setFacets] = useState<CustomerFilterFacets>(EMPTY_FACETS)
+  const [filters, setFilters] = useState<CustomerFilterValues>(DEFAULT_CUSTOMER_FILTERS)
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [filtersReady, setFiltersReady] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Customer | null>(null)
@@ -33,24 +55,88 @@ export default function CustomersPage() {
     taxId: '', creditLimit: 0, paymentTerms: 30
   })
 
-  async function load() {
+  useEffect(() => {
+    const stored = loadStoredCustomerFilters()
+    setFilters(stored)
+    setDebouncedSearch(stored.search)
+    setFiltersReady(true)
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(filters.search)
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [filters.search])
+
+  const queryFilters = useMemo(
+    () => ({ ...filters, search: debouncedSearch }),
+    [filters, debouncedSearch],
+  )
+
+  const activeFilterCount = countActiveCustomerFilters(queryFilters)
+
+  const load = useCallback(async () => {
     setLoading(true)
-    const params = new URLSearchParams()
-    if (search) params.set('search', search)
-    if (countryFilter) params.set('country', countryFilter)
-    if (cityFilter) params.set('city', cityFilter)
-    if (vatFilter === 'yes') params.set('hasVat', 'true')
-    if (vatFilter === 'no') params.set('hasVat', 'false')
-    if (outstandingFilter === 'yes') params.set('hasOutstanding', 'true')
-    if (outstandingFilter === 'exceeded') params.set('creditLimitExceeded', 'true')
-    params.set('sortBy', sortBy)
-    params.set('sortDir', sortDir)
+    const params = buildQueryParams(queryFilters)
     const res = await fetch(`/api/customers?${params}`)
     if (res.ok) setCustomers(await res.json())
     setLoading(false)
+  }, [queryFilters])
+
+  useEffect(() => {
+    if (!filtersReady) return
+    void load()
+    try {
+      localStorage.setItem(CUSTOMER_FILTERS_STORAGE_KEY, JSON.stringify(filters))
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [filtersReady, load, filters])
+
+  useEffect(() => {
+    fetch('/api/customers/facets')
+      .then((r) => (r.ok ? r.json() : EMPTY_FACETS))
+      .then((data) => setFacets(data))
+      .catch(() => setFacets(EMPTY_FACETS))
+  }, [])
+
+  function patchFilters(patch: Partial<CustomerFilterValues>) {
+    setFilters((current) => ({ ...current, ...patch }))
   }
 
-  useEffect(() => { load() }, [search, countryFilter, cityFilter, vatFilter, outstandingFilter, sortBy, sortDir])
+  function resetFilters() {
+    setFilters(DEFAULT_CUSTOMER_FILTERS)
+    setDebouncedSearch('')
+    try {
+      localStorage.removeItem(CUSTOMER_FILTERS_STORAGE_KEY)
+    } catch {
+      // Ignore storage failures.
+    }
+  }
+
+  function removeFilterChip(key: keyof CustomerFilterValues) {
+    switch (key) {
+      case 'search':
+        patchFilters({ search: '' })
+        setDebouncedSearch('')
+        break
+      case 'country':
+        patchFilters({ country: '', city: '' })
+        break
+      case 'city':
+        patchFilters({ city: '' })
+        break
+      case 'vatFilter':
+        patchFilters({ vatFilter: '' })
+        break
+      case 'balanceFilter':
+        patchFilters({ balanceFilter: '' })
+        break
+      default:
+        break
+    }
+  }
 
   function openCreate() {
     setEditing(null)
@@ -73,7 +159,12 @@ export default function CustomersPage() {
       setSaving(false)
       return
     }
-    if (res.ok) { setShowModal(false); load() }
+    if (res.ok) {
+      setShowModal(false)
+      const facetsRes = await fetch('/api/customers/facets')
+      if (facetsRes.ok) setFacets(await facetsRes.json())
+      load()
+    }
     setSaving(false)
   }
 
@@ -84,45 +175,31 @@ export default function CustomersPage() {
       alert(await readApiError(res))
       return
     }
+    const facetsRes = await fetch('/api/customers/facets')
+    if (facetsRes.ok) setFacets(await facetsRes.json())
     load()
   }
 
+  const subtitle = activeFilterCount > 0
+    ? `${customers.length} matching customers`
+    : `${customers.length} customers`
+
   return (
-    <div className="p-6 max-w-[1600px] mx-auto space-y-5">
+    <div className="p-6 max-w-[1600px] mx-auto space-y-4">
       <PageHeader
         title="Customers"
-        subtitle={`${customers.length} customers`}
+        subtitle={subtitle}
         breadcrumb={[{ label: 'Income' }, { label: 'Customers' }]}
         action={<Button onClick={openCreate}><Plus size={15} /> New Customer</Button>}
       />
 
-      <FilterBar>
-        <SearchBar value={search} onChange={setSearch} placeholder="Search customers..." className="flex-1 max-w-sm" />
-        <input value={countryFilter} onChange={e => setCountryFilter(e.target.value)} placeholder="Country" className="input-base w-32" />
-        <input value={cityFilter} onChange={e => setCityFilter(e.target.value)} placeholder="City" className="input-base w-28" />
-        <select value={vatFilter} onChange={e => setVatFilter(e.target.value)} className="input-base w-28">
-          <option value="">VAT</option>
-          <option value="yes">Has VAT</option>
-          <option value="no">No VAT</option>
-        </select>
-        <select value={outstandingFilter} onChange={e => setOutstandingFilter(e.target.value)} className="input-base w-36">
-          <option value="">Balance</option>
-          <option value="yes">Outstanding</option>
-          <option value="exceeded">Limit Exceeded</option>
-        </select>
-        <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="input-base w-36">
-          <option value="name">Alphabetical</option>
-          <option value="createdAt">Newest</option>
-          <option value="outstanding">Highest Outstanding</option>
-        </select>
-        <select value={sortDir} onChange={e => setSortDir(e.target.value as 'asc' | 'desc')} className="input-base w-24">
-          <option value="asc">Asc</option>
-          <option value="desc">Desc</option>
-        </select>
-        <button onClick={load} className="p-2 border border-slate-200 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-50 bg-white transition-colors">
-          <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-        </button>
-      </FilterBar>
+      <CustomerFilterCard
+        filters={filters}
+        facets={facets}
+        onChange={patchFilters}
+        onReset={resetFilters}
+        onRemoveChip={removeFilterChip}
+      />
 
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
@@ -138,7 +215,20 @@ export default function CustomersPage() {
               {loading ? Array.from({ length: 5 }).map((_, i) => (
                 <tr key={i}>{Array.from({ length: 10 }).map((_, j) => <td key={j} className="px-4 py-3"><div className="skeleton h-4 rounded" /></td>)}</tr>
               )) : customers.length === 0 ? (
-                <tr><td colSpan={10} className="px-4 py-16 text-center text-slate-400 text-sm">No customers yet. Add your first customer.</td></tr>
+                <tr>
+                  <td colSpan={10} className="px-4 py-16 text-center">
+                    {activeFilterCount > 0 ? (
+                      <div className="space-y-3">
+                        <p className="text-slate-500 text-sm">No customers match your filters.</p>
+                        <Button variant="outline" size="sm" onClick={resetFilters}>
+                          Clear filters
+                        </Button>
+                      </div>
+                    ) : (
+                      <p className="text-slate-400 text-sm">No customers yet. Add your first customer.</p>
+                    )}
+                  </td>
+                </tr>
               ) : customers.map(c => (
                 <tr key={c.id} className="hover:bg-slate-50/60 transition-colors">
                   <td className="px-4 py-3 font-mono text-xs text-slate-500">{c.customerNo}</td>
@@ -162,8 +252,8 @@ export default function CustomersPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
-                      <button onClick={() => openEdit(c)} className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"><Edit2 size={13} /></button>
-                      <button onClick={() => handleDelete(c.id)} className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"><Trash2 size={13} /></button>
+                      <button onClick={() => openEdit(c)} className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors" aria-label={`Edit ${c.name}`}><Edit2 size={13} /></button>
+                      <button onClick={() => handleDelete(c.id)} className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors" aria-label={`Delete ${c.name}`}><Trash2 size={13} /></button>
                     </div>
                   </td>
                 </tr>

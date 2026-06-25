@@ -39,9 +39,10 @@ interface SearchBarProps {
   onChange: (v: string) => void
   placeholder?: string
   className?: string
+  'aria-label'?: string
 }
 
-export function SearchBar({ value, onChange, placeholder = 'Search...', className }: SearchBarProps) {
+export function SearchBar({ value, onChange, placeholder = 'Search...', className, 'aria-label': ariaLabel }: SearchBarProps) {
   return (
     <div className={cn('relative', className)}>
       <span className="pointer-events-none absolute inset-y-0 left-0 flex w-10 items-center justify-center text-slate-400">
@@ -54,6 +55,7 @@ export function SearchBar({ value, onChange, placeholder = 'Search...', classNam
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
+        aria-label={ariaLabel ?? placeholder}
         className="input-base !pl-10 w-full"
       />
     </div>

@@ -1,4 +1,5 @@
 import 'server-only'
+import { isSaudiVatTrn } from '@/lib/customers/vat'
 import { mapCustomerRow, mapInvoiceRow } from '../entity-mappers'
 import type { CustomerRecord } from '../entities'
 import { queryByIdOrLegacy, resolveCompanyId, supabaseDb } from '../repository-utils'
@@ -56,19 +57,33 @@ export const supabaseCustomerRepository: CustomerRepository = {
 
     if (search) {
       query = query.or(
-        `name.ilike.%${search}%,email.ilike.%${search}%,customer_no.ilike.%${search}%`,
+        `name.ilike.%${search}%,email.ilike.%${search}%,customer_no.ilike.%${search}%,phone.ilike.%${search}%,tax_id.ilike.%${search}%`,
       )
     }
-    if (options.country) query = query.ilike('country', `%${options.country}%`)
-    if (options.city) query = query.ilike('city', `%${options.city}%`)
-    if (options.hasVat === true) query = query.not('tax_id', 'is', null).neq('tax_id', '')
-    if (options.hasVat === false) query = query.or('tax_id.is.null,tax_id.eq.')
+    if (options.country) query = query.eq('country', options.country)
+    if (options.city) query = query.eq('city', options.city)
+
+    if (options.vatFilter === 'has_vat' || options.hasVat === true) {
+      query = query.not('tax_id', 'is', null).neq('tax_id', '')
+    } else if (options.vatFilter === 'no_vat' || options.hasVat === false) {
+      query = query.or('tax_id.is.null,tax_id.eq.')
+    }
 
     const sortAsc = options.sortDir === 'asc'
-    if (options.sortBy === 'createdAt') {
+    const sortBy = options.sortBy ?? 'name'
+
+    if (sortBy === 'createdAt') {
       query = query.order('created_at', { ascending: sortAsc })
+    } else if (sortBy === 'updatedAt') {
+      query = query.order('updated_at', { ascending: sortAsc })
+    } else if (sortBy === 'creditLimit') {
+      query = query.order('credit_limit', { ascending: sortAsc })
+    } else if (sortBy === 'city') {
+      query = query.order('city', { ascending: sortAsc, nullsFirst: false })
+    } else if (sortBy === 'country') {
+      query = query.order('country', { ascending: sortAsc })
     } else {
-      query = query.order('name', { ascending: options.sortBy === 'name' ? sortAsc : true })
+      query = query.order('name', { ascending: sortBy === 'name' ? sortAsc : true })
     }
 
     const { data, error } = await query
@@ -77,16 +92,26 @@ export const supabaseCustomerRepository: CustomerRepository = {
     let customers = (data ?? []).map(mapCustomerRow)
     customers = await attachOutstanding(customers, companyId)
 
-    if (options.hasOutstanding === true) {
+    if (options.vatFilter === 'valid_trn') {
+      customers = customers.filter((c) => Boolean(c.taxId?.trim()) && isSaudiVatTrn(c.taxId!))
+    } else if (options.vatFilter === 'invalid_trn') {
+      customers = customers.filter((c) => Boolean(c.taxId?.trim()) && !isSaudiVatTrn(c.taxId!))
+    }
+
+    const balanceFilter = options.balanceFilter
+    if (balanceFilter === 'outstanding' || options.hasOutstanding === true) {
       customers = customers.filter((c) => (c.outstandingBalance ?? 0) > 0)
+    } else if (balanceFilter === 'zero' || options.hasOutstanding === false) {
+      customers = customers.filter((c) => (c.outstandingBalance ?? 0) === 0)
+    } else if (balanceFilter === 'credit') {
+      customers = customers.filter((c) => (c.outstandingBalance ?? 0) < 0)
+    } else if (balanceFilter === 'over_limit' || options.creditLimitExceeded) {
+      customers = customers.filter(
+        (c) => (c.outstandingBalance ?? 0) > (c.creditLimit ?? 0) && (c.creditLimit ?? 0) > 0,
+      )
     }
-    if (options.hasOutstanding === false) {
-      customers = customers.filter((c) => (c.outstandingBalance ?? 0) <= 0)
-    }
-    if (options.creditLimitExceeded) {
-      customers = customers.filter((c) => (c.outstandingBalance ?? 0) > (c.creditLimit ?? 0) && (c.creditLimit ?? 0) > 0)
-    }
-    if (options.sortBy === 'outstanding') {
+
+    if (sortBy === 'outstanding') {
       customers.sort((a, b) => {
         const cmp = (a.outstandingBalance ?? 0) - (b.outstandingBalance ?? 0)
         return sortAsc ? cmp : -cmp
@@ -94,6 +119,40 @@ export const supabaseCustomerRepository: CustomerRepository = {
     }
 
     return customers
+  },
+
+  async getFilterFacets() {
+    const db = supabaseDb()
+    const companyId = await resolveCompanyId()
+    const { data, error } = await db
+      .from('customers')
+      .select('country, city')
+      .eq('company_id', companyId)
+      .is('deleted_at', null)
+
+    if (error) throw error
+
+    const citiesByCountry: Record<string, Set<string>> = {}
+    const countrySet = new Set<string>()
+
+    for (const row of data ?? []) {
+      const country = String(row.country ?? '').trim()
+      const city = String(row.city ?? '').trim()
+      if (!country) continue
+      countrySet.add(country)
+      if (!citiesByCountry[country]) citiesByCountry[country] = new Set()
+      if (city) citiesByCountry[country].add(city)
+    }
+
+    return {
+      countries: [...countrySet].sort((a, b) => a.localeCompare(b)),
+      citiesByCountry: Object.fromEntries(
+        Object.entries(citiesByCountry).map(([country, cities]) => [
+          country,
+          [...cities].sort((a, b) => a.localeCompare(b)),
+        ]),
+      ),
+    }
   },
 
   async findById(id: string) {

@@ -1,6 +1,10 @@
 ﻿import { requireAuth } from '@/lib/auth'
 import { getCustomerRepository } from '@/lib/db/provider'
-import type { CustomerListOptions } from '@/lib/db/repositories/customer.repository.interface'
+import type {
+  CustomerBalanceFilter,
+  CustomerListOptions,
+  CustomerVatFilter,
+} from '@/lib/db/repositories/customer.repository.interface'
 
 function pickBool(searchParams: URLSearchParams, key: string): boolean | undefined {
   const value = searchParams.get(key)
@@ -9,20 +13,50 @@ function pickBool(searchParams: URLSearchParams, key: string): boolean | undefin
   return undefined
 }
 
+const VAT_FILTERS = new Set<CustomerVatFilter>(['has_vat', 'no_vat', 'valid_trn', 'invalid_trn'])
+const BALANCE_FILTERS = new Set<CustomerBalanceFilter>(['outstanding', 'zero', 'credit', 'over_limit'])
+const SORT_FIELDS = new Set<CustomerListOptions['sortBy']>([
+  'name',
+  'createdAt',
+  'updatedAt',
+  'outstanding',
+  'creditLimit',
+  'city',
+  'country',
+])
+
 export async function GET(request: Request) {
   try {
     await requireAuth()
     const { searchParams } = new URL(request.url)
+
+    const vatRaw = searchParams.get('vatFilter') ?? ''
+    const balanceRaw = searchParams.get('balanceFilter') ?? ''
+    const sortRaw = searchParams.get('sortBy') ?? 'name'
+
+    const vatFilter = VAT_FILTERS.has(vatRaw as CustomerVatFilter)
+      ? (vatRaw as CustomerVatFilter)
+      : undefined
+    const balanceFilter = BALANCE_FILTERS.has(balanceRaw as CustomerBalanceFilter)
+      ? (balanceRaw as CustomerBalanceFilter)
+      : undefined
+    const sortBy = SORT_FIELDS.has(sortRaw as CustomerListOptions['sortBy'])
+      ? (sortRaw as CustomerListOptions['sortBy'])
+      : 'name'
+
     const options: CustomerListOptions = {
       search: searchParams.get('search') ?? undefined,
       country: searchParams.get('country') ?? undefined,
       city: searchParams.get('city') ?? undefined,
+      vatFilter,
+      balanceFilter,
       hasVat: pickBool(searchParams, 'hasVat'),
       hasOutstanding: pickBool(searchParams, 'hasOutstanding'),
       creditLimitExceeded: searchParams.get('creditLimitExceeded') === 'true' ? true : undefined,
-      sortBy: (searchParams.get('sortBy') as CustomerListOptions['sortBy']) ?? undefined,
-      sortDir: (searchParams.get('sortDir') as CustomerListOptions['sortDir']) ?? undefined,
+      sortBy,
+      sortDir: searchParams.get('sortDir') === 'desc' ? 'desc' : 'asc',
     }
+
     const customers = await getCustomerRepository().findMany(options)
     return Response.json(customers)
   } catch (error) {
