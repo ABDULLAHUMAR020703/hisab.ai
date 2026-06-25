@@ -137,6 +137,7 @@ export async function loadInvoicePdfDocument(invoiceId: string): Promise<Invoice
   const logoPng = await loadCompanyLogoImage({
     logoUrl: settings.logoUrl,
     logoStoragePath: settings.logoStoragePath,
+    logoUploadedAt: settings.logoUploadedAt,
   })
   const qr = await resolveInvoiceQrForPdf(invoiceId)
 

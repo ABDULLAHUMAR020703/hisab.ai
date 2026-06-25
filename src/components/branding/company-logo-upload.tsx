@@ -7,6 +7,7 @@ import {
   COMPANY_LOGO_ALLOWED_EXTENSIONS,
   COMPANY_LOGO_MAX_BYTES,
 } from '@/lib/branding/constants'
+import { stripLogoCacheBuster, withLogoCacheBuster } from '@/lib/branding/logo-url'
 
 interface CompanyLogoUploadProps {
   logoUrl: string | null
@@ -24,30 +25,43 @@ export function CompanyLogoUpload({
   onLogoChange,
 }: CompanyLogoUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(logoUrl)
-  const [uploadedAt, setUploadedAt] = useState<string | null>(logoUploadedAt)
+  const localPreviewRef = useRef<string | null>(null)
+  const [localPreview, setLocalPreview] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
-  const [localPreview, setLocalPreview] = useState<string | null>(null)
 
-  useEffect(() => {
-    setPreviewUrl(logoUrl)
-    setUploadedAt(logoUploadedAt)
-  }, [logoUrl, logoUploadedAt])
+  const serverDisplayUrl = withLogoCacheBuster(logoUrl, logoUploadedAt)
+  const displayUrl = localPreview ?? serverDisplayUrl
+  const hasLogo = Boolean(logoUrl || localPreview)
 
   useEffect(() => {
     return () => {
-      if (localPreview) URL.revokeObjectURL(localPreview)
+      if (localPreviewRef.current) {
+        URL.revokeObjectURL(localPreviewRef.current)
+        localPreviewRef.current = null
+      }
     }
-  }, [localPreview])
+  }, [])
+
+  function clearLocalPreview() {
+    if (localPreviewRef.current) {
+      URL.revokeObjectURL(localPreviewRef.current)
+      localPreviewRef.current = null
+    }
+    setLocalPreview(null)
+  }
 
   function openFilePicker() {
     inputRef.current?.click()
   }
 
-  function uploadWithProgress(file: File): Promise<{ logoUrl: string; logoUploadedAt: string }> {
+  function uploadWithProgress(file: File): Promise<{
+    logoUrl: string | null
+    logoStoragePath: string | null
+    logoUploadedAt: string
+  }> {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest()
       const formData = new FormData()
@@ -94,20 +108,22 @@ export function CompanyLogoUpload({
       return
     }
 
+    clearLocalPreview()
     const objectUrl = URL.createObjectURL(file)
+    localPreviewRef.current = objectUrl
     setLocalPreview(objectUrl)
-    setPreviewUrl(objectUrl)
     setUploading(true)
 
     try {
       const result = await uploadWithProgress(file)
-      setPreviewUrl(result.logoUrl)
-      setUploadedAt(result.logoUploadedAt)
-      onLogoChange({ logoUrl: result.logoUrl, logoUploadedAt: result.logoUploadedAt })
-      if (localPreview) URL.revokeObjectURL(localPreview)
-      setLocalPreview(null)
+      const baseUrl = stripLogoCacheBuster(result.logoUrl)
+      clearLocalPreview()
+      onLogoChange({
+        logoUrl: baseUrl,
+        logoUploadedAt: result.logoUploadedAt,
+      })
     } catch (err) {
-      setPreviewUrl(logoUrl)
+      clearLocalPreview()
       setError(err instanceof Error ? err.message : 'Upload failed')
     } finally {
       setUploading(false)
@@ -124,19 +140,14 @@ export function CompanyLogoUpload({
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to remove logo')
 
-      setPreviewUrl(null)
-      setUploadedAt(null)
+      clearLocalPreview()
       onLogoChange({ logoUrl: null, logoUploadedAt: null })
-      if (localPreview) URL.revokeObjectURL(localPreview)
-      setLocalPreview(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to remove logo')
     } finally {
       setRemoving(false)
     }
   }
-
-  const displayUrl = previewUrl
 
   return (
     <div className="space-y-4">
@@ -153,6 +164,7 @@ export function CompanyLogoUpload({
           {displayUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
+              key={displayUrl}
               src={displayUrl}
               alt="Company logo preview"
               className="max-h-24 max-w-[9.5rem] object-contain"
@@ -171,9 +183,9 @@ export function CompanyLogoUpload({
             <p className="text-xs text-slate-400 mt-1">
               PNG, JPG, JPEG, or SVG · max {formatFileSize(COMPANY_LOGO_MAX_BYTES)} · used on invoices and future documents
             </p>
-            {uploadedAt && (
+            {logoUploadedAt && (
               <p className="text-xs text-slate-500 mt-1">
-                Uploaded {new Date(uploadedAt).toLocaleString()}
+                Uploaded {new Date(logoUploadedAt).toLocaleString()}
               </p>
             )}
           </div>
@@ -187,9 +199,9 @@ export function CompanyLogoUpload({
               loading={uploading}
             >
               <Upload size={14} />
-              {displayUrl ? 'Replace logo' : 'Upload logo'}
+              {hasLogo ? 'Replace logo' : 'Upload logo'}
             </Button>
-            {displayUrl && (
+            {hasLogo && (
               <Button
                 type="button"
                 variant="outline"

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Plus, RefreshCw, Send, DollarSign, RotateCcw, Eye, Shield, FileDown, FileMinus, FilePlus, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Plus, RefreshCw, Send, DollarSign, RotateCcw, Eye, Shield, FileDown, FileMinus, FilePlus, ChevronLeft, ChevronRight, Edit2 } from 'lucide-react'
 import { formatDate, formatCurrency, cn } from '@/lib/utils'
 import { readApiError } from '@/lib/api-client'
 import { BusinessBadge, ZatcaBadge } from '@/components/ui/badge'
@@ -16,7 +16,7 @@ import {
   loadStoredInvoiceFilters,
   type InvoiceFilterValues,
 } from '@/components/invoices/invoice-filter-card'
-import { computeDisplayBusinessStatus, formatInvoiceTypeLabel } from '@/lib/ui/invoice-status'
+import { computeDisplayBusinessStatus, formatInvoiceTypeLabel, canEditInvoice, todayDateString, isFutureInvoiceDate } from '@/lib/ui/invoice-status'
 
 interface Customer { id: string; name: string }
 interface Account { id: string; accountNo: string; name: string }
@@ -56,6 +56,9 @@ export default function InvoicesPage() {
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null)
+  const [formDateError, setFormDateError] = useState<string | null>(null)
+  const [pdfLoading, setPdfLoading] = useState<'view' | 'download' | null>(null)
   const [showPayModal, setShowPayModal] = useState(false)
   const [showViewModal, setShowViewModal] = useState(false)
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null)
@@ -169,16 +172,25 @@ export default function InvoicesPage() {
   const total = subtotal + taxAmount
 
   async function handleSave() {
+    if (isFutureInvoiceDate(form.date)) {
+      setFormDateError('Invoice date cannot be in the future.')
+      return
+    }
+    setFormDateError(null)
     setSaving(true)
-    const res = await fetch('/api/invoices', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form)
+    const url = editingInvoiceId ? `/api/invoices/${editingInvoiceId}` : '/api/invoices'
+    const method = editingInvoiceId ? 'PUT' : 'POST'
+    const res = await fetch(url, {
+      method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form)
     })
     if (!res.ok) {
       alert(await readApiError(res))
       setSaving(false)
       return
     }
-    if (res.ok) { setShowModal(false); load() }
+    setEditingInvoiceId(null)
+    setShowModal(false)
+    load()
     setSaving(false)
   }
 
@@ -236,11 +248,96 @@ export default function InvoicesPage() {
   }
 
   function viewPdf(inv: Invoice) {
-    window.open(`/api/invoices/${inv.id}/pdf?disposition=inline`, '_blank')
+    setPdfLoading('view')
+    const popup = window.open(`/api/invoices/${inv.id}/pdf?disposition=inline`, '_blank')
+    if (!popup) {
+      alert('Pop-up blocked. Please allow pop-ups to view the PDF.')
+    }
+    setPdfLoading(null)
   }
 
-  function downloadPdf(inv: Invoice) {
-    window.open(`/api/invoices/${inv.id}/pdf?disposition=attachment`, '_blank')
+  async function downloadPdf(inv: Invoice) {
+    setPdfLoading('download')
+    try {
+      const res = await fetch(`/api/invoices/${inv.id}/pdf?disposition=attachment`)
+      if (!res.ok) {
+        alert(await readApiError(res))
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `${inv.invoiceNo}.pdf`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      alert('Failed to download PDF. Please try again.')
+    } finally {
+      setPdfLoading(null)
+    }
+  }
+
+  function resetInvoiceForm() {
+    setEditingInvoiceId(null)
+    setFormDateError(null)
+    setForm({
+      customerId: '',
+      date: todayDateString(),
+      dueDate: '',
+      notes: '',
+      terms: 'Net 30',
+      isRecurring: false,
+      lines: [{ ...EMPTY_LINE }],
+    })
+  }
+
+  function openCreate() {
+    resetInvoiceForm()
+    setShowModal(true)
+  }
+
+  function toDateInputValue(value: string | Date | undefined | null): string {
+    if (!value) return ''
+    const raw = typeof value === 'string' ? value : value.toISOString()
+    return raw.split('T')[0]
+  }
+
+  async function openEdit(inv: Invoice) {
+    const res = await fetch(`/api/invoices/${inv.id}`)
+    if (!res.ok) {
+      alert(await readApiError(res))
+      return
+    }
+    const full = await res.json()
+    const zatca = full.zatcaStatus ?? inv.zatcaStatus
+    if (!canEditInvoice(zatca)) {
+      alert('This invoice cannot be edited after ZATCA submission.')
+      return
+    }
+    setForm({
+      customerId: full.customerId ?? '',
+      date: toDateInputValue(full.date),
+      dueDate: toDateInputValue(full.dueDate),
+      notes: full.notes ?? '',
+      terms: full.terms ?? 'Net 30',
+      isRecurring: full.isRecurring ?? false,
+      lines: (full.lines ?? []).length > 0
+        ? full.lines.map((line: InvoiceLine) => ({
+            description: line.description ?? '',
+            quantity: line.quantity ?? 1,
+            unitPrice: line.unitPrice ?? 0,
+            taxRate: line.taxRate ?? 15,
+            accountId: line.accountId ?? '',
+          }))
+        : [{ ...EMPTY_LINE }],
+    })
+    setEditingInvoiceId(inv.id)
+    setFormDateError(null)
+    setShowViewModal(false)
+    setShowModal(true)
   }
 
   function openArtifact(type: 'xml' | 'signed-xml' | 'qr') {
@@ -355,7 +452,7 @@ export default function InvoicesPage() {
         subtitle={`${stats.total} invoices · ${formatCurrency(stats.totalValue)} total`}
         breadcrumb={[{ label: 'Income' }, { label: 'Invoices' }]}
         action={
-          <Button onClick={() => { setForm({ customerId: '', date: new Date().toISOString().split('T')[0], dueDate: '', notes: '', terms: 'Net 30', isRecurring: false, lines: [{ ...EMPTY_LINE }] }); setShowModal(true) }}>
+          <Button onClick={openCreate}>
             <Plus size={15} /> New Invoice
           </Button>
         }
@@ -456,8 +553,14 @@ export default function InvoicesPage() {
                       </button>
                       <button onClick={() => viewPdf(inv)}
                         className="flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-2 py-1 rounded-lg transition-colors">
-                        <FileDown size={10} /> PDF
+                        <Eye size={10} /> PDF
                       </button>
+                      {canEditInvoice(inv.zatcaStatus) && (
+                        <button onClick={() => openEdit(inv)}
+                          className="flex items-center gap-1 text-[11px] font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 px-2 py-1 rounded-lg transition-colors">
+                          <Edit2 size={10} /> Edit
+                        </button>
+                      )}
                       {inv.status === 'DRAFT' && (
                         <button onClick={() => handleSend(inv.id)}
                           className="flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-1 rounded-lg transition-colors">
@@ -487,14 +590,16 @@ export default function InvoicesPage() {
       </div>
       <Modal
         open={showModal}
-        onClose={() => setShowModal(false)}
-        title="New Invoice"
-        subtitle="Create a new customer invoice"
+        onClose={() => { setShowModal(false); resetInvoiceForm() }}
+        title={editingInvoiceId ? 'Edit Invoice' : 'New Invoice'}
+        subtitle={editingInvoiceId ? 'Update invoice details before ZATCA submission' : 'Create a new customer invoice'}
         size="xl"
         footer={
           <>
-            <Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button>
-            <Button onClick={handleSave} loading={saving}>Save Invoice</Button>
+            <Button variant="outline" onClick={() => { setShowModal(false); resetInvoiceForm() }}>Cancel</Button>
+            <Button onClick={handleSave} loading={saving}>
+              {editingInvoiceId ? 'Update Invoice' : 'Save Invoice'}
+            </Button>
           </>
         }
       >
@@ -504,7 +609,21 @@ export default function InvoicesPage() {
               <option value="">Select customer...</option>
               {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>
-            <Input label="Date" type="date" required value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
+            <Input
+              label="Date"
+              type="date"
+              required
+              max={todayDateString()}
+              value={form.date}
+              error={formDateError ?? undefined}
+              onChange={e => {
+                const nextDate = e.target.value
+                setForm({ ...form, date: nextDate })
+                setFormDateError(
+                  isFutureInvoiceDate(nextDate) ? 'Invoice date cannot be in the future.' : null,
+                )
+              }}
+            />
             <Input label="Due Date" type="date" required value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })} />
           </div>
 
@@ -608,22 +727,43 @@ export default function InvoicesPage() {
         onClose={() => setShowViewModal(false)}
         title={selectedInvoice ? selectedInvoice.invoiceNo : 'Invoice'}
         subtitle={selectedInvoice ? selectedInvoice.customer.name : ''}
-        size="md"
+        size="lg"
         footer={
-          <>
-            <Button variant="outline" onClick={() => selectedInvoice && viewPdf(selectedInvoice)}>
-              <Eye size={14} /> View PDF
-            </Button>
-            <Button variant="outline" onClick={() => selectedInvoice && downloadPdf(selectedInvoice)}>
-              <FileDown size={14} /> Download PDF
-            </Button>
-            <Button variant="outline" onClick={() => setShowViewModal(false)}>Close</Button>
-            {zatcaStatus?.canSubmit && (
-              <Button onClick={handleZatcaSubmit} loading={submittingZatca}>
-                <Shield size={14} /> Submit to ZATCA
+          <div className="w-full flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!selectedInvoice || pdfLoading !== null}
+                loading={pdfLoading === 'view'}
+                onClick={() => selectedInvoice && viewPdf(selectedInvoice)}
+              >
+                <Eye size={14} /> View PDF
               </Button>
-            )}
-          </>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!selectedInvoice || pdfLoading !== null}
+                loading={pdfLoading === 'download'}
+                onClick={() => selectedInvoice && downloadPdf(selectedInvoice)}
+              >
+                <FileDown size={14} /> Download PDF
+              </Button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+              {selectedInvoice && canEditInvoice(zatcaStatus?.zatcaStatus ?? selectedInvoice.zatcaStatus) && (
+                <Button variant="outline" size="sm" onClick={() => openEdit(selectedInvoice)}>
+                  <Edit2 size={14} /> Edit
+                </Button>
+              )}
+              <Button variant="outline" size="sm" onClick={() => setShowViewModal(false)}>Close</Button>
+              {zatcaStatus?.canSubmit && (
+                <Button size="sm" onClick={handleZatcaSubmit} loading={submittingZatca}>
+                  <Shield size={14} /> Submit to ZATCA
+                </Button>
+              )}
+            </div>
+          </div>
         }
       >
         {selectedInvoice && (

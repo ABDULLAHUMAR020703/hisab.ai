@@ -1,4 +1,5 @@
 import { requireAuth } from '@/lib/auth'
+import { stripLogoCacheBuster } from '@/lib/branding/logo-url'
 import { getSettingsRepository } from '@/lib/db/provider'
 import type { CompanySettingsUpdateInput } from '@/lib/db/types'
 
@@ -15,7 +16,11 @@ export async function GET() {
         currency: 'SAR',
       })
     }
-    return Response.json(settings)
+    return Response.json({
+      ...settings,
+      logoUrl: stripLogoCacheBuster(settings.logoUrl),
+      logoUploadedAt: settings.logoUploadedAt?.toISOString() ?? null,
+    })
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })

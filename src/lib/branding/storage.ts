@@ -24,7 +24,7 @@ export async function uploadCompanyLogoPng(
     .upload(storagePath, pngBuffer, {
       contentType: 'image/png',
       upsert: true,
-      cacheControl: '3600',
+      cacheControl: '60',
     })
 
   if (error) throw error

@@ -6,6 +6,7 @@ import {
   uploadCompanyLogoPng,
   validateCompanyLogoFile,
 } from '@/lib/branding'
+import { stripLogoCacheBuster } from '@/lib/branding/logo-url'
 import { getSettingsRepository } from '@/lib/db/provider'
 
 export async function POST(request: Request) {
@@ -46,10 +47,12 @@ export async function POST(request: Request) {
       logoUploadedAt: uploadedAt,
     })
 
+    const logoUploadedAt = updated.logoUploadedAt?.toISOString() ?? uploadedAt.toISOString()
+
     return Response.json({
-      logoUrl: updated.logoUrl,
+      logoUrl: stripLogoCacheBuster(updated.logoUrl),
       logoStoragePath: updated.logoStoragePath,
-      logoUploadedAt: updated.logoUploadedAt?.toISOString() ?? uploadedAt.toISOString(),
+      logoUploadedAt,
     })
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {

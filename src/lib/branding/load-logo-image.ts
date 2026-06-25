@@ -1,5 +1,6 @@
 import 'server-only'
 import { COMPANY_LOGO_MAX_BYTES } from './constants'
+import { withLogoCacheBuster } from './logo-url'
 import { downloadCompanyLogoBuffer } from './storage'
 import type { CompanyBranding } from './types'
 
@@ -16,7 +17,10 @@ async function loadLogoFromUrl(url: string): Promise<Buffer | null> {
       return null
     }
 
-    const res = await fetch(url, { signal: AbortSignal.timeout(10_000) })
+    const res = await fetch(url, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10_000),
+    })
     if (!res.ok) {
       console.error('[branding] logo URL fetch failed:', res.status, url)
       return null
@@ -42,7 +46,7 @@ async function loadLogoFromUrl(url: string): Promise<Buffer | null> {
  * Never throws — returns null when unavailable.
  */
 export async function loadCompanyLogoImage(
-  branding: Pick<CompanyBranding, 'logoStoragePath' | 'logoUrl'>,
+  branding: Pick<CompanyBranding, 'logoStoragePath' | 'logoUrl' | 'logoUploadedAt'>,
 ): Promise<Buffer | null> {
   if (branding.logoStoragePath) {
     const fromStorage = await downloadCompanyLogoBuffer(branding.logoStoragePath)
@@ -50,7 +54,9 @@ export async function loadCompanyLogoImage(
   }
 
   if (branding.logoUrl) {
-    return loadLogoFromUrl(branding.logoUrl)
+    const busted =
+      withLogoCacheBuster(branding.logoUrl, branding.logoUploadedAt) ?? branding.logoUrl
+    return loadLogoFromUrl(busted)
   }
 
   return null

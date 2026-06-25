@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
 import { CompanyLogoUpload } from '@/components/branding/company-logo-upload'
+import { stripLogoCacheBuster } from '@/lib/branding/logo-url'
 import { readApiError } from '@/lib/api-client'
 
 interface Settings {
@@ -129,8 +130,12 @@ export default function SettingsPage() {
           currency: d.currency ?? 'SAR',
           fiscalYearStart: d.fiscalYearStart ?? '01-01',
           zatcaEnvironment: d.zatcaEnvironment === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX',
-          logoUrl: d.logoUrl ?? null,
-          logoUploadedAt: d.logoUploadedAt ?? null,
+          logoUrl: stripLogoCacheBuster(d.logoUrl) ?? null,
+          logoUploadedAt: d.logoUploadedAt
+            ? typeof d.logoUploadedAt === 'string'
+              ? d.logoUploadedAt
+              : new Date(d.logoUploadedAt).toISOString()
+            : null,
         }))
       })
       .catch(() => null)
@@ -328,7 +333,11 @@ export default function SettingsPage() {
           logoUrl={settings.logoUrl}
           logoUploadedAt={settings.logoUploadedAt}
           onLogoChange={({ logoUrl, logoUploadedAt }) => {
-            setSettings((s) => ({ ...s, logoUrl, logoUploadedAt }))
+            setSettings((s) => ({
+              ...s,
+              logoUrl: stripLogoCacheBuster(logoUrl),
+              logoUploadedAt,
+            }))
           }}
         />
 

@@ -25,3 +25,20 @@ export function formatZatcaStatusLabel(status?: string | null): string {
   if (!status || status === 'DRAFT') return 'Not Submitted'
   return status.replaceAll('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
+
+const NON_EDITABLE_ZATCA_STATUSES = new Set(['SUBMITTED', 'CLEARED', 'REPORTED', 'PENDING'])
+
+/** Invoices may be edited only before they are submitted to ZATCA. */
+export function canEditInvoice(zatcaStatus?: string | null): boolean {
+  const status = (zatcaStatus ?? 'DRAFT').toUpperCase()
+  return !NON_EDITABLE_ZATCA_STATUSES.has(status)
+}
+
+export function todayDateString(): string {
+  return new Date().toISOString().split('T')[0]
+}
+
+export function isFutureInvoiceDate(dateStr: string): boolean {
+  if (!dateStr) return false
+  return dateStr > todayDateString()
+}
