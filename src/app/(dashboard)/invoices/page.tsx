@@ -8,7 +8,14 @@ import { BusinessBadge, ZatcaBadge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { Input, Select, Textarea } from '@/components/ui/input'
-import { PageHeader, SearchBar, FilterBar } from '@/components/ui/page-header'
+import { PageHeader } from '@/components/ui/page-header'
+import {
+  DEFAULT_INVOICE_FILTERS,
+  INVOICE_FILTERS_STORAGE_KEY,
+  InvoiceFilterCard,
+  loadStoredInvoiceFilters,
+  type InvoiceFilterValues,
+} from '@/components/invoices/invoice-filter-card'
 import { computeDisplayBusinessStatus, formatInvoiceTypeLabel } from '@/lib/ui/invoice-status'
 
 interface Customer { id: string; name: string }
@@ -43,16 +50,9 @@ export default function InvoicesPage() {
   const [listTotal, setListTotal] = useState(0)
   const [customers, setCustomers] = useState<Customer[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
-  const [zatcaFilter, setZatcaFilter] = useState('')
-  const [typeFilter, setTypeFilter] = useState('')
-  const [customerFilter, setCustomerFilter] = useState('')
-  const [datePreset, setDatePreset] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [sortBy, setSortBy] = useState('createdAt')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [appliedFilters, setAppliedFilters] = useState<InvoiceFilterValues>(DEFAULT_INVOICE_FILTERS)
+  const [draftFilters, setDraftFilters] = useState<InvoiceFilterValues>(DEFAULT_INVOICE_FILTERS)
+  const [filtersReady, setFiltersReady] = useState(false)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -87,21 +87,57 @@ export default function InvoicesPage() {
 
   const limit = 50
 
+  useEffect(() => {
+    const stored = loadStoredInvoiceFilters()
+    setAppliedFilters(stored)
+    setDraftFilters(stored)
+    setFiltersReady(true)
+  }, [])
+
+  function patchDraftFilters(patch: Partial<InvoiceFilterValues>) {
+    setDraftFilters((current) => ({ ...current, ...patch }))
+  }
+
+  function applyFilters() {
+    setAppliedFilters(draftFilters)
+    setPage(1)
+    try {
+      localStorage.setItem(INVOICE_FILTERS_STORAGE_KEY, JSON.stringify(draftFilters))
+    } catch {
+      // Ignore storage failures.
+    }
+  }
+
+  function resetDraftFilters() {
+    setDraftFilters(DEFAULT_INVOICE_FILTERS)
+  }
+
+  function clearAllFilters() {
+    setDraftFilters(DEFAULT_INVOICE_FILTERS)
+    setAppliedFilters(DEFAULT_INVOICE_FILTERS)
+    setPage(1)
+    try {
+      localStorage.removeItem(INVOICE_FILTERS_STORAGE_KEY)
+    } catch {
+      // Ignore storage failures.
+    }
+  }
+
   async function load() {
     setLoading(true)
     const params = new URLSearchParams()
-    if (search) params.set('search', search)
-    if (statusFilter) params.set('status', statusFilter)
-    if (zatcaFilter) params.set('zatcaStatus', zatcaFilter)
-    if (typeFilter) params.set('invoiceType', typeFilter)
-    if (customerFilter) params.set('customerId', customerFilter)
-    if (datePreset) params.set('datePreset', datePreset)
-    if (datePreset === 'custom') {
-      if (dateFrom) params.set('dateFrom', dateFrom)
-      if (dateTo) params.set('dateTo', dateTo)
+    if (appliedFilters.search) params.set('search', appliedFilters.search)
+    if (appliedFilters.statusFilter) params.set('status', appliedFilters.statusFilter)
+    if (appliedFilters.zatcaFilter) params.set('zatcaStatus', appliedFilters.zatcaFilter)
+    if (appliedFilters.typeFilter) params.set('invoiceType', appliedFilters.typeFilter)
+    if (appliedFilters.customerFilter) params.set('customerId', appliedFilters.customerFilter)
+    if (appliedFilters.datePreset) params.set('datePreset', appliedFilters.datePreset)
+    if (appliedFilters.datePreset === 'custom') {
+      if (appliedFilters.dateFrom) params.set('dateFrom', appliedFilters.dateFrom)
+      if (appliedFilters.dateTo) params.set('dateTo', appliedFilters.dateTo)
     }
-    params.set('sortBy', sortBy)
-    params.set('sortDir', sortDir)
+    params.set('sortBy', appliedFilters.sortBy)
+    params.set('sortDir', appliedFilters.sortDir)
     params.set('page', String(page))
     params.set('limit', String(limit))
     const [invRes, custRes, accRes] = await Promise.all([
@@ -119,7 +155,10 @@ export default function InvoicesPage() {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [search, statusFilter, zatcaFilter, typeFilter, customerFilter, datePreset, dateFrom, dateTo, sortBy, sortDir, page])
+  useEffect(() => {
+    if (!filtersReady) return
+    load()
+  }, [filtersReady, appliedFilters, page])
 
   function updateLine(idx: number, field: string, value: string | number) {
     setForm(f => ({ ...f, lines: f.lines.map((l, i) => i === idx ? { ...l, [field]: value } : l) }))
@@ -310,7 +349,7 @@ export default function InvoicesPage() {
   }
 
   return (
-    <div className="p-6 max-w-[1600px] mx-auto space-y-5">
+    <div className="p-6 max-w-[1600px] mx-auto space-y-4">
       <PageHeader
         title="Invoices"
         subtitle={`${stats.total} invoices · ${formatCurrency(stats.totalValue)} total`}
@@ -337,57 +376,29 @@ export default function InvoicesPage() {
         ))}
       </div>
 
-      <FilterBar>
-        <SearchBar value={search} onChange={(v) => { setPage(1); setSearch(v) }} placeholder="Search invoice # or customer..." className="flex-1 max-w-sm" />
-        <select value={statusFilter} onChange={e => { setPage(1); setStatusFilter(e.target.value) }} className="input-base w-auto min-w-[130px]">
-          <option value="">All Business</option>
-          {['DRAFT', 'SENT', 'PAID', 'PARTIAL', 'OVERDUE', 'VOID'].map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <select value={zatcaFilter} onChange={e => { setPage(1); setZatcaFilter(e.target.value) }} className="input-base w-auto min-w-[130px]">
-          <option value="">All ZATCA</option>
-          <option value="DRAFT">Not Submitted</option>
-          {['PENDING', 'SUBMITTED', 'CLEARED', 'REPORTED', 'FAILED', 'REJECTED'].map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <select value={typeFilter} onChange={e => { setPage(1); setTypeFilter(e.target.value) }} className="input-base w-auto min-w-[120px]">
-          <option value="">All Types</option>
-          {['STANDARD', 'SIMPLIFIED', 'CREDIT_NOTE', 'DEBIT_NOTE'].map(t => <option key={t} value={t}>{formatInvoiceTypeLabel(t)}</option>)}
-        </select>
-        <select value={customerFilter} onChange={e => { setPage(1); setCustomerFilter(e.target.value) }} className="input-base w-auto min-w-[140px]">
-          <option value="">All Customers</option>
-          {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-        <select value={datePreset} onChange={e => { setPage(1); setDatePreset(e.target.value) }} className="input-base w-auto min-w-[120px]">
-          <option value="">All Dates</option>
-          <option value="today">Today</option>
-          <option value="week">This Week</option>
-          <option value="month">This Month</option>
-          <option value="custom">Custom</option>
-        </select>
-        {datePreset === 'custom' && (
-          <>
-            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input-base w-auto" />
-            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="input-base w-auto" />
-          </>
-        )}
-        <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="input-base w-auto min-w-[120px]">
-          <option value="createdAt">Newest</option>
-          <option value="date">Invoice Date</option>
-          <option value="dueDate">Due Date</option>
-          <option value="invoiceNo">Invoice #</option>
-          <option value="total">Amount</option>
-          <option value="customerName">Customer</option>
-        </select>
-        <select value={sortDir} onChange={e => setSortDir(e.target.value as 'asc' | 'desc')} className="input-base w-auto min-w-[90px]">
-          <option value="desc">Desc</option>
-          <option value="asc">Asc</option>
-        </select>
-        <button onClick={load} className="p-2 border border-slate-200 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-50 bg-white transition-colors">
-          <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-        </button>
-      </FilterBar>
+      <InvoiceFilterCard
+        draft={draftFilters}
+        applied={appliedFilters}
+        customers={customers}
+        onChange={patchDraftFilters}
+        onApply={applyFilters}
+        onResetDraft={resetDraftFilters}
+        onClearAll={clearAllFilters}
+      />
 
       {/* Table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="flex items-center justify-end border-b border-slate-100 px-4 py-2">
+          <button
+            type="button"
+            onClick={load}
+            className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700"
+            aria-label="Refresh invoices"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full data-table">
             <thead>

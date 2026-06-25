@@ -5,7 +5,7 @@ import { getInvoiceRepository, getSettingsRepository } from '@/lib/db/provider'
 import { computeDisplayBusinessStatus } from '@/lib/ui/invoice-status'
 import { resolveInvoiceQrForPdf } from '../qr-for-pdf'
 import { buildAddressLines, invoicePdfTitle } from './format'
-import { loadCompanyLogoPng } from './logo'
+import { loadCompanyLogoImage } from '@/lib/branding/load-logo-image'
 import type {
   InvoicePdfDocument,
   PdfCustomerInfo,
@@ -134,7 +134,10 @@ export async function loadInvoicePdfDocument(invoiceId: string): Promise<Invoice
   const zatcaStatus = (invoice.zatcaStatus ?? 'DRAFT').toUpperCase()
   const submitted = zatcaStatus !== 'DRAFT' && zatcaStatus !== 'NOT_SUBMITTED'
 
-  const logoPng = await loadCompanyLogoPng(settings.logoUrl)
+  const logoPng = await loadCompanyLogoImage({
+    logoUrl: settings.logoUrl,
+    logoStoragePath: settings.logoStoragePath,
+  })
   const qr = await resolveInvoiceQrForPdf(invoiceId)
 
   return {

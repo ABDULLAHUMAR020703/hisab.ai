@@ -1,0 +1,94 @@
+import { requireAuth } from '@/lib/auth'
+import {
+  deleteCompanyLogoFile,
+  inferLogoMimeType,
+  rasterizeCompanyLogoToPng,
+  uploadCompanyLogoPng,
+  validateCompanyLogoFile,
+} from '@/lib/branding'
+import { getSettingsRepository } from '@/lib/db/provider'
+
+export async function POST(request: Request) {
+  try {
+    await requireAuth()
+    const formData = await request.formData()
+    const file = formData.get('file')
+
+    if (!(file instanceof File)) {
+      return Response.json({ error: 'No logo file provided' }, { status: 400 })
+    }
+
+    const validationError = validateCompanyLogoFile(file)
+    if (validationError) {
+      return Response.json({ error: validationError }, { status: 400 })
+    }
+
+    const settingsRepo = getSettingsRepository()
+    const existing = await settingsRepo.findFirst()
+    if (!existing) {
+      return Response.json({ error: 'Company settings not found' }, { status: 404 })
+    }
+
+    const mime = inferLogoMimeType(file)
+    const rawBuffer = Buffer.from(await file.arrayBuffer())
+    const pngBuffer = await rasterizeCompanyLogoToPng(rawBuffer, mime)
+
+    if (existing.logoStoragePath) {
+      await deleteCompanyLogoFile(existing.logoStoragePath)
+    }
+
+    const { storagePath, publicUrl } = await uploadCompanyLogoPng(existing.id, pngBuffer)
+    const uploadedAt = new Date()
+
+    const updated = await settingsRepo.update(existing.id, {
+      logoUrl: publicUrl,
+      logoStoragePath: storagePath,
+      logoUploadedAt: uploadedAt,
+    })
+
+    return Response.json({
+      logoUrl: updated.logoUrl,
+      logoStoragePath: updated.logoStoragePath,
+      logoUploadedAt: updated.logoUploadedAt?.toISOString() ?? uploadedAt.toISOString(),
+    })
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Unauthorized') {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    console.error('[branding] logo upload failed:', error)
+    return Response.json({ error: 'Failed to upload logo' }, { status: 500 })
+  }
+}
+
+export async function DELETE() {
+  try {
+    await requireAuth()
+    const settingsRepo = getSettingsRepository()
+    const existing = await settingsRepo.findFirst()
+    if (!existing) {
+      return Response.json({ error: 'Company settings not found' }, { status: 404 })
+    }
+
+    if (existing.logoStoragePath) {
+      await deleteCompanyLogoFile(existing.logoStoragePath)
+    }
+
+    const updated = await settingsRepo.update(existing.id, {
+      logoUrl: null,
+      logoStoragePath: null,
+      logoUploadedAt: null,
+    })
+
+    return Response.json({
+      logoUrl: updated.logoUrl,
+      logoStoragePath: updated.logoStoragePath,
+      logoUploadedAt: null,
+    })
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Unauthorized') {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    console.error('[branding] logo removal failed:', error)
+    return Response.json({ error: 'Failed to remove logo' }, { status: 500 })
+  }
+}

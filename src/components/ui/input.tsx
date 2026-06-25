@@ -20,7 +20,7 @@ export function Input({ label, error, hint, leftIcon, className, id, ...props }:
       )}
       <div className="relative">
         {leftIcon && (
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+          <span className="pointer-events-none absolute inset-y-0 left-0 flex w-10 items-center justify-center text-slate-400">
             {leftIcon}
           </span>
         )}
@@ -28,7 +28,7 @@ export function Input({ label, error, hint, leftIcon, className, id, ...props }:
           id={inputId}
           className={cn(
             'input-base',
-            leftIcon && 'pl-9',
+            leftIcon && '!pl-10',
             error && 'border-red-400 focus:border-red-500',
             className
           )}

@@ -1,10 +1,11 @@
 ﻿'use client'
 
 import { useEffect, useState } from 'react'
-import { Save, Building2, Shield, Link2, Loader2, Wifi } from 'lucide-react'
+import { Save, Building2, Shield, Link2, Loader2, Wifi, Palette } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
+import { CompanyLogoUpload } from '@/components/branding/company-logo-upload'
 import { readApiError } from '@/lib/api-client'
 
 interface Settings {
@@ -21,9 +22,12 @@ interface Settings {
   country: string
   phone: string
   email: string
+  website: string
   currency: string
   fiscalYearStart: string
   zatcaEnvironment: 'SANDBOX' | 'PRODUCTION'
+  logoUrl: string | null
+  logoUploadedAt: string | null
 }
 
 interface OnboardingStatus {
@@ -68,9 +72,12 @@ export default function SettingsPage() {
     country: 'Saudi Arabia',
     phone: '',
     email: '',
+    website: '',
     currency: 'SAR',
     fiscalYearStart: '01-01',
     zatcaEnvironment: 'SANDBOX',
+    logoUrl: null,
+    logoUploadedAt: null,
   })
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null)
   const [otp, setOtp] = useState('')
@@ -118,9 +125,12 @@ export default function SettingsPage() {
           country: d.country ?? 'Saudi Arabia',
           phone: d.phone ?? '',
           email: d.email ?? '',
+          website: d.website ?? '',
           currency: d.currency ?? 'SAR',
           fiscalYearStart: d.fiscalYearStart ?? '01-01',
           zatcaEnvironment: d.zatcaEnvironment === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX',
+          logoUrl: d.logoUrl ?? null,
+          logoUploadedAt: d.logoUploadedAt ?? null,
         }))
       })
       .catch(() => null)
@@ -301,6 +311,33 @@ export default function SettingsPage() {
           <Input label="Postal Code" value={settings.postalCode} onChange={(e) => f('postalCode', e.target.value)} />
         </div>
         <Input label="Country" value={settings.country} onChange={(e) => f('country', e.target.value)} />
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">
+        <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
+          <div className="w-10 h-10 rounded-xl bg-violet-50 flex items-center justify-center">
+            <Palette size={18} className="text-violet-600" />
+          </div>
+          <div>
+            <h2 className="font-semibold text-slate-900">Company Branding</h2>
+            <p className="text-xs text-slate-400">Logo appears on invoices, credit notes, and future documents</p>
+          </div>
+        </div>
+
+        <CompanyLogoUpload
+          logoUrl={settings.logoUrl}
+          logoUploadedAt={settings.logoUploadedAt}
+          onLogoChange={({ logoUrl, logoUploadedAt }) => {
+            setSettings((s) => ({ ...s, logoUrl, logoUploadedAt }))
+          }}
+        />
+
+        <Input
+          label="Website"
+          value={settings.website}
+          onChange={(e) => f('website', e.target.value)}
+          placeholder="https://example.com"
+        />
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">

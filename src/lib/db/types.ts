@@ -37,6 +37,8 @@ export interface CompanySettingsRecord {
   email: string | null
   website: string | null
   logoUrl: string | null
+  logoStoragePath: string | null
+  logoUploadedAt: Date | null
   currency: string
   fiscalYearStart: string
   zatcaEnabled: boolean
@@ -67,6 +69,8 @@ export interface CompanySettingsUpdateInput {
   email?: string | null
   website?: string | null
   logoUrl?: string | null
+  logoStoragePath?: string | null
+  logoUploadedAt?: Date | null
   currency?: string
   fiscalYearStart?: string
   zatcaEnabled?: boolean

@@ -44,15 +44,17 @@ interface SearchBarProps {
 export function SearchBar({ value, onChange, placeholder = 'Search...', className }: SearchBarProps) {
   return (
     <div className={cn('relative', className)}>
-      <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" width="16" height="16" fill="none" viewBox="0 0 24 24">
-        <path d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-      </svg>
+      <span className="pointer-events-none absolute inset-y-0 left-0 flex w-10 items-center justify-center text-slate-400">
+        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+        </svg>
+      </span>
       <input
         type="search"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="input-base pl-9 w-full"
+        className="input-base !pl-10 w-full"
       />
     </div>
   )

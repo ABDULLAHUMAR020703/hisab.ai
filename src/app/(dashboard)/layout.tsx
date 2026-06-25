@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
@@ -81,6 +81,26 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [mobileOpen, setMobileOpen] = useState(false)
   const [user] = useState<UserInfo>({ name: 'Admin', role: 'ADMIN' })
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [showNotifications, setShowNotifications] = useState(false)
+  const notificationRef = useRef<HTMLDivElement>(null)
+  const userMenuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!showNotifications && !showUserMenu) return
+
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target as Node
+      if (showNotifications && notificationRef.current && !notificationRef.current.contains(target)) {
+        setShowNotifications(false)
+      }
+      if (showUserMenu && userMenuRef.current && !userMenuRef.current.contains(target)) {
+        setShowUserMenu(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    return () => document.removeEventListener('mousedown', handlePointerDown)
+  }, [showNotifications, showUserMenu])
 
   useEffect(() => {
     fetch('/api/settings')
@@ -283,19 +303,54 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
 
             {/* Right actions */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
 
-              {/* Notification bell */}
-              <button className="relative p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
-                <Bell size={18} />
-                <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-indigo-500" />
-              </button>
+              {/* Notifications */}
+              <div className="relative" ref={notificationRef}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowNotifications((open) => !open)
+                    setShowUserMenu(false)
+                  }}
+                  aria-expanded={showNotifications}
+                  aria-haspopup="menu"
+                  aria-label="Notifications"
+                  className="relative rounded-xl p-2.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                >
+                  <Bell size={18} />
+                  <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-indigo-500 ring-2 ring-white" />
+                </button>
+
+                {showNotifications && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 top-full z-40 mt-2 w-80 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg animate-scale-in"
+                  >
+                    <div className="border-b border-slate-100 px-4 py-3">
+                      <p className="text-sm font-semibold text-slate-800">Notifications</p>
+                      <p className="text-xs text-slate-400">Recent activity and alerts</p>
+                    </div>
+                    <div className="px-4 py-8 text-center">
+                      <Bell size={24} className="mx-auto mb-2 text-slate-300" />
+                      <p className="text-sm font-medium text-slate-600">You&apos;re all caught up</p>
+                      <p className="mt-1 text-xs text-slate-400">New invoice and ZATCA alerts will appear here.</p>
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {/* User */}
-              <div className="relative">
+              <div className="relative" ref={userMenuRef}>
                 <button
-                  onClick={() => setShowUserMenu(!showUserMenu)}
-                  className="flex items-center gap-2 pl-2 pr-1 py-1 rounded-xl hover:bg-slate-100 transition-colors"
+                  type="button"
+                  onClick={() => {
+                    setShowUserMenu((open) => !open)
+                    setShowNotifications(false)
+                  }}
+                  aria-expanded={showUserMenu}
+                  aria-haspopup="menu"
+                  className="flex items-center gap-2 rounded-xl py-1 pl-2 pr-2 hover:bg-slate-100 transition-colors"
                 >
                   <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center">
                     <span className="text-white text-xs font-bold">A</span>
@@ -305,7 +360,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 </button>
 
                 {showUserMenu && (
-                  <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-lg border border-slate-200 py-1 z-30 animate-scale-in">
+                  <div
+                    role="menu"
+                    className="absolute right-0 top-full z-40 mt-2 w-48 rounded-xl border border-slate-200 bg-white py-1 shadow-lg animate-scale-in"
+                  >
                     <div className="px-4 py-2 border-b border-slate-100">
                       <p className="text-xs font-semibold text-slate-700">Admin User</p>
                       <p className="text-xs text-slate-400">{DEMO_ADMIN_EMAIL}</p>

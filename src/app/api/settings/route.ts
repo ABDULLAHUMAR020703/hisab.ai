@@ -44,6 +44,7 @@ export async function PUT(request: Request) {
       country: body.country,
       phone: body.phone,
       email: body.email,
+      website: body.website,
       currency: body.currency,
       fiscalYearStart: body.fiscalYearStart,
       zatcaEnabled: body.zatcaEnabled,

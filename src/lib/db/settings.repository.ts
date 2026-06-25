@@ -113,6 +113,12 @@ export async function updateCompanySettings(
   if (input.email !== undefined) companyPatch.email = input.email
   if (input.website !== undefined) companyPatch.website = input.website
   if (input.logoUrl !== undefined) companyPatch.logo_url = input.logoUrl
+  if (input.logoStoragePath !== undefined) companyPatch.logo_storage_path = input.logoStoragePath
+  if (input.logoUploadedAt !== undefined) {
+    companyPatch.logo_uploaded_at = input.logoUploadedAt
+      ? input.logoUploadedAt.toISOString()
+      : null
+  }
   if (input.currency !== undefined) companyPatch.currency = input.currency
   if (input.fiscalYearStart !== undefined) companyPatch.fiscal_year_start = input.fiscalYearStart
 

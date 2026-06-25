@@ -1,5 +1,10 @@
 import 'server-only'
 import PDFDocument from 'pdfkit'
+import {
+  COMPANY_LOGO_PDF_GAP,
+  COMPANY_LOGO_PDF_MAX_HEIGHT,
+  COMPANY_LOGO_PDF_MAX_WIDTH,
+} from '@/lib/branding/constants'
 import type { InvoicePdfDocument, PdfCustomerInfo } from '../types'
 import { formatMoney, formatPdfDate, formatPdfDateTime } from '../format'
 
@@ -79,18 +84,64 @@ export async function renderSaudiProfessionalInvoice(document: InvoicePdfDocumen
 
     const headerRightX = left + pageWidth - 200
     const headerLeftWidth = pageWidth - 220
+    const displayName = document.company.legalName || document.company.companyName
+    let logoRendered = false
 
     if (document.company.logoPng) {
+      const textX = left + COMPANY_LOGO_PDF_MAX_WIDTH + COMPANY_LOGO_PDF_GAP
+      const textWidth = headerLeftWidth - COMPANY_LOGO_PDF_MAX_WIDTH - COMPANY_LOGO_PDF_GAP
+
       try {
-        doc.image(document.company.logoPng, left, y, { fit: [headerLeftWidth, 56] })
-        y += 60
-      } catch {
-        // Corrupt image — fall through to text header.
+        doc.image(document.company.logoPng, left, y, {
+          fit: [COMPANY_LOGO_PDF_MAX_WIDTH, COMPANY_LOGO_PDF_MAX_HEIGHT],
+        })
+        logoRendered = true
+
+        let textY = y
+        doc.font('Helvetica-Bold').fontSize(16).fillColor('#0f172a')
+        doc.text(displayName, textX, textY, { width: textWidth })
+        textY = doc.y + 4
+        if (document.company.legalName && document.company.companyName !== document.company.legalName) {
+          doc.font('Helvetica').fontSize(9).fillColor('#64748b')
+          doc.text(document.company.companyName, textX, textY, { width: textWidth })
+          textY = doc.y + 2
+        }
+
+        doc.font('Helvetica').fontSize(8.5).fillColor('#475569')
+        for (const line of document.company.addressLines) {
+          doc.text(line, textX, textY, { width: textWidth })
+          textY = doc.y + 1
+        }
+        if (document.company.commercialRegistration) {
+          doc.text(`CR: ${document.company.commercialRegistration}`, textX, textY)
+          textY = doc.y + 1
+        }
+        if (document.company.taxId) {
+          doc.text(`VAT TRN: ${document.company.taxId}`, textX, textY)
+          textY = doc.y + 1
+        }
+        if (document.company.phone) {
+          doc.text(`Tel: ${document.company.phone}`, textX, textY)
+          textY = doc.y + 1
+        }
+        if (document.company.email) {
+          doc.text(document.company.email, textX, textY)
+          textY = doc.y + 1
+        }
+        if (document.company.website) {
+          doc.text(document.company.website, textX, textY)
+          textY = doc.y + 1
+        }
+
+        y = Math.max(y + COMPANY_LOGO_PDF_MAX_HEIGHT, textY) + 6
+      } catch (error) {
+        console.error('[branding] failed to embed logo in PDF:', error)
+        logoRendered = false
+        y = MARGIN
       }
     }
 
-    if (!document.company.logoPng || y === MARGIN) {
-      const displayName = document.company.legalName || document.company.companyName
+    if (!logoRendered) {
       doc.font('Helvetica-Bold').fontSize(16).fillColor('#0f172a')
       doc.text(displayName, left, y, { width: headerLeftWidth })
       y = doc.y + 4
@@ -99,32 +150,32 @@ export async function renderSaudiProfessionalInvoice(document: InvoicePdfDocumen
         doc.text(document.company.companyName, left, y, { width: headerLeftWidth })
         y = doc.y + 2
       }
-    }
 
-    doc.font('Helvetica').fontSize(8.5).fillColor('#475569')
-    for (const line of document.company.addressLines) {
-      doc.text(line, left, y, { width: headerLeftWidth })
-      y = doc.y + 1
-    }
-    if (document.company.commercialRegistration) {
-      doc.text(`CR: ${document.company.commercialRegistration}`, left, y)
-      y = doc.y + 1
-    }
-    if (document.company.taxId) {
-      doc.text(`VAT TRN: ${document.company.taxId}`, left, y)
-      y = doc.y + 1
-    }
-    if (document.company.phone) {
-      doc.text(`Tel: ${document.company.phone}`, left, y)
-      y = doc.y + 1
-    }
-    if (document.company.email) {
-      doc.text(document.company.email, left, y)
-      y = doc.y + 1
-    }
-    if (document.company.website) {
-      doc.text(document.company.website, left, y)
-      y = doc.y + 1
+      doc.font('Helvetica').fontSize(8.5).fillColor('#475569')
+      for (const line of document.company.addressLines) {
+        doc.text(line, left, y, { width: headerLeftWidth })
+        y = doc.y + 1
+      }
+      if (document.company.commercialRegistration) {
+        doc.text(`CR: ${document.company.commercialRegistration}`, left, y)
+        y = doc.y + 1
+      }
+      if (document.company.taxId) {
+        doc.text(`VAT TRN: ${document.company.taxId}`, left, y)
+        y = doc.y + 1
+      }
+      if (document.company.phone) {
+        doc.text(`Tel: ${document.company.phone}`, left, y)
+        y = doc.y + 1
+      }
+      if (document.company.email) {
+        doc.text(document.company.email, left, y)
+        y = doc.y + 1
+      }
+      if (document.company.website) {
+        doc.text(document.company.website, left, y)
+        y = doc.y + 1
+      }
     }
 
     const headerTop = MARGIN

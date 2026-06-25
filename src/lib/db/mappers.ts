@@ -52,6 +52,8 @@ export function mapCompanySettingsRows(
     email: (company.email as string | null) ?? null,
     website: (company.website as string | null) ?? null,
     logoUrl: (company.logo_url as string | null) ?? null,
+    logoStoragePath: (company.logo_storage_path as string | null) ?? null,
+    logoUploadedAt: toDate(company.logo_uploaded_at as string | null | undefined),
     currency: String(company.currency ?? 'SAR'),
     fiscalYearStart: String(company.fiscal_year_start ?? '01-01'),
     zatcaEnabled: Boolean(zatca?.zatca_enabled ?? false),
