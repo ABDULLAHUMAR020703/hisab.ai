@@ -1,7 +1,9 @@
+import { requireAuth } from '@/lib/auth'
 import { seedQaData } from '@/lib/qa-seed'
 
 export async function POST() {
   try {
+    await requireAuth()
     const qa = await seedQaData()
 
     return Response.json({

@@ -10,7 +10,7 @@ import {
   Menu, List, Bell, ChevronDown, TrendingUp
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { DEMO_ADMIN_EMAIL, PRODUCT_NAME } from '@/lib/brand'
+import { PRODUCT_NAME } from '@/lib/brand'
 
 const NAV = [
   {
@@ -79,7 +79,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router = useRouter()
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [user] = useState<UserInfo>({ name: 'Admin', role: 'ADMIN' })
+  const [user, setUser] = useState<UserInfo | null>(null)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const notificationRef = useRef<HTMLDivElement>(null)
@@ -103,18 +103,24 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }, [showNotifications, showUserMenu])
 
   useEffect(() => {
-    fetch('/api/settings')
-      .then((response) => {
+    fetch('/api/auth/me')
+      .then(async (response) => {
         if (response.status === 401) {
-          void fetch('/api/auth/logout', { method: 'POST' })
-            .catch(() => null)
-            .finally(() => {
-              router.push('/login')
-              router.refresh()
-            })
+          await fetch('/api/auth/logout', { method: 'POST' }).catch(() => null)
+          router.push('/login')
+          router.refresh()
           return null
         }
-        return response.json()
+        return response.ok ? response.json() : null
+      })
+      .then((data) => {
+        if (data) {
+          setUser({
+            name: data.name ?? data.email,
+            email: data.email,
+            role: data.role,
+          })
+        }
       })
       .catch(() => null)
   }, [router])
@@ -125,10 +131,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   async function handleLogout() {
-    await fetch('/api/auth/logout', { method: 'POST' })
+    const supabase = (await import('@/lib/supabase/client')).createClient()
+    await supabase.auth.signOut()
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => null)
     router.push('/login')
     router.refresh()
   }
+
+  const userInitial = (user?.name ?? user?.email ?? 'U').charAt(0).toUpperCase()
 
   const currentPageLabel = NAV.flatMap(s => s.items).find(i => isActive(i.href))?.label || 'Dashboard'
 
@@ -218,12 +228,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div className="rounded-xl bg-white/[0.04] p-3 flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center flex-shrink-0">
               <span className="text-white text-xs font-bold">
-                {(user.name || 'A')[0].toUpperCase()}
+                {userInitial}
               </span>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-white text-xs font-semibold truncate">{user.name || 'Admin'}</p>
-              <p className="text-slate-500 text-[10px] truncate">{user.role || 'ADMIN'}</p>
+              <p className="text-white text-xs font-semibold truncate">{user?.name ?? 'Account'}</p>
+              <p className="text-slate-500 text-[10px] truncate">{user?.role ?? 'USER'}</p>
             </div>
             <button
               onClick={handleLogout}
@@ -353,9 +363,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   className="flex items-center gap-2 rounded-xl py-1 pl-2 pr-2 hover:bg-slate-100 transition-colors"
                 >
                   <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center">
-                    <span className="text-white text-xs font-bold">A</span>
+                    <span className="text-white text-xs font-bold">{userInitial}</span>
                   </div>
-                  <span className="hidden sm:block text-sm font-medium text-slate-700">Admin</span>
+                  <span className="hidden sm:block text-sm font-medium text-slate-700">{user?.name ?? 'Account'}</span>
                   <ChevronDown size={14} className={cn('text-slate-400 transition-transform', showUserMenu && 'rotate-180')} />
                 </button>
 
@@ -365,8 +375,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     className="absolute right-0 top-full z-40 mt-2 w-48 rounded-xl border border-slate-200 bg-white py-1 shadow-lg animate-scale-in"
                   >
                     <div className="px-4 py-2 border-b border-slate-100">
-                      <p className="text-xs font-semibold text-slate-700">Admin User</p>
-                      <p className="text-xs text-slate-400">{DEMO_ADMIN_EMAIL}</p>
+                      <p className="text-xs font-semibold text-slate-700">{user?.name ?? 'Account'}</p>
+                      <p className="text-xs text-slate-400">{user?.email ?? ''}</p>
                     </div>
                     <a href="/settings" className="flex items-center gap-2 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">
                       <Settings size={14} /> Settings

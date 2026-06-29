@@ -1,6 +1,5 @@
 import 'server-only'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
-import { DEMO_ACCOUNTANT_EMAIL, DEMO_ADMIN_EMAIL } from '@/lib/brand'
 import { getDefaultCompanyId } from '@/lib/db/company.repository'
 import type { CompanyRole } from '@/lib/db/types'
 import { getSupabaseAnonKey, getSupabaseUrl } from './env'
@@ -11,13 +10,9 @@ export interface AppUser {
   name: string | null
   email: string
   role: string
+  companyId: string
   isActive: boolean
 }
-
-const DEMO_USERS = [
-  { email: DEMO_ADMIN_EMAIL, name: 'System Administrator', role: 'ADMIN', password: 'admin123' },
-  { email: DEMO_ACCOUNTANT_EMAIL, name: 'Senior Accountant', role: 'ACCOUNTANT', password: 'accountant123' },
-] as const
 
 function toCompanyRole(role: string | null | undefined): CompanyRole {
   if (role === 'ADMIN' || role === 'ACCOUNTANT' || role === 'OWNER' || role === 'MANAGER' || role === 'EMPLOYEE') {
@@ -39,74 +34,22 @@ export function createPasswordAuthClient() {
   })
 }
 
-async function findAuthUserByEmail(email: string) {
+async function resolvePrimaryCompanyId(userId: string): Promise<string> {
   const admin = createAdminClient()
-  let page = 1
+  const { data, error } = await admin
+    .from('company_users')
+    .select('company_id, role, created_at')
+    .eq('user_id', userId)
+    .eq('is_active', true)
+    .order('created_at', { ascending: true })
 
-  while (page < 20) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 100 })
-    if (error) throw error
-
-    const user = data.users.find((candidate) => candidate.email?.toLowerCase() === email.toLowerCase())
-    if (user) return user
-    if (data.users.length < 100) return null
-    page += 1
+  if (error) throw error
+  if (!data?.length) {
+    return getDefaultCompanyId(admin)
   }
 
-  return null
-}
-
-export async function ensureSupabaseUser(input: {
-  email: string
-  password: string
-  name?: string | null
-  role?: string | null
-}) {
-  const admin = createAdminClient()
-  const existing = await findAuthUserByEmail(input.email)
-  let userId = existing?.id
-
-  if (!existing) {
-    const { data, error } = await admin.auth.admin.createUser({
-      email: input.email,
-      password: input.password,
-      email_confirm: true,
-      user_metadata: {
-        full_name: input.name ?? input.email.split('@')[0],
-        role: publicRole(input.role),
-      },
-    })
-    if (error) throw error
-    userId = data.user.id
-  } else if (input.password && input.email.endsWith('@hisab.ai')) {
-    const { error } = await admin.auth.admin.updateUserById(existing.id, {
-      password: input.password,
-      user_metadata: {
-        ...(existing.user_metadata ?? {}),
-        full_name: input.name ?? existing.user_metadata?.full_name,
-        role: publicRole(input.role ?? existing.user_metadata?.role),
-      },
-    })
-    if (error) throw error
-  }
-
-  if (!userId) throw new Error(`Could not resolve Supabase user ${input.email}`)
-
-  await upsertProfileAndMembership({
-    userId,
-    email: input.email,
-    name: input.name ?? null,
-    role: input.role ?? 'ACCOUNTANT',
-    isActive: true,
-  })
-
-  return userId
-}
-
-export async function ensureDemoSupabaseUsers() {
-  for (const user of DEMO_USERS) {
-    await ensureSupabaseUser(user)
-  }
+  const owner = data.find((row) => row.role === 'OWNER')
+  return String((owner ?? data[0]).company_id)
 }
 
 export async function upsertProfileAndMembership(input: {
@@ -115,9 +58,9 @@ export async function upsertProfileAndMembership(input: {
   name?: string | null
   role?: string | null
   isActive?: boolean
+  companyId: string
 }) {
   const admin = createAdminClient()
-  const companyId = await getDefaultCompanyId(admin)
 
   const { error: profileError } = await admin
     .from('profiles')
@@ -135,7 +78,7 @@ export async function upsertProfileAndMembership(input: {
     .from('company_users')
     .upsert(
       {
-        company_id: companyId,
+        company_id: input.companyId,
         user_id: input.userId,
         role: toCompanyRole(input.role),
         is_active: input.isActive ?? true,
@@ -147,7 +90,7 @@ export async function upsertProfileAndMembership(input: {
 
 export async function getAppUser(userId: string, email: string): Promise<AppUser> {
   const admin = createAdminClient()
-  const companyId = await getDefaultCompanyId(admin)
+  const companyId = await resolvePrimaryCompanyId(userId)
 
   const [{ data: profile, error: profileError }, { data: membership, error: membershipError }] = await Promise.all([
     admin.from('profiles').select('full_name, is_active').eq('id', userId).maybeSingle(),
@@ -166,14 +109,14 @@ export async function getAppUser(userId: string, email: string): Promise<AppUser
     id: userId,
     name: (profile?.full_name as string | null | undefined) ?? email.split('@')[0],
     email,
+    companyId,
     role: publicRole((membership?.role as string | null | undefined) ?? 'ACCOUNTANT'),
     isActive: Boolean((profile?.is_active ?? true) && (membership?.is_active ?? true)),
   }
 }
 
-export async function listAppUsers(): Promise<(AppUser & { createdAt: string })[]> {
+export async function listAppUsers(companyId: string): Promise<(AppUser & { createdAt: string })[]> {
   const admin = createAdminClient()
-  const companyId = await getDefaultCompanyId(admin)
 
   const { data, error } = await admin
     .from('company_users')
@@ -195,6 +138,7 @@ export async function listAppUsers(): Promise<(AppUser & { createdAt: string })[
         id: String(row.user_id),
         name: profile?.full_name ?? email.split('@')[0],
         email,
+        companyId,
         role: publicRole(row.role as string | null),
         isActive: Boolean((row.is_active ?? true) && (profile?.is_active ?? true)),
         createdAt: String(row.created_at),
@@ -210,14 +154,37 @@ export async function createAppUser(input: {
   password: string
   name?: string | null
   role?: string | null
+  companyId: string
 }): Promise<AppUser & { createdAt: string }> {
-  const userId = await ensureSupabaseUser(input)
-  const user = await getAppUser(userId, input.email)
+  const admin = createAdminClient()
+  const { data, error } = await admin.auth.admin.createUser({
+    email: input.email,
+    password: input.password,
+    email_confirm: true,
+    user_metadata: {
+      full_name: input.name ?? input.email.split('@')[0],
+      role: publicRole(input.role),
+    },
+  })
+  if (error) throw error
+  if (!data.user.email) throw new Error('User email is missing')
+
+  await upsertProfileAndMembership({
+    userId: data.user.id,
+    email: data.user.email,
+    name: input.name ?? null,
+    role: input.role ?? 'ACCOUNTANT',
+    companyId: input.companyId,
+    isActive: true,
+  })
+
+  const user = await getAppUser(data.user.id, data.user.email)
   return { ...user, createdAt: new Date().toISOString() }
 }
 
 export async function updateAppUser(
   userId: string,
+  companyId: string,
   input: { name?: string | null; role?: string | null; isActive?: boolean | null; password?: string | null },
 ): Promise<AppUser> {
   const admin = createAdminClient()
@@ -243,6 +210,7 @@ export async function updateAppUser(
     name: input.name ?? authUser.user.user_metadata?.full_name ?? null,
     role: input.role ?? authUser.user.user_metadata?.role ?? 'ACCOUNTANT',
     isActive: input.isActive ?? true,
+    companyId,
   })
 
   return getAppUser(userId, authUser.user.email)

@@ -1,12 +1,14 @@
-import { clearAuthCookieHeaderValues } from '@/lib/auth'
+import { createClient } from '@/lib/supabase/server'
 
 export async function POST() {
-  const response = Response.json({ success: true })
-  const headers = new Headers(response.headers)
-
-  for (const value of clearAuthCookieHeaderValues()) {
-    headers.append('Set-Cookie', value)
+  try {
+    const supabase = await createClient()
+    const { error } = await supabase.auth.signOut()
+    if (error) {
+      return Response.json({ error: error.message }, { status: 400 })
+    }
+    return Response.json({ success: true })
+  } catch (error) {
+    return Response.json({ error: String(error) }, { status: 500 })
   }
-
-  return new Response(response.body, { status: 200, headers })
 }

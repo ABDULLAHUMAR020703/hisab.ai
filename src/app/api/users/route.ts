@@ -3,8 +3,8 @@ import { createAppUser, listAppUsers } from '@/lib/supabase/auth-users'
 
 export async function GET() {
   try {
-    await requireAuth()
-    return Response.json(await listAppUsers())
+    const session = await requireAuth()
+    return Response.json(await listAppUsers(session.companyId))
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
@@ -15,7 +15,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await requireAuth()
+    const session = await requireAuth()
     const body = await request.json()
 
     if (!body.email || !body.password) {
@@ -27,6 +27,7 @@ export async function POST(request: Request) {
       email: body.email,
       password: body.password,
       role: body.role || 'ACCOUNTANT',
+      companyId: session.companyId,
     })
 
     return Response.json(user, { status: 201 })

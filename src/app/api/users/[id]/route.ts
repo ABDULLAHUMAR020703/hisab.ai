@@ -3,11 +3,11 @@ import { deleteAppUser, updateAppUser } from '@/lib/supabase/auth-users'
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireAuth()
+    const session = await requireAuth()
     const { id } = await params
     const body = await request.json()
 
-    const user = await updateAppUser(id, {
+    const user = await updateAppUser(id, session.companyId, {
       name: body.name,
       role: body.role,
       isActive: body.isActive,

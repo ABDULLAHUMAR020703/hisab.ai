@@ -2,7 +2,6 @@ import 'server-only'
 import { createHash, randomUUID } from 'crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { DEFAULT_COMPANY_ID } from '@/lib/supabase/env'
-import { ensureDemoSupabaseUsers } from '@/lib/supabase/auth-users'
 
 export interface QaSeedResult {
   status: 'seeded'
@@ -57,8 +56,6 @@ async function ensureFoundation() {
     status: 'TRIAL',
   }, { onConflict: 'company_id' })
   if (subscriptionError) throw subscriptionError
-
-  await ensureDemoSupabaseUsers()
 }
 
 async function getSeedUserId() {

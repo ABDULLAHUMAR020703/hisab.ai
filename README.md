@@ -9,7 +9,7 @@ hisab.ai is a Supabase-only accounting and ZATCA e-invoicing web app for NETKOM 
 - Backend: Next.js API routes
 - Database and auth: Supabase only
 - Runtime database access: Supabase client with service-role server access where needed
-- Authentication: Supabase Auth with HTTP-only app cookies
+- Authentication: Supabase Auth with SSR session cookies (`@supabase/ssr`)
 - Deployment target: Vercel
 
 There is no Prisma runtime, SQLite database, Postgres direct connection string, or local database fallback.
@@ -81,12 +81,8 @@ npm run test:zatca
 - Supabase Auth users are mirrored into `profiles` and `company_users`.
 - Server routes use Supabase service role for backend operations.
 - RLS policies remain in Supabase migrations and protect authenticated tenant access.
-- The default demo login is managed through Supabase Auth:
-
-```txt
-admin@hisab.ai
-admin123
-```
+- Register at `/register` to create a company workspace; sign in at `/login`.
+- Configure Supabase redirect URLs: `{APP_URL}/auth/callback` and `{APP_URL}/reset-password`.
 
 ## Removed Legacy Stack
 

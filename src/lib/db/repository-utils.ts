@@ -1,5 +1,6 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { getSession } from '@/lib/auth'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getDefaultCompanyId } from './company.repository'
 
@@ -10,6 +11,10 @@ export function supabaseDb(client?: SupabaseClient): SupabaseClient {
 }
 
 export async function resolveCompanyId(client?: SupabaseClient): Promise<string> {
+  const session = await getSession()
+  if (session?.companyId) {
+    return session.companyId
+  }
   return getDefaultCompanyId(client)
 }
 
