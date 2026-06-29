@@ -1,5 +1,6 @@
 import 'server-only'
 import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
+import { isMockOnboardingEnabled } from '../env-guard'
 import type { ComplianceCsidRequest, ComplianceCsidResponse } from './types'
 import {
   extractBodyRequestId,
@@ -39,7 +40,7 @@ function wrapCertificatePem(binarySecurityToken: string): string {
 }
 
 export function isMockMode(): boolean {
-  return process.env.ZATCA_MOCK_ONBOARDING === 'true'
+  return isMockOnboardingEnabled()
 }
 
 function mockComplianceResponse(request: ComplianceCsidRequest): ComplianceCsidResponse {

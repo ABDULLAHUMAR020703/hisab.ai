@@ -1,4 +1,5 @@
 import { requireAuth } from '@/lib/auth'
+import { isZatcaAdmin, ZatcaForbiddenError } from '@/lib/zatca/authz'
 import { stripLogoCacheBuster } from '@/lib/branding/logo-url'
 import { getSettingsRepository } from '@/lib/db/provider'
 import type { CompanySettingsUpdateInput } from '@/lib/db/types'
@@ -27,9 +28,21 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   try {
-    await requireAuth()
+    const user = await requireAuth()
     const body = await request.json()
     const settingsRepo = getSettingsRepository()
+
+    const touchesZatcaAdminFields = [
+      body.zatcaEnabled,
+      body.zatcaConnected,
+      body.zatcaEnvironment,
+      body.zatcaBusinessCategory,
+      body.zatcaEgsUnitId,
+    ].some((value) => value !== undefined)
+
+    if (touchesZatcaAdminFields && !isZatcaAdmin(user)) {
+      throw new ZatcaForbiddenError('Only company owners and administrators can change ZATCA settings.')
+    }
 
     const data: CompanySettingsUpdateInput = {
       companyName: body.companyName,
@@ -50,9 +63,13 @@ export async function PUT(request: Request) {
       fiscalYearStart: body.fiscalYearStart,
       zatcaEnabled: body.zatcaEnabled,
       zatcaConnected: body.zatcaConnected,
-      zatcaEnvironment: body.zatcaEnvironment === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX',
       zatcaEgsUnitId: body.zatcaEgsUnitId?.trim() || null,
       zatcaBusinessCategory: body.zatcaBusinessCategory?.trim() || null,
+    }
+
+    // Active environment is switched via /api/zatca/connection/environment only.
+    if (body.zatcaEnvironment !== undefined && isZatcaAdmin(user)) {
+      data.zatcaEnvironment = body.zatcaEnvironment === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX'
     }
 
     const settings = await settingsRepo.upsert(data)
@@ -60,6 +77,9 @@ export async function PUT(request: Request) {
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    if (error instanceof ZatcaForbiddenError) {
+      return Response.json({ error: error.message }, { status: 403 })
     }
     return Response.json({ error: String(error) }, { status: 500 })
   }

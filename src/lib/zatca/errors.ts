@@ -10,6 +10,8 @@ export type ZatcaErrorCode =
   | 'ZATCA_DISABLED'
   | 'INVOICE_NOT_FOUND'
   | 'ALREADY_SUBMITTED'
+  | 'SUBMISSION_IN_PROGRESS'
+  | 'PIH_CHAIN_BROKEN'
   | 'UNKNOWN'
 
 export class ZatcaError extends Error {

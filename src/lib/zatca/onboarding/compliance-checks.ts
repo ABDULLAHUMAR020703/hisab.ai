@@ -150,6 +150,7 @@ async function runSingleComplianceCheck(
 
     const enrichedInput = await enrichZatcaInvoiceInput({
       ...loaded.input,
+      zatcaEnvironment: environment,
       billingReferenceId,
       profileIdOverride: config.profileIdOverride,
       invoiceTypeCodeNameOverride: config.invoiceTypeCodeName,

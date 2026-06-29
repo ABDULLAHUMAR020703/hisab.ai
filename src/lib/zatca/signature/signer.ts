@@ -2,6 +2,7 @@ import 'server-only'
 import { createHash, createPrivateKey, createSign, createVerify } from 'crypto'
 import forge from 'node-forge'
 import { generateZatcaInvoiceHash } from '../hash/zatca-hash'
+import { isMockSubmissionEnabled } from '../env-guard'
 import { stripSignatureBlock } from './canonicalize'
 import {
   buildSignedProperties,
@@ -71,7 +72,7 @@ function normalizeEcdsaInteger(value: Buffer): Buffer {
 }
 
 function isMockSigningEnabled(): boolean {
-  return process.env.ZATCA_MOCK_SUBMISSION === 'true' || process.env.ZATCA_MOCK_ONBOARDING === 'true'
+  return isMockSubmissionEnabled()
 }
 
 function mockCertificateInfo(certificatePem: string): ZatcaCertificateInfo {

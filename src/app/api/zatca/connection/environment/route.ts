@@ -1,25 +1,24 @@
 import { requireZatcaAdmin } from '@/lib/zatca/authz'
 import { ZatcaForbiddenError } from '@/lib/zatca/authz'
-import { requestAndStoreProductionCsid } from '@/lib/zatca/onboarding/service'
+import { setActiveZatcaEnvironment } from '@/lib/zatca/connection/credentials'
 import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
 
-/**
- * POST /api/zatca/onboarding/production
- * Body: { environment: 'SANDBOX' | 'PRODUCTION' }
- * Requests and stores Production CSID after compliance onboarding.
- */
-export async function POST(request: Request) {
+export async function PUT(request: Request) {
   try {
     const user = await requireZatcaAdmin()
     const body = await request.json().catch(() => ({}))
-    const environment = body?.environment as ZatcaEnvironment | undefined
+    const environment = body.environment as ZatcaEnvironment
 
     if (environment !== 'SANDBOX' && environment !== 'PRODUCTION') {
       return Response.json({ error: 'environment must be SANDBOX or PRODUCTION' }, { status: 400 })
     }
 
-    const result = await requestAndStoreProductionCsid(environment, { userId: user.id, userName: user.name })
-    return Response.json(result)
+    await setActiveZatcaEnvironment(environment, {
+      userId: user.id,
+      userName: user.name,
+    })
+
+    return Response.json({ success: true, environment })
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
@@ -27,6 +26,6 @@ export async function POST(request: Request) {
     if (error instanceof ZatcaForbiddenError) {
       return Response.json({ error: error.message }, { status: 403 })
     }
-    return Response.json({ error: String(error) }, { status: 422 })
+    return Response.json({ error: String(error) }, { status: 500 })
   }
 }

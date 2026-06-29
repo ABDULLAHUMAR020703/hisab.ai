@@ -1,8 +1,9 @@
 import type { ZatcaCsrSubjectInput } from './types'
 
+import { resolveBusinessCategory } from '../business-categories'
+
 const SOLUTION_NAME = 'hisab.ai'
 const DEFAULT_INVOICE_TYPES = '1100'
-const DEFAULT_BUSINESS_CATEGORY = 'Telecommunications'
 const DEFAULT_EGS_MODEL = 'hisab.ai'
 const OID_ORGANIZATION_IDENTIFIER = '2.5.4.97'
 
@@ -87,7 +88,7 @@ export function buildCsrSubjectValues(input: ZatcaCsrSubjectInput): CsrSubjectVa
     organizationUnit: sanitizePrintable(input.organizationUnit?.trim() || 'Main Branch'),
     commonName: resolveCommonName(input),
     registeredAddress: sanitizePrintable(input.registeredAddress?.trim() || 'Riyadh'),
-    businessCategory: sanitizePrintable(input.businessCategory?.trim() || DEFAULT_BUSINESS_CATEGORY),
+    businessCategory: sanitizePrintable(resolveBusinessCategory(input.businessCategory)),
     invoiceTypes: sanitizePrintable(input.invoiceTypes || DEFAULT_INVOICE_TYPES),
   }
 }

@@ -1,4 +1,5 @@
-import { requireAuth } from '@/lib/auth'
+import { requireZatcaAdmin } from '@/lib/zatca/authz'
+import { ZatcaForbiddenError } from '@/lib/zatca/authz'
 import { mapOnboardingError } from '@/lib/zatca/onboarding/onboarding-errors'
 import { runZatcaOnboarding } from '@/lib/zatca/onboarding/onboard'
 import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
@@ -9,7 +10,7 @@ import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
  */
 export async function POST(request: Request) {
   try {
-    const user = await requireAuth()
+    const user = await requireZatcaAdmin()
     const body = await request.json()
     const otp = body?.otp
     const environment = body?.environment as ZatcaEnvironment | undefined
@@ -27,6 +28,9 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return Response.json({ error: 'Unauthorized', code: 'UNAUTHORIZED' }, { status: 401 })
+    }
+    if (error instanceof ZatcaForbiddenError) {
+      return Response.json({ error: error.message, code: 'FORBIDDEN' }, { status: 403 })
     }
 
     const mapped = mapOnboardingError(error)

@@ -1,9 +1,10 @@
 import { createHash, randomBytes } from 'crypto'
 import type { CompanySettings, ZatcaEnvironment } from '@/lib/db/prisma-types'
 
+import { resolveBusinessCategory } from '../business-categories'
+
 const SOLUTION_NAME = 'hisab.ai'
 const DEFAULT_EGS_MODEL = 'hisab.ai'
-const DEFAULT_BUSINESS_CATEGORY = 'Telecommunications'
 
 export interface EgsIdentity {
   /** CSR Common Name — ZATCA simulation: TST-{VAT}; production: {VAT} */
@@ -27,6 +28,7 @@ export function generateEgsIdentity(
   companyName: string | null | undefined,
   vatNumber: string | null | undefined,
   environment: ZatcaEnvironment = 'SANDBOX',
+  businessCategory?: string | null,
 ): EgsIdentity {
   const vat = normalizeVat(vatNumber)
   const egsUnitId = environment === 'SANDBOX' ? `TST-${vat}` : vat
@@ -44,7 +46,7 @@ export function generateEgsIdentity(
     egsSerialNumber,
     egsModel: DEFAULT_EGS_MODEL,
     solutionName: SOLUTION_NAME,
-    businessCategory: DEFAULT_BUSINESS_CATEGORY,
+    businessCategory: resolveBusinessCategory(businessCategory),
   }
 }
 

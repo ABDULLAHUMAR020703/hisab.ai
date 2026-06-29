@@ -166,3 +166,19 @@ export async function findLatestOnboardingRequest(
   if (!data) return null
   return mapZatcaOnboardingRequestRow(data)
 }
+
+/** Deletes locally stored credentials for one environment. Does not touch invoices or audit logs. */
+export async function deleteCredential(
+  environment: ZatcaEnvironment,
+  companyId?: string,
+  client?: SupabaseClient,
+): Promise<void> {
+  const id = await resolveCompanyIdOrThrow(companyId)
+  const { error } = await db(client)
+    .from('zatca_credentials')
+    .delete()
+    .eq('company_id', id)
+    .eq('environment', environment)
+
+  if (error) throw error
+}

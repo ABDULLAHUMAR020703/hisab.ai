@@ -1,5 +1,6 @@
 import 'server-only'
 import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
+import { isMockSubmissionEnabled } from '../env-guard'
 import { buildBasicAuthHeader, loadSigningCredentials } from '../signature/certificate'
 
 export function getZatcaApiBaseUrl(): string {
@@ -7,7 +8,7 @@ export function getZatcaApiBaseUrl(): string {
 }
 
 export function isMockSubmission(): boolean {
-  return process.env.ZATCA_MOCK_SUBMISSION === 'true' || process.env.ZATCA_MOCK_ONBOARDING === 'true'
+  return isMockSubmissionEnabled()
 }
 
 const API_PREFIX: Record<ZatcaEnvironment, string> = {

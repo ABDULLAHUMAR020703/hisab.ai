@@ -26,17 +26,24 @@ async function getCompanySettingsOrThrow() {
 }
 
 /**
- * Generates and stores a ZATCA CSR for the active company environment.
+ * Generates and stores a ZATCA CSR for the given environment.
  */
-export async function generateAndStoreCsr(auditContext?: OnboardingAuditContext) {
+export async function generateAndStoreCsr(
+  environment: ZatcaEnvironment,
+  auditContext?: OnboardingAuditContext,
+) {
   const settings = await getCompanySettingsOrThrow()
-  const environment: ZatcaEnvironment = settings.zatcaEnvironment
 
   if (!settings.taxId?.trim()) {
     throw new Error('VAT registration number (taxId) is required before generating a CSR')
   }
 
-  const egsIdentity = generateEgsIdentity(settings.legalName || settings.companyName, settings.taxId, environment)
+  const egsIdentity = generateEgsIdentity(
+    settings.legalName || settings.companyName,
+    settings.taxId,
+    environment,
+    settings.zatcaBusinessCategory,
+  )
 
   await getSettingsRepository().update(settings.id, {
       zatcaEgsUnitId: egsIdentity.egsUnitId,
@@ -44,7 +51,9 @@ export async function generateAndStoreCsr(auditContext?: OnboardingAuditContext)
       zatcaEgsSerialNumber: egsIdentity.egsSerialNumber,
   })
 
-  const csrResult = await generateCSR(companySettingsToCsrInput(settings, egsIdentity))
+  const csrResult = await generateCSR(
+    companySettingsToCsrInput({ ...settings, zatcaEnvironment: environment }, egsIdentity),
+  )
 
   await storeCredentials({
     environment,
@@ -77,9 +86,12 @@ export async function generateAndStoreCsr(auditContext?: OnboardingAuditContext)
 /**
  * Submits stored CSR to ZATCA compliance API with OTP and persists CSID credentials.
  */
-export async function submitComplianceOnboarding(otp: string, auditContext?: OnboardingAuditContext) {
+export async function submitComplianceOnboarding(
+  environment: ZatcaEnvironment,
+  otp: string,
+  auditContext?: OnboardingAuditContext,
+) {
   const settings = await getCompanySettingsOrThrow()
-  const environment: ZatcaEnvironment = settings.zatcaEnvironment
   const csrPem = await getDecryptedCsr(environment)
 
   if (!csrPem) {
@@ -117,7 +129,9 @@ export async function submitComplianceOnboarding(otp: string, auditContext?: Onb
       onboardedAt: new Date(),
     })
 
-    await getSettingsRepository().update(settings.id, { zatcaConnected: true })
+    if (settings.zatcaEnvironment === environment) {
+      await getSettingsRepository().update(settings.id, { zatcaConnected: true })
+    }
 
     await logZatcaAudit({
       action: 'CREDENTIALS_STORED',
@@ -170,6 +184,7 @@ export async function submitComplianceOnboarding(otp: string, auditContext?: Onb
       userId: auditContext?.userId,
       userName: auditContext?.userName,
       companyName: settings.companyName,
+      metadata: { environment },
     })
     throw error
   }
@@ -178,9 +193,11 @@ export async function submitComplianceOnboarding(otp: string, auditContext?: Onb
 /**
  * Requests Production CSID after compliance onboarding and stores credentials.
  */
-export async function requestAndStoreProductionCsid(auditContext?: OnboardingAuditContext) {
+export async function requestAndStoreProductionCsid(
+  environment: ZatcaEnvironment,
+  auditContext?: OnboardingAuditContext,
+) {
   const settings = await getCompanySettingsOrThrow()
-  const environment: ZatcaEnvironment = settings.zatcaEnvironment
 
   try {
     const response = await requestProductionCsid(environment)

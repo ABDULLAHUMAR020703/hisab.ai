@@ -2,51 +2,37 @@ import { requireZatcaAdmin } from '@/lib/zatca/authz'
 import { ZatcaForbiddenError } from '@/lib/zatca/authz'
 import { getSettingsRepository } from '@/lib/db/provider'
 import { logZatcaAudit } from '@/lib/zatca/audit/logger'
-import { testZatcaConnection } from '@/lib/zatca/onboarding/onboard'
 import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
 
 /**
- * POST /api/zatca/onboarding/test-connection
- * Body: { environment: 'SANDBOX' | 'PRODUCTION' }
+ * POST /api/zatca/connection/renew
+ * Records certificate renewal intent (does not call ZATCA).
  */
 export async function POST(request: Request) {
   try {
     const user = await requireZatcaAdmin()
     const body = await request.json().catch(() => ({}))
-    const environment = body?.environment as ZatcaEnvironment | undefined
+    const environment = body.environment as ZatcaEnvironment
 
     if (environment !== 'SANDBOX' && environment !== 'PRODUCTION') {
       return Response.json({ error: 'environment must be SANDBOX or PRODUCTION' }, { status: 400 })
     }
 
     const settings = await getSettingsRepository().findFirst()
-    const result = await testZatcaConnection(environment)
-
     await logZatcaAudit({
-      action: 'CONNECTION_TEST',
-      result: result.ok ? 'SUCCESS' : 'FAILED',
-      message: result.message,
+      action: 'CERTIFICATE_RENEWAL_STARTED',
+      result: 'SUCCESS',
+      message: `Certificate renewal started for ${environment}`,
       userId: user.id,
       userName: user.name,
       companyName: settings?.companyName ?? null,
-      metadata: {
-        environment,
-        hasPrivateKey: result.hasPrivateKey,
-        hasCertificate: result.hasCertificate,
-        hasSecret: result.hasSecret,
-        failures: result.failures ?? [],
-      },
+      metadata: { environment },
     })
 
     return Response.json({
-      ok: result.ok,
-      message: result.message,
-      hasPrivateKey: result.hasPrivateKey,
-      hasCertificate: result.hasCertificate,
-      hasSecret: result.hasSecret,
-      failures: result.failures ?? [],
-      environment,
-    }, { status: result.ok ? 200 : 422 })
+      success: true,
+      message: 'Delete local credentials, then complete onboarding with a new OTP from the Fatoora portal.',
+    })
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })

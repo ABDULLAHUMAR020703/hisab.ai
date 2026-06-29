@@ -1,4 +1,5 @@
-import { requireAuth } from '@/lib/auth'
+import { requireZatcaSubmit } from '@/lib/zatca/authz'
+import { ZatcaForbiddenError } from '@/lib/zatca/authz'
 import { ZatcaError } from '@/lib/zatca/errors'
 import { submitInvoice } from '@/lib/zatca/submission'
 
@@ -11,7 +12,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const user = await requireAuth()
+    const user = await requireZatcaSubmit()
     const { id } = await params
     const result = await submitInvoice(id, {
       userId: user.id,
@@ -21,6 +22,9 @@ export async function POST(
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    if (error instanceof ZatcaForbiddenError) {
+      return Response.json({ error: error.message }, { status: 403 })
     }
     if (error instanceof ZatcaError) {
       return Response.json({

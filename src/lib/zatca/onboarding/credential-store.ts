@@ -342,25 +342,89 @@ export async function testStoredConnection(environment: ZatcaEnvironment): Promi
   hasPrivateKey: boolean
   hasCertificate: boolean
   hasSecret: boolean
+  failures?: string[]
 }> {
-  const [privateKey, certificate, secret] = await Promise.all([
-    getDecryptedPrivateKey(environment),
-    getDecryptedCertificate(environment),
-    getDecryptedSecret(environment),
-  ])
+  if (environment === 'PRODUCTION') {
+    return testProductionStoredConnection(environment)
+  }
+  return testSimulationStoredConnection(environment)
+}
 
-  const hasPrivateKey = Boolean(privateKey)
-  const hasCertificate = Boolean(certificate)
-  const hasSecret = Boolean(secret)
-  const ok = hasPrivateKey && hasCertificate && hasSecret
+async function testSimulationStoredConnection(environment: ZatcaEnvironment) {
+  const failures: string[] = []
+  const cred = await getCredential(environment)
+
+  const privateKey = await getDecryptedPrivateKey(environment)
+  if (!privateKey) failures.push('Private key missing')
+
+  const certificate = await getDecryptedCertificate(environment)
+  if (!certificate) {
+    failures.push('Compliance certificate missing')
+  } else {
+    const dates = extractCertificateDates(certificate)
+    if (dates && dates.validTo.getTime() <= Date.now()) {
+      failures.push('Compliance certificate expired')
+    }
+  }
+
+  const secret = await getDecryptedSecret(environment)
+  if (!secret) failures.push('Compliance secret missing')
+
+  if (!cred?.complianceCsid && !cred?.binarySecurityTokenEnc) {
+    failures.push('Compliance CSID missing')
+  }
+
+  const ok = failures.length === 0
 
   return {
     ok,
-    hasPrivateKey,
-    hasCertificate,
-    hasSecret,
+    hasPrivateKey: Boolean(privateKey),
+    hasCertificate: Boolean(certificate),
+    hasSecret: Boolean(secret),
+    failures,
     message: ok
-      ? 'ZATCA credentials are present and decryptable for this environment.'
-      : 'Missing or incomplete ZATCA credentials. Complete onboarding or regenerate CSR.',
+      ? 'Simulation credentials are present and decryptable.'
+      : failures.join('; '),
+  }
+}
+
+async function testProductionStoredConnection(environment: ZatcaEnvironment) {
+  const failures: string[] = []
+  const cred = await getCredential(environment)
+
+  if (!cred?.productionCsid) {
+    failures.push('Production CSID missing')
+  }
+
+  const privateKey = await getDecryptedPrivateKey(environment)
+  if (!privateKey) failures.push('Private key missing')
+
+  const productionToken = await getDecryptedProductionBinarySecurityToken(environment)
+  if (!productionToken) failures.push('Production BinarySecurityToken missing')
+
+  const productionCertificate = await getDecryptedProductionCertificate(environment)
+  if (!productionCertificate) {
+    failures.push('Production certificate missing')
+  } else {
+    const dates = extractCertificateDates(productionCertificate)
+    if (dates && dates.validTo.getTime() <= Date.now()) {
+      failures.push('Production certificate expired')
+    }
+  }
+
+  const secret = await getDecryptedSecret(environment)
+  if (!secret) failures.push('Production secret missing')
+
+  const ok = failures.length === 0
+
+  return {
+    ok,
+    hasPrivateKey: Boolean(privateKey),
+    hasCertificate: Boolean(productionCertificate),
+    hasSecret: Boolean(secret),
+    failures,
+    message: ok
+      ? 'Production credentials are present, decryptable, and the certificate is valid.'
+      : failures.join('; '),
   }
 }

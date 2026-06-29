@@ -1,4 +1,5 @@
-import { requireAuth } from '@/lib/auth'
+import { requireZatcaAdmin } from '@/lib/zatca/authz'
+import { ZatcaForbiddenError } from '@/lib/zatca/authz'
 import { submitComplianceInvoice } from '@/lib/zatca/api/compliance-invoices'
 import { processZatcaInvoice, loadZatcaInvoiceById } from '@/lib/zatca/invoice-service'
 import { signAndEmbedPhase2Qr } from '@/lib/zatca/invoice-signing'
@@ -14,7 +15,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    await requireAuth()
+    await requireZatcaAdmin()
     const { id } = await params
 
     const settings = await getSettingsRepository().findFirst()
@@ -57,6 +58,9 @@ export async function POST(
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    if (error instanceof ZatcaForbiddenError) {
+      return Response.json({ error: error.message }, { status: 403 })
     }
     return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 })
   }

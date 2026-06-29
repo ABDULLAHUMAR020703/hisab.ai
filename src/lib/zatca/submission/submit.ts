@@ -15,9 +15,10 @@ import {
   validateFullSubmissionPipeline,
   validateSubmissionReadiness,
 } from '../validation/hardening'
-import { TERMINAL_ZATCA_STATUSES, type InvoiceSubmissionResult } from './types'
+import { verifyPihForInvoice } from '../pih-chain'
 import { resolveInvoiceTypeCodeName } from '../constants'
 import { getSubmissionRoute } from './router'
+import { TERMINAL_ZATCA_STATUSES, type InvoiceSubmissionResult } from './types'
 
 export interface SubmitAuditContext {
   userId?: string
@@ -56,6 +57,9 @@ async function assertSubmissionReady(invoiceId: string) {
   if (!invoice) throw new ZatcaError('INVOICE_NOT_FOUND', 'Invoice not found')
 
   const zatcaStatus = invoice.zatcaStatus as ZatcaInvoiceStatus
+  if (zatcaStatus === 'PENDING') {
+    throw new ZatcaError('SUBMISSION_IN_PROGRESS', 'Invoice submission is already in progress. Wait and retry if it does not complete.')
+  }
   if (TERMINAL_ZATCA_STATUSES.includes(zatcaStatus)) {
     throw new ZatcaError('ALREADY_SUBMITTED', `Invoice already submitted with status: ${invoice.zatcaStatus}`)
   }
@@ -86,6 +90,36 @@ export async function submitInvoice(
 ): Promise<InvoiceSubmissionResult> {
   const { settings, invoice, companyName } = await assertSubmissionReady(invoiceId)
   const environment = settings.zatcaEnvironment
+  const wasRetry = invoice.zatcaStatus === 'FAILED'
+
+  const pihCheck = await verifyPihForInvoice(invoiceId)
+  if (!pihCheck.valid) {
+    const message = pihCheck.issues.map((issue) => issue.message).join(' ')
+    await logZatcaAudit({
+      action: 'PIH_CHAIN_WARNING',
+      result: 'FAILED',
+      message,
+      userId: auditContext?.userId,
+      userName: auditContext?.userName,
+      companyName,
+      invoiceId,
+      metadata: { issues: pihCheck.issues },
+    })
+    throw new ZatcaError('PIH_CHAIN_BROKEN', `Invoice hash chain is broken. ${message}`)
+  }
+
+  if (wasRetry) {
+    await logZatcaAudit({
+      action: 'SUBMISSION_RETRY',
+      result: 'SUCCESS',
+      message: 'Retrying failed ZATCA submission for the same invoice',
+      userId: auditContext?.userId,
+      userName: auditContext?.userName,
+      companyName,
+      invoiceId,
+      metadata: { environment },
+    })
+  }
 
   await updateInvoiceZatcaFields(invoiceId, {
     zatcaStatus: 'PENDING',

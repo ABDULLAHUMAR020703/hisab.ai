@@ -134,6 +134,7 @@ export async function runZatcaOnboarding(
     settings.legalName || settings.companyName,
     settings.taxId,
     environment,
+    settings.zatcaBusinessCategory,
   )
 
   const onboardingRequest = await createOnboardingRequest({
@@ -280,7 +281,7 @@ export async function runZatcaOnboarding(
         })
 
         try {
-          const production = await requestAndStoreProductionCsid(auditContext)
+          const production = await requestAndStoreProductionCsid(environment, auditContext)
           productionRequestId = production.requestId
           await storeCredentials({ environment, onboardingStatus: 'PRODUCTION_READY', lastError: null })
           await logZatcaAudit({
@@ -375,10 +376,8 @@ export async function runZatcaOnboarding(
   }
 }
 
-export async function testZatcaConnection(environment?: ZatcaEnvironment) {
-  const settings = await getCompanySettingsOrThrow()
-  const env = environment ?? settings.zatcaEnvironment
-  return testStoredConnection(env)
+export async function testZatcaConnection(environment: ZatcaEnvironment) {
+  return testStoredConnection(environment)
 }
 
 export { validateCompanyProfileForZatca as validateOnboardingState, mapOnboardingError }

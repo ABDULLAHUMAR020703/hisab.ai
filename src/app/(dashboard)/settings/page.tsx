@@ -1,11 +1,13 @@
 ﻿'use client'
 
 import { useEffect, useState } from 'react'
-import { Save, Building2, Shield, Link2, Loader2, Wifi, Palette } from 'lucide-react'
+import { Save, Building2, Shield, Palette } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
 import { CompanyLogoUpload } from '@/components/branding/company-logo-upload'
+import { ZatcaConnectionManager } from '@/components/zatca/ZatcaConnectionManager'
+import { ZATCA_BUSINESS_CATEGORIES } from '@/lib/zatca/business-categories'
 import { stripLogoCacheBuster } from '@/lib/branding/logo-url'
 import { readApiError } from '@/lib/api-client'
 
@@ -27,17 +29,12 @@ interface Settings {
   currency: string
   fiscalYearStart: string
   zatcaEnvironment: 'SANDBOX' | 'PRODUCTION'
+  zatcaBusinessCategory: string
   logoUrl: string | null
   logoUploadedAt: string | null
 }
 
 interface OnboardingStatus {
-  zatcaConnected: boolean
-  environment: 'SANDBOX' | 'PRODUCTION'
-  connectionStatus: 'NOT_CONNECTED' | 'PENDING' | 'CONNECTED' | 'FAILED'
-  onboardingStatus: string
-  onboardedAt: string | null
-  lastError: string | null
   compliance?: {
     passed: boolean | null
     createdAt: string | null
@@ -49,13 +46,6 @@ interface OnboardingStatus {
       requestId?: string
     }>
   }
-}
-
-const CONNECTION_BADGES: Record<OnboardingStatus['connectionStatus'], { label: string; className: string }> = {
-  NOT_CONNECTED: { label: 'Not Connected', className: 'bg-slate-100 text-slate-700' },
-  PENDING: { label: 'Connecting…', className: 'bg-amber-100 text-amber-800' },
-  CONNECTED: { label: 'Connected', className: 'bg-emerald-100 text-emerald-800' },
-  FAILED: { label: 'Failed', className: 'bg-red-100 text-red-700' },
 }
 
 export default function SettingsPage() {
@@ -77,32 +67,14 @@ export default function SettingsPage() {
     currency: 'SAR',
     fiscalYearStart: '01-01',
     zatcaEnvironment: 'SANDBOX',
+    zatcaBusinessCategory: 'Telecommunications',
     logoUrl: null,
     logoUploadedAt: null,
   })
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null)
-  const [otp, setOtp] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [connecting, setConnecting] = useState(false)
-  const [onboardingMsg, setOnboardingMsg] = useState<string | null>(null)
-  const [onboardingErr, setOnboardingErr] = useState<string | null>(null)
-  const [testingConnection, setTestingConnection] = useState(false)
-  const [connectionTest, setConnectionTest] = useState<{
-    ok: boolean
-    message: string
-    environment: string
-    timestamp: string
-    hasPrivateKey?: boolean
-    hasCertificate?: boolean
-    hasSecret?: boolean
-  } | null>(null)
-
-  async function loadOnboardingStatus() {
-    const res = await fetch('/api/zatca/onboarding/status')
-    if (res.ok) setOnboarding(await res.json())
-  }
 
   useEffect(() => {
     let active = true
@@ -130,6 +102,7 @@ export default function SettingsPage() {
           currency: d.currency ?? 'SAR',
           fiscalYearStart: d.fiscalYearStart ?? '01-01',
           zatcaEnvironment: d.zatcaEnvironment === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX',
+          zatcaBusinessCategory: d.zatcaBusinessCategory ?? 'Telecommunications',
           logoUrl: stripLogoCacheBuster(d.logoUrl) ?? null,
           logoUploadedAt: d.logoUploadedAt
             ? typeof d.logoUploadedAt === 'string'
@@ -143,7 +116,7 @@ export default function SettingsPage() {
     fetch('/api/zatca/onboarding/status')
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (active && d) setOnboarding(d)
+        if (active && d) setOnboarding({ compliance: d.compliance })
       })
       .catch(() => null)
 
@@ -178,95 +151,10 @@ export default function SettingsPage() {
     }
   }
 
-  async function handleConnectZatca() {
-    setConnecting(true)
-    setOnboardingMsg(null)
-    setOnboardingErr(null)
-
-    try {
-      if (!otp.trim()) {
-        setOnboardingErr('Enter the OTP from the Fatoora portal.')
-        return
-      }
-
-      const saveRes = await fetch('/api/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...settings, zatcaEnabled: true }),
-      })
-      if (!saveRes.ok) {
-        const data = await saveRes.json()
-        throw new Error(data.error || 'Failed to save company profile')
-      }
-
-      setOnboardingMsg('Connecting to ZATCA… generating keys, CSR, and requesting CSID. This may take a minute.')
-
-      const res = await fetch('/api/zatca/onboard', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          otp,
-          environment: settings.zatcaEnvironment,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'ZATCA connection failed')
-
-      const warnings: string[] = Array.isArray(data.warnings) ? data.warnings : []
-      if (warnings.length) {
-        setOnboardingMsg(
-          `Connected to ZATCA — Compliance CSID issued. Some follow-up steps were deferred: ${warnings.join(' | ')}`,
-        )
-      } else {
-        setOnboardingMsg('Connected to ZATCA. Compliance checks and production CSID completed successfully.')
-      }
-      setOtp('')
-      await loadOnboardingStatus()
-    } catch (err) {
-      setOnboardingErr(err instanceof Error ? err.message : String(err))
-      await loadOnboardingStatus()
-    } finally {
-      setConnecting(false)
-    }
-  }
-
-  async function handleTestConnection() {
-    setTestingConnection(true)
-    setConnectionTest(null)
-
-    try {
-      const res = await fetch('/api/zatca/onboarding/test-connection', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ environment: settings.zatcaEnvironment }),
-      })
-      const data = await res.json().catch(() => ({}))
-      setConnectionTest({
-        ok: res.ok && Boolean(data.ok),
-        message: data.message || data.error || 'Connection test failed',
-        environment: data.environment || settings.zatcaEnvironment,
-        timestamp: new Date().toISOString(),
-        hasPrivateKey: data.hasPrivateKey,
-        hasCertificate: data.hasCertificate,
-        hasSecret: data.hasSecret,
-      })
-      await loadOnboardingStatus()
-    } catch (error) {
-      setConnectionTest({
-        ok: false,
-        message: error instanceof Error ? error.message : 'Connection test failed',
-        environment: settings.zatcaEnvironment,
-        timestamp: new Date().toISOString(),
-      })
-    } finally {
-      setTestingConnection(false)
-    }
-  }
-
   const f = (field: keyof Settings, val: string) => setSettings((s) => ({ ...s, [field]: val }))
 
   return (
-    <div className="p-6 max-w-3xl mx-auto space-y-6">
+    <div className="p-6 max-w-5xl mx-auto space-y-6">
       <PageHeader
         title="Settings"
         subtitle="Company information and ZATCA e-invoicing"
@@ -306,6 +194,16 @@ export default function SettingsPage() {
           <Input label="VAT Number (TRN)" required value={settings.taxId} onChange={(e) => f('taxId', e.target.value)} placeholder="3xxxxxxxxxxxxx3" />
           <Input label="Commercial Registration (CR)" required value={settings.commercialRegistration} onChange={(e) => f('commercialRegistration', e.target.value)} />
         </div>
+        <Select
+          label="ZATCA Business Category (CSR)"
+          value={settings.zatcaBusinessCategory}
+          onChange={(e) => f('zatcaBusinessCategory', e.target.value)}
+        >
+          {ZATCA_BUSINESS_CATEGORIES.map((category) => (
+            <option key={category} value={category}>{category}</option>
+          ))}
+        </Select>
+        <p className="text-xs text-slate-400 -mt-3">Used when generating the CSR during onboarding. Save before connecting to ZATCA.</p>
         <div className="grid grid-cols-2 gap-4">
           <Input label="Building Number" required value={settings.buildingNumber} onChange={(e) => f('buildingNumber', e.target.value)} />
           <Input label="Street Address" value={settings.streetAddress} onChange={(e) => f('streetAddress', e.target.value)} />
@@ -350,65 +248,9 @@ export default function SettingsPage() {
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">
-        <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
-          <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center">
-            <Shield size={18} className="text-emerald-600" />
-          </div>
-          <div>
-            <h2 className="font-semibold text-slate-900">Saudi E-Invoicing (ZATCA)</h2>
-            <p className="text-xs text-slate-400">
-              Log in to the Fatoora portal, generate an OTP, paste it below, and click Connect.
-            </p>
-          </div>
-        </div>
-
-        <Select
-          label="Environment"
-          value={settings.zatcaEnvironment}
-          onChange={(e) => f('zatcaEnvironment', e.target.value)}
-        >
-          <option value="SANDBOX">Simulation (Sandbox)</option>
-          <option value="PRODUCTION">Production</option>
-        </Select>
-
-        {onboarding && (
-          <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 text-sm flex flex-wrap items-center gap-2">
-            <span className="font-medium text-slate-700">Status</span>
-            <span className={`px-2 py-0.5 rounded text-xs font-medium ${CONNECTION_BADGES[onboarding.connectionStatus].className}`}>
-              {CONNECTION_BADGES[onboarding.connectionStatus].label}
-            </span>
-            {onboarding.zatcaConnected && onboarding.onboardedAt && (
-              <span className="text-xs text-slate-500">
-                since {new Date(onboarding.onboardedAt).toLocaleDateString()} ({onboarding.environment})
-              </span>
-            )}
-            {onboarding.lastError && (
-              <p className="w-full text-red-600 text-xs mt-1">{onboarding.lastError}</p>
-            )}
-          </div>
-        )}
-
-        <div className="rounded-xl border border-slate-200 p-4 space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-semibold text-slate-900">Connection Test</h3>
-              <p className="text-xs text-slate-400">Checks stored credentials can be decrypted for the selected environment.</p>
-            </div>
-            <Button variant="outline" onClick={handleTestConnection} loading={testingConnection}>
-              {testingConnection ? <Loader2 size={15} className="animate-spin" /> : <Wifi size={15} />}
-              Test ZATCA Connection
-            </Button>
-          </div>
-          {connectionTest && (
-            <div className={`rounded-lg border px-3 py-2 text-sm ${connectionTest.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'}`}>
-              <p className="font-medium">{connectionTest.ok ? 'Success' : 'Failure'} - {connectionTest.environment}</p>
-              <p className="text-xs mt-1">{connectionTest.message}</p>
-              <p className="text-[11px] mt-1 opacity-80">
-                {new Date(connectionTest.timestamp).toLocaleString()} - key {connectionTest.hasPrivateKey ? 'ok' : 'missing'}, certificate {connectionTest.hasCertificate ? 'ok' : 'missing'}, secret {connectionTest.hasSecret ? 'ok' : 'missing'}
-              </p>
-            </div>
-          )}
-        </div>
+        <ZatcaConnectionManager
+          onEnvironmentChange={(env) => setSettings((s) => ({ ...s, zatcaEnvironment: env }))}
+        />
 
         <div className="rounded-xl border border-slate-200 p-4 space-y-3">
           <div className="flex items-center justify-between gap-3">
@@ -416,7 +258,7 @@ export default function SettingsPage() {
               <h3 className="text-sm font-semibold text-slate-900">Compliance Status</h3>
               <p className="text-xs text-slate-400">
                 Latest ZATCA compliance invoice suite
-                {onboarding?.compliance?.createdAt ? ` - ${new Date(onboarding.compliance.createdAt).toLocaleString()}` : ''}
+                {onboarding?.compliance?.createdAt ? ` · ${new Date(onboarding.compliance.createdAt).toLocaleString()}` : ''}
               </p>
             </div>
             {onboarding?.compliance?.passed !== null && onboarding?.compliance?.passed !== undefined && (
@@ -446,25 +288,6 @@ export default function SettingsPage() {
             })}
           </div>
         </div>
-
-        <Input
-          label="OTP from Fatoora Portal"
-          value={otp}
-          onChange={(e) => setOtp(e.target.value)}
-          placeholder="e.g. 213710"
-        />
-        <p className="text-xs text-slate-400 -mt-3">
-          In the Fatoora portal: create or select your EGS unit → Generate OTP → paste here.
-          hisab.ai handles keys, CSR, and certificate automatically.
-        </p>
-
-        <Button onClick={handleConnectZatca} loading={connecting} className="w-full sm:w-auto">
-          {connecting ? <Loader2 size={15} className="animate-spin" /> : <Link2 size={15} />}
-          Connect to ZATCA
-        </Button>
-
-        {onboardingMsg && <p className="text-sm text-emerald-600">{onboardingMsg}</p>}
-        {onboardingErr && <p className="text-sm text-red-600">{onboardingErr}</p>}
       </div>
     </div>
   )
