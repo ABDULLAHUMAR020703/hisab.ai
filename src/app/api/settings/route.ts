@@ -8,13 +8,9 @@ export async function GET() {
     await requireAuth()
     const settingsRepo = getSettingsRepository()
 
-    let settings = await settingsRepo.findFirst()
+    const settings = await settingsRepo.findFirst()
     if (!settings) {
-      settings = await settingsRepo.create({
-        companyName: 'NETKOM COMPANY FOR COMMUNICATION',
-        country: 'Saudi Arabia',
-        currency: 'SAR',
-      })
+      return Response.json({ error: 'Company settings not found' }, { status: 404 })
     }
     return Response.json({
       ...settings,

@@ -1,6 +1,6 @@
 import 'server-only'
 import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
-import { getDefaultCompanyId } from '@/lib/db/company.repository'
+import { resolveCompanyIdOrThrow } from '@/lib/tenant'
 import { createAdminClient } from '@/lib/supabase/admin'
 import type { ZatcaApiResponseBody } from './client'
 
@@ -51,6 +51,7 @@ export async function persistZatcaApiLog(input: {
   environment: ZatcaEnvironment
   endpoint: string
   invoiceId?: string | null
+  companyId?: string
   status: number
   ok: boolean
   requestId: string
@@ -65,7 +66,7 @@ export async function persistZatcaApiLog(input: {
 }) {
   try {
     const supabase = createAdminClient()
-    const companyId = await getDefaultCompanyId(supabase)
+    const companyId = await resolveCompanyIdOrThrow(input.companyId)
     const metadata = {
       correlationId: input.correlationId,
       attempt: input.attempt,

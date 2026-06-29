@@ -1,8 +1,6 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { getSession } from '@/lib/auth'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { getDefaultCompanyId } from './company.repository'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -10,13 +8,7 @@ export function supabaseDb(client?: SupabaseClient): SupabaseClient {
   return client ?? createAdminClient()
 }
 
-export async function resolveCompanyId(client?: SupabaseClient): Promise<string> {
-  const session = await getSession()
-  if (session?.companyId) {
-    return session.companyId
-  }
-  return getDefaultCompanyId(client)
-}
+export { resolveCompanyId, resolveCompanyIdOrThrow, TenantAccessError } from '@/lib/tenant'
 
 export function isUuid(value: string): boolean {
   return UUID_RE.test(value)

@@ -1,7 +1,8 @@
 import 'server-only'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
-import { getDefaultCompanyId } from '@/lib/db/company.repository'
+import { findCompanyById } from '@/lib/db/company.repository'
 import type { CompanyRole } from '@/lib/db/types'
+import { TenantAccessError } from '@/lib/tenant-error'
 import { getSupabaseAnonKey, getSupabaseUrl } from './env'
 import { createAdminClient } from './admin'
 
@@ -11,6 +12,8 @@ export interface AppUser {
   email: string
   role: string
   companyId: string
+  companyName: string
+  avatarUrl: string | null
   isActive: boolean
 }
 
@@ -45,11 +48,15 @@ async function resolvePrimaryCompanyId(userId: string): Promise<string> {
 
   if (error) throw error
   if (!data?.length) {
-    return getDefaultCompanyId(admin)
+    throw new TenantAccessError('This account is not linked to a company. Register a new company or accept an invitation.')
   }
 
-  const owner = data.find((row) => row.role === 'OWNER')
-  return String((owner ?? data[0]).company_id)
+  const ownerMemberships = data.filter((row) => row.role === 'OWNER')
+  if (ownerMemberships.length > 0) {
+    return String(ownerMemberships[ownerMemberships.length - 1].company_id)
+  }
+
+  return String(data[data.length - 1].company_id)
 }
 
 export async function upsertProfileAndMembership(input: {
@@ -92,24 +99,31 @@ export async function getAppUser(userId: string, email: string): Promise<AppUser
   const admin = createAdminClient()
   const companyId = await resolvePrimaryCompanyId(userId)
 
-  const [{ data: profile, error: profileError }, { data: membership, error: membershipError }] = await Promise.all([
-    admin.from('profiles').select('full_name, is_active').eq('id', userId).maybeSingle(),
-    admin
-      .from('company_users')
-      .select('role, is_active')
-      .eq('company_id', companyId)
-      .eq('user_id', userId)
-      .maybeSingle(),
-  ])
+  const [{ data: profile, error: profileError }, { data: membership, error: membershipError }, company] =
+    await Promise.all([
+      admin.from('profiles').select('full_name, avatar_url, is_active').eq('id', userId).maybeSingle(),
+      admin
+        .from('company_users')
+        .select('role, is_active')
+        .eq('company_id', companyId)
+        .eq('user_id', userId)
+        .maybeSingle(),
+      findCompanyById(companyId, admin),
+    ])
 
   if (profileError) throw profileError
   if (membershipError) throw membershipError
+  if (!membership) {
+    throw new TenantAccessError('Company membership not found for this account.')
+  }
 
   return {
     id: userId,
     name: (profile?.full_name as string | null | undefined) ?? email.split('@')[0],
     email,
     companyId,
+    companyName: company?.companyName ?? 'Company',
+    avatarUrl: (profile?.avatar_url as string | null | undefined) ?? null,
     role: publicRole((membership?.role as string | null | undefined) ?? 'ACCOUNTANT'),
     isActive: Boolean((profile?.is_active ?? true) && (membership?.is_active ?? true)),
   }
@@ -120,25 +134,33 @@ export async function listAppUsers(companyId: string): Promise<(AppUser & { crea
 
   const { data, error } = await admin
     .from('company_users')
-    .select('user_id, role, is_active, created_at, profiles(full_name, is_active)')
+    .select('user_id, role, is_active, created_at, profiles(full_name, avatar_url, is_active)')
     .eq('company_id', companyId)
     .order('created_at', { ascending: true })
 
   if (error) throw error
+
+  const company = await findCompanyById(companyId, admin)
 
   const users = await Promise.all(
     (data ?? []).map(async (row) => {
       const { data: authUser, error: authError } = await admin.auth.admin.getUserById(String(row.user_id))
       if (authError) throw authError
 
-      const profile = row.profiles as { full_name?: string | null; is_active?: boolean | null } | null
-      const email = authUser.user.email ?? ''
+      const profile = row.profiles as {
+        full_name?: string | null
+        avatar_url?: string | null
+        is_active?: boolean | null
+      } | null
+      const userEmail = authUser.user.email ?? ''
 
       return {
         id: String(row.user_id),
-        name: profile?.full_name ?? email.split('@')[0],
-        email,
+        name: profile?.full_name ?? userEmail.split('@')[0],
+        email: userEmail,
         companyId,
+        companyName: company?.companyName ?? 'Company',
+        avatarUrl: profile?.avatar_url ?? null,
         role: publicRole(row.role as string | null),
         isActive: Boolean((row.is_active ?? true) && (profile?.is_active ?? true)),
         createdAt: String(row.created_at),
@@ -156,6 +178,7 @@ export async function createAppUser(input: {
   role?: string | null
   companyId: string
 }): Promise<AppUser & { createdAt: string }> {
+  // Flow B (invite): joins an existing tenant. Never creates a new company.
   const admin = createAdminClient()
   const { data, error } = await admin.auth.admin.createUser({
     email: input.email,
@@ -220,4 +243,16 @@ export async function deleteAppUser(userId: string) {
   const admin = createAdminClient()
   const { error } = await admin.auth.admin.deleteUser(userId)
   if (error) throw error
+}
+
+export async function userHasCompanyMembership(userId: string): Promise<boolean> {
+  const admin = createAdminClient()
+  const { count, error } = await admin
+    .from('company_users')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('is_active', true)
+
+  if (error) throw error
+  return (count ?? 0) > 0
 }

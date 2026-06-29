@@ -2,7 +2,7 @@ import 'server-only'
 /* eslint-disable @typescript-eslint/no-explicit-any, prefer-const */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createAdminClient } from './supabase/admin'
-import { getDefaultCompanyId } from './db/company.repository'
+import { resolveCompanyId } from '@/lib/tenant'
 
 type AnyRecord = Record<string, any>
 
@@ -147,7 +147,7 @@ function splitUpdateOperators(data: AnyRecord) {
 
 async function addCompanyId(row: AnyRecord, table: string) {
   if ('company_id' in row || table === 'profiles') return row
-  row.company_id = await getDefaultCompanyId()
+  row.company_id = await resolveCompanyId()
   return row
 }
 

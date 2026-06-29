@@ -99,7 +99,7 @@ function LoginForm() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-5" autoComplete="off">
             <div>
               <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">
                 Email Address
@@ -108,10 +108,13 @@ function LoginForm() {
                 <Mail size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                 <input
                   type="email"
+                  name="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  autoComplete="email"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
                   placeholder="your@email.com"
                   className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-white text-slate-900 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all shadow-sm"
                 />
@@ -131,10 +134,13 @@ function LoginForm() {
                 <Lock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                 <input
                   type={showPwd ? 'text' : 'password'}
+                  name="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
-                  autoComplete="current-password"
+                  autoComplete="new-password"
+                  data-lpignore="true"
+                  data-form-type="other"
                   placeholder="••••••••"
                   className="w-full pl-10 pr-11 py-3 rounded-xl border border-slate-200 bg-white text-slate-900 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all shadow-sm"
                 />
@@ -154,14 +160,14 @@ function LoginForm() {
               className="w-full py-3 rounded-xl text-white text-sm font-semibold transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed shadow-lg shadow-indigo-200"
               style={{ background: 'linear-gradient(135deg, #6366f1, #4f46e5)' }}
             >
-              {loading ? 'Signing in…' : 'Sign in'}
+              {loading ? 'Signing in…' : 'Sign In'}
             </button>
           </form>
 
           <p className="mt-8 text-center text-sm text-slate-500">
             Don&apos;t have an account?{' '}
             <Link href="/register" className="font-semibold text-indigo-600 hover:text-indigo-800">
-              Create one
+              Register
             </Link>
           </p>
         </div>

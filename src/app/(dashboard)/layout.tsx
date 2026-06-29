@@ -72,6 +72,8 @@ interface UserInfo {
   name?: string
   email?: string
   role?: string
+  companyName?: string
+  avatarUrl?: string | null
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -119,6 +121,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             name: data.name ?? data.email,
             email: data.email,
             role: data.role,
+            companyName: data.companyName,
+            avatarUrl: data.avatarUrl ?? null,
           })
         }
       })
@@ -140,6 +144,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const userInitial = (user?.name ?? user?.email ?? 'U').charAt(0).toUpperCase()
 
+  function renderAvatar(size: 'sm' | 'md') {
+    const dim = size === 'sm' ? 'w-7 h-7' : 'w-8 h-8'
+    const text = size === 'sm' ? 'text-xs' : 'text-xs'
+    if (user?.avatarUrl) {
+      return (
+        <img
+          src={user.avatarUrl}
+          alt=""
+          className={cn(dim, 'rounded-full object-cover flex-shrink-0')}
+        />
+      )
+    }
+    return (
+      <div className={cn(dim, 'rounded-full bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center flex-shrink-0')}>
+        <span className={cn('text-white font-bold', text)}>{userInitial}</span>
+      </div>
+    )
+  }
+
   const currentPageLabel = NAV.flatMap(s => s.items).find(i => isActive(i.href))?.label || 'Dashboard'
 
   const renderSidebar = (mobile = false) => (
@@ -156,7 +179,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div className="overflow-hidden">
             <div className="text-white font-bold text-sm leading-tight">{PRODUCT_NAME}</div>
             <div className="text-indigo-300 text-[10px] font-medium truncate max-w-[130px] leading-tight mt-0.5">
-              NETKOM Co.
+              {user?.companyName ?? 'Your company'}
             </div>
           </div>
         )}
@@ -226,11 +249,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       )}>
         {(!collapsed || mobile) ? (
           <div className="rounded-xl bg-white/[0.04] p-3 flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center flex-shrink-0">
-              <span className="text-white text-xs font-bold">
-                {userInitial}
-              </span>
-            </div>
+            {renderAvatar('md')}
             <div className="flex-1 min-w-0">
               <p className="text-white text-xs font-semibold truncate">{user?.name ?? 'Account'}</p>
               <p className="text-slate-500 text-[10px] truncate">{user?.role ?? 'USER'}</p>
@@ -362,9 +381,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   aria-haspopup="menu"
                   className="flex items-center gap-2 rounded-xl py-1 pl-2 pr-2 hover:bg-slate-100 transition-colors"
                 >
-                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center">
-                    <span className="text-white text-xs font-bold">{userInitial}</span>
-                  </div>
+                  {renderAvatar('sm')}
                   <span className="hidden sm:block text-sm font-medium text-slate-700">{user?.name ?? 'Account'}</span>
                   <ChevronDown size={14} className={cn('text-slate-400 transition-transform', showUserMenu && 'rotate-180')} />
                 </button>
@@ -377,6 +394,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     <div className="px-4 py-2 border-b border-slate-100">
                       <p className="text-xs font-semibold text-slate-700">{user?.name ?? 'Account'}</p>
                       <p className="text-xs text-slate-400">{user?.email ?? ''}</p>
+                      {user?.companyName && (
+                        <p className="text-[10px] text-slate-400 mt-0.5">{user.companyName} · {user?.role}</p>
+                      )}
                     </div>
                     <a href="/settings" className="flex items-center gap-2 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">
                       <Settings size={14} /> Settings

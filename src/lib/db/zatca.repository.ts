@@ -1,7 +1,7 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { getDefaultCompanyId } from './company.repository'
+import { resolveCompanyId, resolveCompanyIdOrThrow } from '@/lib/tenant'
 import { mapZatcaCredentialRow, mapZatcaOnboardingRequestRow } from './mappers'
 import type {
   SaveCredentialInput,
@@ -14,11 +14,11 @@ function db(client?: SupabaseClient) {
   return client ?? createAdminClient()
 }
 
-async function resolveCompanyId(
+async function resolveZatcaCompanyId(
   input: { companyId?: string; companySettingsId?: string },
   client?: SupabaseClient,
 ): Promise<string> {
-  return input.companyId ?? input.companySettingsId ?? getDefaultCompanyId(client)
+  return resolveCompanyIdOrThrow(input.companyId ?? input.companySettingsId)
 }
 
 /** Mirrors `prisma.zatcaCredential.findUnique({ where: { environment } })` scoped by company. */
@@ -27,7 +27,7 @@ export async function getCredential(
   companyId?: string,
   client?: SupabaseClient,
 ): Promise<ZatcaCredentialRecord | null> {
-  const id = companyId ?? (await getDefaultCompanyId(client))
+  const id = await resolveCompanyIdOrThrow(companyId)
   const { data, error } = await db(client)
     .from('zatca_credentials')
     .select('*')
@@ -45,7 +45,7 @@ export async function upsertCredential(
   input: SaveCredentialInput,
   client?: SupabaseClient,
 ): Promise<ZatcaCredentialRecord> {
-  const companyId = await resolveCompanyId(input, client)
+  const companyId = await resolveZatcaCompanyId(input, client)
   const supabase = db(client)
 
   const row: Record<string, unknown> = {
@@ -107,7 +107,7 @@ export async function createOnboardingRequest(
   },
   client?: SupabaseClient,
 ): Promise<ZatcaOnboardingRequestRecord> {
-  const companyId = input.companyId ?? (await getDefaultCompanyId(client))
+  const companyId = input.companyId ?? (await resolveCompanyId(client))
   const { data, error } = await db(client)
     .from('zatca_onboarding_requests')
     .insert({

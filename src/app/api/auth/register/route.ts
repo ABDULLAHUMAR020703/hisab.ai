@@ -1,33 +1,33 @@
-import { createCompany } from '@/lib/db/company.repository'
+import { createCompany, uniqueCompanySlug } from '@/lib/db/company.repository'
 import { createClient } from '@/lib/supabase/server'
-import { createPasswordAuthClient, upsertProfileAndMembership } from '@/lib/supabase/auth-users'
-
-function slugifyCompanyName(name: string): string {
-  const base = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 48)
-  return base || 'company'
-}
+import {
+  createPasswordAuthClient,
+  upsertProfileAndMembership,
+  userHasCompanyMembership,
+} from '@/lib/supabase/auth-users'
 
 export async function POST(request: Request) {
   try {
     const body = await request.json()
     const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
     const password = typeof body.password === 'string' ? body.password : ''
+    const confirmPassword = typeof body.confirmPassword === 'string' ? body.confirmPassword : ''
     const name = typeof body.name === 'string' ? body.name.trim() : ''
     const companyName = typeof body.companyName === 'string' ? body.companyName.trim() : ''
 
-    if (!email || !password || !name || !companyName) {
+    if (!email || !password || !confirmPassword || !name || !companyName) {
       return Response.json(
-        { error: 'Name, company name, email, and password are required' },
+        { error: 'Company name, full name, email, password, and confirm password are required' },
         { status: 400 },
       )
     }
 
     if (password.length < 8) {
       return Response.json({ error: 'Password must be at least 8 characters' }, { status: 400 })
+    }
+
+    if (confirmPassword !== password) {
+      return Response.json({ error: 'Passwords do not match' }, { status: 400 })
     }
 
     const supabase = createPasswordAuthClient()
@@ -50,8 +50,16 @@ export async function POST(request: Request) {
       return Response.json({ error: 'Registration failed' }, { status: 500 })
     }
 
+    if (await userHasCompanyMembership(data.user.id)) {
+      return Response.json(
+        { error: 'This account is already linked to a company. Sign in or ask your administrator for an invitation.' },
+        { status: 409 },
+      )
+    }
+
+    // Always create a new companies.id — company name is legal metadata, not a tenant key.
     const company = await createCompany({
-      slug: `${slugifyCompanyName(companyName)}-${Date.now().toString(36)}`,
+      slug: uniqueCompanySlug(companyName),
       companyName,
       country: 'Saudi Arabia',
       currency: 'SAR',

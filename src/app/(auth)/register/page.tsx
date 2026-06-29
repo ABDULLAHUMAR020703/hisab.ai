@@ -9,18 +9,26 @@ import { PRODUCT_NAME } from '@/lib/brand'
 export default function RegisterPage() {
   const router = useRouter()
   const [form, setForm] = useState({
-    name: '',
     companyName: '',
+    name: '',
     email: '',
     password: '',
+    confirmPassword: '',
   })
   const [showPwd, setShowPwd] = useState(false)
+  const [showConfirmPwd, setShowConfirmPwd] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
+
+    if (form.password !== form.confirmPassword) {
+      setError('Passwords do not match')
+      return
+    }
+
     setLoading(true)
 
     try {
@@ -62,17 +70,17 @@ export default function RegisterPage() {
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Create your account</h1>
-            <p className="text-slate-500 text-sm mt-1">Set up your company workspace in minutes</p>
+            <p className="text-slate-500 text-sm mt-1">Register your company and start with a fresh workspace</p>
           </div>
 
           {error && (
             <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">{error}</div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <Field icon={<User size={16} />} label="Your name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} required />
+          <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
             <Field icon={<Building2 size={16} />} label="Company name" value={form.companyName} onChange={(v) => setForm({ ...form, companyName: v })} required />
-            <Field icon={<Mail size={16} />} label="Work email" type="email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} required autoComplete="email" />
+            <Field icon={<User size={16} />} label="Full name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} required />
+            <Field icon={<Mail size={16} />} label="Email" type="email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} required autoComplete="email" />
             <div>
               <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">Password</label>
               <div className="relative">
@@ -92,6 +100,25 @@ export default function RegisterPage() {
                 </button>
               </div>
             </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">Confirm password</label>
+              <div className="relative">
+                <Lock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input
+                  type={showConfirmPwd ? 'text' : 'password'}
+                  value={form.confirmPassword}
+                  onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
+                  required
+                  minLength={8}
+                  autoComplete="new-password"
+                  placeholder="Re-enter your password"
+                  className="w-full pl-10 pr-11 py-3 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <button type="button" onClick={() => setShowConfirmPwd(!showConfirmPwd)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400">
+                  {showConfirmPwd ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
 
             <button
               type="submit"
@@ -105,7 +132,7 @@ export default function RegisterPage() {
 
           <p className="text-center text-sm text-slate-500">
             Already have an account?{' '}
-            <Link href="/login" className="font-semibold text-indigo-600 hover:text-indigo-800">Sign in</Link>
+            <Link href="/login" className="font-semibold text-indigo-600 hover:text-indigo-800">Sign In</Link>
           </p>
         </div>
       </div>

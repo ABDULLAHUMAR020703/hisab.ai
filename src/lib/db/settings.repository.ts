@@ -1,7 +1,7 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { getDefaultCompanyId } from './company.repository'
+import { resolveCompanyId } from '@/lib/tenant'
 import { mapCompanySettingsRows } from './mappers'
 import type { CompanySettingsRecord, CompanySettingsUpdateInput } from './types'
 
@@ -25,12 +25,12 @@ async function loadCompanyBundle(companyId: string, client?: SupabaseClient) {
   return mapCompanySettingsRows(companyRes.data, settingsRes.data, zatcaRes.data)
 }
 
-/** Mirrors `prisma.companySettings.findFirst()`. */
+/** Load settings for the authenticated user's company (or an explicit company id). */
 export async function findFirstCompanySettings(
   companyId?: string,
   client?: SupabaseClient,
 ): Promise<CompanySettingsRecord | null> {
-  const id = companyId ?? (await getDefaultCompanyId(client))
+  const id = companyId ?? (await resolveCompanyId(client))
   return loadCompanyBundle(id, client)
 }
 
@@ -161,10 +161,7 @@ export async function upsertCompanySettings(
 ): Promise<CompanySettingsRecord> {
   const existing = await findFirstCompanySettings(undefined, client)
   if (!existing) {
-    return createCompanySettings({
-      companyName: input.companyName ?? 'NETKOM COMPANY FOR COMMUNICATION',
-      ...input,
-    }, client)
+    throw new Error('Company settings not found for this tenant')
   }
   return updateCompanySettings(existing.id, input, client)
 }

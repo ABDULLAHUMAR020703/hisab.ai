@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'hisab.ai — NETKOM COMPANY FOR COMMUNICATION',
+  title: 'hisab.ai — Financial Management',
   description: 'hisab.ai — financial management and accounting',
 }
 
