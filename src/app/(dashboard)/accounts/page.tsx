@@ -128,7 +128,6 @@ export default function AccountsPage() {
                   <td colSpan={7} className="px-4 py-16 text-center">
                     <div className="flex flex-col items-center gap-3">
                       <p className="text-slate-400 text-sm">No accounts found.</p>
-                      <a href="/" className="text-sm text-indigo-600 hover:text-indigo-800 font-medium underline">Go to Dashboard → Seed Database</a>
                     </div>
                   </td>
                 </tr>

@@ -121,8 +121,6 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [seeding, setSeeding] = useState(false)
-  const [seedMsg, setSeedMsg] = useState('')
   // Rendered client-side only: server/client locale + timezone formatting of the
   // current date differ and would otherwise cause a hydration mismatch.
   const [todayLabel, setTodayLabel] = useState('')
@@ -149,27 +147,6 @@ export default function DashboardPage() {
       setLoading(false)
     }
   }, [router])
-
-  async function handleSeed() {
-    setSeeding(true)
-    setSeedMsg('')
-    try {
-      const res = await fetch('/api/seed', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force: false }),
-      })
-      const d = await res.json()
-      if (!res.ok) {
-        setSeedMsg(d.error || 'Seed failed')
-        return
-      }
-      setSeedMsg(d.message || d.qa?.message || 'Done')
-      await loadData()
-    } finally {
-      setSeeding(false)
-    }
-  }
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -216,11 +193,6 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          {seedMsg && (
-            <span className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg font-medium">
-              {seedMsg}
-            </span>
-          )}
           <button
             onClick={loadData}
             disabled={loading}
@@ -228,14 +200,6 @@ export default function DashboardPage() {
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             Refresh
-          </button>
-          <button
-            onClick={handleSeed}
-            disabled={seeding}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white rounded-xl disabled:opacity-50 transition-all shadow-sm"
-            style={{ background: 'linear-gradient(135deg, #6366f1, #4f46e5)' }}
-          >
-            {seeding ? 'Loading sample data...' : 'Load sample data'}
           </button>
         </div>
       </div>
@@ -252,7 +216,7 @@ export default function DashboardPage() {
           <Activity size={32} className="mx-auto text-indigo-400 mb-3" />
           <h2 className="font-semibold text-slate-900 mb-1">No transactions yet</h2>
           <p className="text-sm text-slate-500 mb-4 max-w-md mx-auto">
-            Create invoices, bills, expenses, and journal entries in the app, or click &quot;Load sample data&quot; to populate the dashboard with demo records.
+            Create invoices, bills, expenses, and journal entries to start building your financial overview.
           </p>
         </div>
       )}
