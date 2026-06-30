@@ -69,19 +69,16 @@ export function isAlreadyConnected(credential: ZatcaCredential | null): boolean 
   )
 }
 
+/** Per-environment connection label — does not use the global zatcaConnected flag. */
 export function resolveConnectionLabel(
-  zatcaConnected: boolean,
   onboardingStatus: string,
 ): 'NOT_CONNECTED' | 'PENDING' | 'CONNECTED' | 'FAILED' {
   if (onboardingStatus === 'FAILED') return 'FAILED'
   if (
-    zatcaConnected
-    && (
-      onboardingStatus === 'COMPLIANCE_ISSUED'
-      || onboardingStatus === 'COMPLIANCE_VALIDATED'
-      || onboardingStatus === 'PRODUCTION_ISSUED'
-      || onboardingStatus === 'PRODUCTION_READY'
-    )
+    onboardingStatus === 'COMPLIANCE_ISSUED'
+    || onboardingStatus === 'COMPLIANCE_VALIDATED'
+    || onboardingStatus === 'PRODUCTION_ISSUED'
+    || onboardingStatus === 'PRODUCTION_READY'
   ) {
     return 'CONNECTED'
   }

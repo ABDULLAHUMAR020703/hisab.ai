@@ -3,7 +3,7 @@ import type { ZatcaEnvironment } from '@/lib/db/prisma-types'
 import { getSettingsRepository } from '@/lib/db/provider'
 import { deleteCredential as deleteSupabaseCredential } from '@/lib/db/zatca.repository'
 import { logZatcaAudit } from '../audit/logger'
-import { getOnboardingStatus } from '../onboarding/credential-store'
+import { getCredential, getOnboardingStatus } from '../onboarding/credential-store'
 import type { OnboardingAuditContext } from '../onboarding/types'
 
 export async function deleteLocalCredentials(
@@ -47,11 +47,19 @@ export async function setActiveZatcaEnvironment(
   if (previous === environment) return
 
   const status = await getOnboardingStatus(environment)
-  await getSettingsRepository().update(settings.id, {
+  const credential = await getCredential(environment)
+
+  const updates: Record<string, unknown> = {
     zatcaEnvironment: environment,
     zatcaConnected: status.connectionStatus === 'CONNECTED',
-    zatcaConnectedAt: status.connectionStatus === 'CONNECTED' ? settings.zatcaConnectedAt : null,
-  })
+    zatcaConnectedAt: status.connectionStatus === 'CONNECTED' ? settings.zatcaConnectedAt ?? new Date() : null,
+  }
+
+  if (credential?.egsUnitId) {
+    updates.zatcaEgsUnitId = credential.egsUnitId
+  }
+
+  await getSettingsRepository().update(settings.id, updates)
 
   await logZatcaAudit({
     action: 'ENVIRONMENT_CHANGED',

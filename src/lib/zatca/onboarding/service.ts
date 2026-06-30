@@ -4,6 +4,7 @@ import { getSettingsRepository } from '@/lib/db/provider'
 import { logZatcaAudit } from '../audit/logger'
 import { requestComplianceCsid } from './compliance-client'
 import {
+  getCredential,
   getDecryptedCsr,
   getOnboardingStatus,
   storeCredentials,
@@ -45,11 +46,13 @@ export async function generateAndStoreCsr(
     settings.zatcaBusinessCategory,
   )
 
-  await getSettingsRepository().update(settings.id, {
+  if (settings.zatcaEnvironment === environment) {
+    await getSettingsRepository().update(settings.id, {
       zatcaEgsUnitId: egsIdentity.egsUnitId,
       zatcaDeviceIdentifier: egsIdentity.deviceIdentifier,
       zatcaEgsSerialNumber: egsIdentity.egsSerialNumber,
-  })
+    })
+  }
 
   const csrResult = await generateCSR(
     companySettingsToCsrInput({ ...settings, zatcaEnvironment: environment }, egsIdentity),
@@ -115,10 +118,19 @@ export async function submitComplianceOnboarding(
       environment,
     })
 
+    const existingCred = await getCredential(environment)
+    const egsUnitId = existingCred?.egsUnitId
+      ?? generateEgsIdentity(
+        settings.legalName || settings.companyName,
+        settings.taxId,
+        environment,
+        settings.zatcaBusinessCategory,
+      ).egsUnitId
+
     await storeCredentials({
       environment,
       companySettingsId: settings.id,
-      egsUnitId: settings.zatcaEgsUnitId ?? undefined,
+      egsUnitId,
       certificate: response.certificatePem,
       binarySecurityToken: response.binarySecurityToken,
       secret: response.secret,

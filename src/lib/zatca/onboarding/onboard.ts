@@ -89,7 +89,11 @@ async function getCompanySettingsOrThrow() {
 async function persistEgsIdentity(
   settingsId: string,
   identity: ReturnType<typeof generateEgsIdentity>,
+  activeEnvironment: ZatcaEnvironment,
+  targetEnvironment: ZatcaEnvironment,
 ) {
+  if (activeEnvironment !== targetEnvironment) return identity
+
   await getSettingsRepository().update(settingsId, {
       zatcaEgsUnitId: identity.egsUnitId,
       zatcaDeviceIdentifier: identity.deviceIdentifier,
@@ -154,7 +158,7 @@ export async function runZatcaOnboarding(
   })
 
   try {
-    await persistEgsIdentity(settings.id, egsIdentity)
+    await persistEgsIdentity(settings.id, egsIdentity, settings.zatcaEnvironment, environment)
 
     const csrInput = companySettingsToCsrInput(
       { ...settings, zatcaEnvironment: environment },
@@ -236,12 +240,12 @@ export async function runZatcaOnboarding(
       onboardedAt: connectedAt,
     })
 
-    await getSettingsRepository().update(settings.id, {
-        zatcaEnabled: true,
-        zatcaConnected: true,
-        zatcaConnectedAt: connectedAt,
-        zatcaEnvironment: environment,
-    })
+    const connectionUpdates: Record<string, unknown> = { zatcaEnabled: true }
+    if (settings.zatcaEnvironment === environment) {
+      connectionUpdates.zatcaConnected = true
+      connectionUpdates.zatcaConnectedAt = connectedAt
+    }
+    await getSettingsRepository().update(settings.id, connectionUpdates)
 
     await logZatcaAudit({
       action: 'CREDENTIALS_STORED',

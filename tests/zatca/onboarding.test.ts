@@ -139,11 +139,12 @@ describe('connection helpers', () => {
     assert.equal(isAlreadyConnected({ onboardingStatus: 'CSR_GENERATED' } as never), false)
   })
 
-  it('resolves connection label', () => {
-    assert.equal(resolveConnectionLabel(true, 'COMPLIANCE_ISSUED'), 'CONNECTED')
-    assert.equal(resolveConnectionLabel(false, 'CSR_GENERATED'), 'PENDING')
-    assert.equal(resolveConnectionLabel(false, 'NOT_STARTED'), 'NOT_CONNECTED')
-    assert.equal(resolveConnectionLabel(false, 'FAILED'), 'FAILED')
+  it('resolves connection label from per-environment onboarding status', () => {
+    assert.equal(resolveConnectionLabel('COMPLIANCE_ISSUED'), 'CONNECTED')
+    assert.equal(resolveConnectionLabel('PRODUCTION_ISSUED'), 'CONNECTED')
+    assert.equal(resolveConnectionLabel('CSR_GENERATED'), 'PENDING')
+    assert.equal(resolveConnectionLabel('NOT_STARTED'), 'NOT_CONNECTED')
+    assert.equal(resolveConnectionLabel('FAILED'), 'FAILED')
   })
 
   it('preserves valid onboarding status after production CSID failure', () => {

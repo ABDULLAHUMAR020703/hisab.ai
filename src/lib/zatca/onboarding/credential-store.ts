@@ -319,10 +319,7 @@ export async function getOnboardingStatus(
   return {
     environment: cred.environment,
     onboardingStatus: cred.onboardingStatus,
-    connectionStatus: resolveConnectionLabel(
-      settings?.zatcaConnected ?? false,
-      cred.onboardingStatus,
-    ),
+    connectionStatus: resolveConnectionLabel(cred.onboardingStatus),
     zatcaConnected: settings?.zatcaConnected ?? false,
     egsUnitId: cred.egsUnitId ?? settings?.zatcaEgsUnitId ?? null,
     hasCsr,
