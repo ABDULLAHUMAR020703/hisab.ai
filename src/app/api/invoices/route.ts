@@ -1,5 +1,7 @@
 import { requireAuth } from '@/lib/auth'
 import { getInvoiceRepository } from '@/lib/db/provider'
+import { resolveCompanyId } from '@/lib/tenant'
+import { maybeStartWorkflow } from '@/lib/workflow/integration'
 import type { InvoiceListOptions } from '@/lib/db/repositories/invoice.repository.interface'
 
 function pickParam(searchParams: URLSearchParams, key: string) {
@@ -40,7 +42,7 @@ export async function POST(request: Request) {
   try {
     const user = await requireAuth()
     const body = await request.json()
-    const { customerId, date, dueDate, lines, notes, terms, isRecurring, recurringDay } = body
+    const { customerId, date, dueDate, currency, lines, notes, terms, isRecurring, recurringDay } = body
 
     if (!customerId || !date || !dueDate || !lines?.length) {
       return Response.json({ error: 'customerId, date, dueDate, lines are required' }, { status: 400 })
@@ -50,12 +52,23 @@ export async function POST(request: Request) {
       customerId,
       date,
       dueDate,
+      currency,
       lines,
       notes,
       terms,
       isRecurring,
       recurringDay,
       createdById: user.id,
+    })
+
+    const companyId = await resolveCompanyId()
+    await maybeStartWorkflow({
+      entityType: 'INVOICE',
+      entityId: invoice.id,
+      entityLabel: invoice.invoiceNo,
+      amount: Number(invoice.total ?? 0),
+      submittedById: user.id,
+      companyId,
     })
 
     return Response.json(invoice, { status: 201 })

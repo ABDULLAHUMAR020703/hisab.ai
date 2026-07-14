@@ -7,10 +7,13 @@ import {
   LayoutDashboard, BookOpen, FileText, Users, Receipt, CreditCard,
   Building2, DollarSign, UserCheck, Package, MapPin, Camera,
   BarChart3, Shield, UserCog, Settings, LogOut, ChevronLeft,
-  Menu, List, Bell, ChevronDown, TrendingUp
+  Menu, List, Bell, ChevronDown, TrendingUp, History, Database,
+  ClipboardList, ShoppingCart, Banknote, BadgePercent, Landmark, Wallet, Wand2, ArrowRightLeft, GitBranch, Cog
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PRODUCT_NAME } from '@/lib/brand'
+import { CompanyCurrencyProvider } from '@/hooks/use-company-currency'
+import { DEFAULT_CURRENCY, isSaudiArabia } from '@/lib/currency/constants'
 
 const NAV = [
   {
@@ -24,12 +27,17 @@ const NAV = [
     items: [
       { label: 'Chart of Accounts', href: '/accounts', icon: List },
       { label: 'Journal Entry', href: '/journal', icon: BookOpen },
+      { label: 'Currency Revaluation', href: '/currency/revaluation', icon: ArrowRightLeft },
+      { label: 'Master Data', href: '/master-data', icon: Database },
     ]
   },
   {
     section: 'Income',
     items: [
       { label: 'Invoices', href: '/invoices', icon: FileText },
+      { label: 'Estimates', href: '/estimates', icon: ClipboardList },
+      { label: 'Sales Orders', href: '/sales-orders', icon: ShoppingCart },
+      { label: 'Sales Receipts', href: '/sales-receipts', icon: Banknote },
       { label: 'Customers', href: '/customers', icon: Users },
     ]
   },
@@ -37,8 +45,17 @@ const NAV = [
     section: 'Expenses',
     items: [
       { label: 'Bills', href: '/bills', icon: Receipt },
+      { label: 'Purchase Orders', href: '/purchase-orders', icon: ShoppingCart },
+      { label: 'Vendor Credits', href: '/vendor-credits', icon: BadgePercent },
       { label: 'Expenses', href: '/expenses', icon: CreditCard },
+      { label: 'Expense Claims', href: '/expense-claims', icon: ClipboardList },
       { label: 'Vendors', href: '/vendors', icon: Building2 },
+    ]
+  },
+  {
+    section: 'Banking',
+    items: [
+      { label: 'Banking', href: '/banking', icon: Landmark },
     ]
   },
   {
@@ -47,6 +64,7 @@ const NAV = [
       { label: 'Payroll', href: '/payroll', icon: DollarSign },
       { label: 'Employees', href: '/employees', icon: UserCheck },
       { label: 'Inventory', href: '/inventory', icon: Package },
+      { label: 'Fixed Assets', href: '/fixed-assets', icon: Landmark },
       { label: 'Cost Centers', href: '/cost-centers', icon: MapPin },
       { label: 'Receipts', href: '/receipts', icon: Camera },
     ]
@@ -55,6 +73,7 @@ const NAV = [
     section: 'Reports & Tax',
     items: [
       { label: 'Reports', href: '/reports', icon: BarChart3 },
+      { label: 'Budgets', href: '/budgets', icon: Wallet },
       { label: 'Tax & ZATCA', href: '/tax', icon: Shield },
       { label: 'ZATCA Monitor', href: '/zatca', icon: Shield },
     ]
@@ -62,7 +81,11 @@ const NAV = [
   {
     section: 'Administration',
     items: [
+      { label: 'Platform', href: '/platform', icon: Cog },
+      { label: 'Approvals', href: '/workflows', icon: GitBranch },
       { label: 'Users', href: '/users', icon: UserCog },
+      { label: 'Migration Wizard', href: '/migration-wizard', icon: Wand2 },
+      { label: 'Import History', href: '/import-history', icon: History },
       { label: 'Settings', href: '/settings', icon: Settings },
     ]
   },
@@ -73,7 +96,17 @@ interface UserInfo {
   email?: string
   role?: string
   companyName?: string
+  companyId?: string
+  country?: string
+  currency?: string
   avatarUrl?: string | null
+}
+
+interface CompanyOption {
+  id: string
+  name: string
+  role: string
+  isActive: boolean
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -82,13 +115,33 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [user, setUser] = useState<UserInfo | null>(null)
+  const [companies, setCompanies] = useState<CompanyOption[]>([])
+  const [showCompanyMenu, setShowCompanyMenu] = useState(false)
+  const companyMenuRef = useRef<HTMLDivElement>(null)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
+  const [notificationCount, setNotificationCount] = useState(0)
+  const [notificationPreview, setNotificationPreview] = useState<Array<{ id: string; title: string; body?: string | null }>>([])
   const notificationRef = useRef<HTMLDivElement>(null)
   const userMenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!showNotifications && !showUserMenu) return
+    fetch('/api/platform/notifications?count=true')
+      .then((r) => r.ok ? r.json() : { count: 0 })
+      .then((d) => setNotificationCount(d.count ?? 0))
+      .catch(() => {})
+  }, [pathname])
+
+  useEffect(() => {
+    if (!showNotifications) return
+    fetch('/api/platform/notifications')
+      .then((r) => r.ok ? r.json() : { notifications: [] })
+      .then((d) => setNotificationPreview((d.notifications ?? []).slice(0, 5)))
+      .catch(() => setNotificationPreview([]))
+  }, [showNotifications])
+
+  useEffect(() => {
+    if (!showNotifications && !showUserMenu && !showCompanyMenu) return
 
     function handlePointerDown(event: MouseEvent) {
       const target = event.target as Node
@@ -98,11 +151,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       if (showUserMenu && userMenuRef.current && !userMenuRef.current.contains(target)) {
         setShowUserMenu(false)
       }
+      if (showCompanyMenu && companyMenuRef.current && !companyMenuRef.current.contains(target)) {
+        setShowCompanyMenu(false)
+      }
     }
 
     document.addEventListener('mousedown', handlePointerDown)
     return () => document.removeEventListener('mousedown', handlePointerDown)
-  }, [showNotifications, showUserMenu])
+  }, [showNotifications, showUserMenu, showCompanyMenu])
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -122,12 +178,33 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             email: data.email,
             role: data.role,
             companyName: data.companyName,
+            companyId: data.companyId,
+            country: data.country,
+            currency: data.currency,
             avatarUrl: data.avatarUrl ?? null,
           })
         }
       })
       .catch(() => null)
+
+    fetch('/api/companies/mine')
+      .then(res => res.ok ? res.json() : [])
+      .then(setCompanies)
+      .catch(() => null)
   }, [router])
+
+  async function switchCompany(companyId: string) {
+    const res = await fetch('/api/companies/mine', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ companyId }),
+    })
+    if (res.ok) {
+      setShowCompanyMenu(false)
+      router.refresh()
+      window.location.reload()
+    }
+  }
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/'
@@ -163,7 +240,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     )
   }
 
-  const currentPageLabel = NAV.flatMap(s => s.items).find(i => isActive(i.href))?.label || 'Dashboard'
+  const isSaudi = isSaudiArabia(user?.country)
+  const navGroups = NAV.map((group) => ({
+    ...group,
+    items: group.items
+      .filter((item) => (item.href === '/zatca' ? isSaudi : true))
+      .map((item) => (
+        item.href === '/tax' && !isSaudi ? { ...item, label: 'Tax' } : item
+      )),
+  })).filter((group) => group.items.length > 0)
+
+  const currentPageLabel = navGroups.flatMap(s => s.items).find(i => isActive(i.href))?.label || 'Dashboard'
 
   const renderSidebar = (mobile = false) => (
     <div className="flex flex-col h-full">
@@ -187,7 +274,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       {/* Nav */}
       <nav className={cn('flex-1 overflow-y-auto sidebar-scroll py-3', collapsed && !mobile ? 'px-2' : 'px-3')}>
-        {NAV.map((group, gi) => (
+        {navGroups.map((group, gi) => (
           <div key={gi} className={gi > 0 ? 'mt-1' : ''}>
             {group.section && (!collapsed || mobile) && (
               <p className="px-2 pt-4 pb-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
@@ -334,6 +421,38 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             {/* Right actions */}
             <div className="flex items-center gap-3">
 
+              {companies.length > 1 && (
+                <div className="relative hidden sm:block" ref={companyMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowCompanyMenu(open => !open)
+                      setShowUserMenu(false)
+                      setShowNotifications(false)
+                    }}
+                    className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    <Building2 size={14} className="text-indigo-500" />
+                    <span className="max-w-[140px] truncate">{user?.companyName ?? 'Company'}</span>
+                    <ChevronDown size={14} className="text-slate-400" />
+                  </button>
+                  {showCompanyMenu && (
+                    <div className="absolute right-0 top-full z-40 mt-2 w-56 rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+                      {companies.map(c => (
+                        <button
+                          key={c.id}
+                          onClick={() => switchCompany(c.id)}
+                          className={`w-full text-left px-4 py-2 text-sm hover:bg-slate-50 ${c.isActive ? 'text-indigo-600 font-semibold' : 'text-slate-700'}`}
+                        >
+                          {c.name}
+                          <span className="block text-[10px] text-slate-400">{c.role}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Notifications */}
               <div className="relative" ref={notificationRef}>
                 <button
@@ -348,7 +467,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   className="relative rounded-xl p-2.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors"
                 >
                   <Bell size={18} />
-                  <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-indigo-500 ring-2 ring-white" />
+                  {notificationCount > 0 && (
+                    <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center font-bold">
+                      {notificationCount > 9 ? '9+' : notificationCount}
+                    </span>
+                  )}
                 </button>
 
                 {showNotifications && (
@@ -356,15 +479,30 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     role="menu"
                     className="absolute right-0 top-full z-40 mt-2 w-80 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg animate-scale-in"
                   >
-                    <div className="border-b border-slate-100 px-4 py-3">
-                      <p className="text-sm font-semibold text-slate-800">Notifications</p>
-                      <p className="text-xs text-slate-400">Recent activity and alerts</p>
+                    <div className="border-b border-slate-100 px-4 py-3 flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-800">Notifications</p>
+                        <p className="text-xs text-slate-400">Recent activity and alerts</p>
+                      </div>
+                      <Link href="/notifications" className="text-xs text-indigo-600 hover:underline" onClick={() => setShowNotifications(false)}>
+                        View all
+                      </Link>
                     </div>
-                    <div className="px-4 py-8 text-center">
-                      <Bell size={24} className="mx-auto mb-2 text-slate-300" />
-                      <p className="text-sm font-medium text-slate-600">You&apos;re all caught up</p>
-                      <p className="mt-1 text-xs text-slate-400">New invoice and ZATCA alerts will appear here.</p>
-                    </div>
+                    {notificationPreview.length === 0 ? (
+                      <div className="px-4 py-8 text-center">
+                        <Bell size={24} className="mx-auto mb-2 text-slate-300" />
+                        <p className="text-sm font-medium text-slate-600">You&apos;re all caught up</p>
+                      </div>
+                    ) : (
+                      <div className="max-h-64 overflow-y-auto divide-y">
+                        {notificationPreview.map((n) => (
+                          <div key={n.id} className="px-4 py-3">
+                            <p className="text-sm font-medium text-slate-800">{n.title}</p>
+                            {n.body && <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{n.body}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -417,7 +555,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {/* Page content */}
         <main className="flex-1 overflow-y-auto">
           <div className="animate-fade-in">
-            {children}
+            <CompanyCurrencyProvider
+              currency={user?.currency ?? DEFAULT_CURRENCY}
+              country={user?.country ?? 'Saudi Arabia'}
+            >
+              {children}
+            </CompanyCurrencyProvider>
           </div>
         </main>
       </div>

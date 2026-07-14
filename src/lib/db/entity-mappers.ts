@@ -1,5 +1,7 @@
+import { DEFAULT_CURRENCY, normalizeCurrency } from '@/lib/currency/constants'
 import type {
   ChartOfAccountRecord,
+  CostCenterRecord,
   CustomerRecord,
   EmployeeRecord,
   InventoryItemRecord,
@@ -8,9 +10,11 @@ import type {
   PaymentRecord,
   PayrollEntryRecord,
   PayrollLineRecord,
+  TaxRateRecord,
   VendorRecord,
   ZatcaAuditLogRecord,
 } from './entities'
+import { resolveAccountClassification } from '@/lib/accounting/account-type-map'
 import { requireDate, toDate, toNumber } from './repository-utils'
 
 export function mapCustomerRow(row: Record<string, unknown>): CustomerRecord {
@@ -61,8 +65,11 @@ export function mapChartOfAccountRow(row: Record<string, unknown>): ChartOfAccou
     fullName: String(row.full_name),
     name: String(row.name),
     parentNo: (row.parent_no as string | null) ?? null,
+    parentId: (row.parent_id as string | null) ?? null,
     accountType: String(row.account_type),
     subType: String(row.sub_type),
+    canonicalType: (row.canonical_type as string | null) ?? null,
+    normalBalance: (row.normal_balance as string | null) ?? null,
     isActive: Boolean(row.is_active ?? true),
     description: (row.description as string | null) ?? null,
     balance: toNumber(row.balance),
@@ -90,7 +97,7 @@ export function mapInvoiceRow(row: Record<string, unknown>): InvoiceRecord {
     date: requireDate(String(row.date)),
     issueTime: (row.issue_time as string | null) ?? null,
     dueDate: requireDate(String(row.due_date)),
-    currency: String(row.currency ?? 'SAR'),
+    currency: normalizeCurrency(String(row.currency ?? DEFAULT_CURRENCY)),
     status: String(row.status ?? 'DRAFT'),
     subtotal: toNumber(row.subtotal),
     taxAmount: toNumber(row.tax_amount),
@@ -140,6 +147,7 @@ export function mapPaymentRow(row: Record<string, unknown>): PaymentRecord {
     id: String(row.id),
     paymentNo: String(row.payment_no),
     date: requireDate(String(row.date)),
+    currency: normalizeCurrency(String(row.currency ?? DEFAULT_CURRENCY)),
     amount: toNumber(row.amount),
     method: String(row.method ?? 'BANK_TRANSFER'),
     reference: (row.reference as string | null) ?? null,
@@ -184,6 +192,31 @@ export function mapEmployeeRow(row: Record<string, unknown>): EmployeeRecord {
     isActive: Boolean(row.is_active ?? true),
     createdAt: requireDate(String(row.created_at)),
     updatedAt: requireDate(String(row.updated_at)),
+  }
+}
+
+export function mapCostCenterRow(row: Record<string, unknown>): CostCenterRecord {
+  return {
+    id: String(row.id),
+    code: String(row.code),
+    name: String(row.name),
+    type: String(row.type ?? 'PROJECT'),
+    description: (row.description as string | null) ?? null,
+    isActive: Boolean(row.is_active ?? true),
+    createdAt: requireDate(String(row.created_at)),
+    updatedAt: requireDate(String(row.updated_at)),
+  }
+}
+
+export function mapTaxRateRow(row: Record<string, unknown>): TaxRateRecord {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    rate: toNumber(row.rate),
+    type: String(row.type ?? 'VAT'),
+    isDefault: Boolean(row.is_default ?? false),
+    isActive: Boolean(row.is_active ?? true),
+    createdAt: requireDate(String(row.created_at)),
   }
 }
 

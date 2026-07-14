@@ -1,0 +1,101 @@
+Account No,Name,Full Name,Parent Account No,Account Type,Sub Type,Description,Active
+1000,Assets,Assets,,Other Assets,Other Assets,Standard Other Assets account,true
+1010,Cash on Hand,Assets:Cash on Hand,1000,Bank,Cash on hand,Standard Bank account,true
+1020,Main Operating Account,Assets:Main Operating Account,1000,Bank,Checking,Standard Bank account,true
+1200,Accounts Receivable,Assets:Accounts Receivable,1000,Accounts receivable (A/R),Accounts Receivable,Standard Accounts receivable (A/R) account,true
+1500,Inventory Asset,Assets:Inventory Asset,1000,Other Current Assets,Inventory,Standard Other Current Assets account,true
+2000,Liabilities,Liabilities,,Other Current Liabilities,Other Current Liabilities,Standard Other Current Liabilities account,true
+2100,Accounts Payable,Liabilities:Accounts Payable,2000,Accounts payable (A/P),Accounts Payable,Standard Accounts payable (A/P) account,true
+2200,VAT Payable,Liabilities:VAT Payable,2000,Other Current Liabilities,Sales Tax Payable,Standard Other Current Liabilities account,true
+3000,Equity,Equity,,Equity,Owner's Equity,Standard Equity account,true
+3100,Retained Earnings,Equity:Retained Earnings,3000,Equity,Retained Earnings,Standard Equity account,true
+4000,Revenue,Revenue,,Income,Sales of Product Income,Standard Income account,true
+4100,Consulting Revenue,Revenue:Consulting Revenue,4000,Income,Service/Fee Income,Standard Income account,true
+5000,Cost of Goods Sold,Cost of Goods Sold,,Cost of Goods Sold,Supplies & Materials,Standard Cost of Goods Sold account,true
+6000,Operating Expenses,Operating Expenses,,Expenses,Office/General Administrative,Standard Expenses account,true
+6100,Rent Expense,Operating Expenses:Rent Expense,6000,Expenses,Rent or Lease of Buildings,Standard Expenses account,true
+6200,Salaries & Wages,Operating Expenses:Salaries & Wages,6000,Expenses,Payroll Expenses,Standard Expenses account,true
+6300,Utilities,Operating Expenses:Utilities,6000,Expenses,Utilities,Standard Expenses account,true
+2100-017,Accounts Payable — Sub 17,Liabilities:Accounts Payable:Sub 17,2100,Accounts payable (A/P),Accounts Payable,Detail account under Accounts Payable,false
+6300-018,Utilities — Sub 18,Operating Expenses:Utilities:Sub 18,6300,Expenses,Utilities,Detail account under Utilities,true
+5000-019,Cost of Goods Sold — Sub 19,Cost of Goods Sold:Sub 19,5000,Cost of Goods Sold,Supplies & Materials,Detail account under Cost of Goods Sold,true
+5000-020,Cost of Goods Sold — Sub 20,Cost of Goods Sold:Sub 20,5000,Cost of Goods Sold,Supplies & Materials,Detail account under Cost of Goods Sold,true
+1010-021,Cash on Hand — Sub 21,Assets:Cash on Hand:Sub 21,1010,Bank,Cash on hand,Detail account under Cash on Hand,false
+6300-022,Utilities — Sub 22,Operating Expenses:Utilities:Sub 22,6300,Expenses,Utilities,Detail account under Utilities,false
+1200-023,Accounts Receivable — Sub 23,Assets:Accounts Receivable:Sub 23,1200,Accounts receivable (A/R),Accounts Receivable,Detail account under Accounts Receivable,true
+2200-024,VAT Payable — Sub 24,Liabilities:VAT Payable:Sub 24,2200,Other Current Liabilities,Sales Tax Payable,Detail account under VAT Payable,false
+1500-025,Inventory Asset — Sub 25,Assets:Inventory Asset:Sub 25,1500,Other Current Assets,Inventory,Detail account under Inventory Asset,true
+6200-026,Salaries & Wages — Sub 26,Operating Expenses:Salaries & Wages:Sub 26,6200,Expenses,Payroll Expenses,Detail account under Salaries & Wages,true
+2000-027,Liabilities — Sub 27,Liabilities:Sub 27,2000,Other Current Liabilities,Other Current Liabilities,Detail account under Liabilities,true
+1500-028,Inventory Asset — Sub 28,Assets:Inventory Asset:Sub 28,1500,Other Current Assets,Inventory,Detail account under Inventory Asset,true
+6200-029,Salaries & Wages — Sub 29,Operating Expenses:Salaries & Wages:Sub 29,6200,Expenses,Payroll Expenses,Detail account under Salaries & Wages,false
+3100-030,Retained Earnings — Sub 30,Equity:Retained Earnings:Sub 30,3100,Equity,Retained Earnings,Detail account under Retained Earnings,false
+1500-031,Inventory Asset — Sub 31,Assets:Inventory Asset:Sub 31,1500,Other Current Assets,Inventory,Detail account under Inventory Asset,true
+6200-032,Salaries & Wages — Sub 32,Operating Expenses:Salaries & Wages:Sub 32,6200,Expenses,Payroll Expenses,Detail account under Salaries & Wages,true
+1200-033,Accounts Receivable — Sub 33,Assets:Accounts Receivable:Sub 33,1200,Accounts receivable (A/R),Accounts Receivable,Detail account under Accounts Receivable,true
+5000-034,Cost of Goods Sold — Sub 34,Cost of Goods Sold:Sub 34,5000,Cost of Goods Sold,Supplies & Materials,Detail account under Cost of Goods Sold,false
+6100-035,Rent Expense — Sub 35,Operating Expenses:Rent Expense:Sub 35,6100,Expenses,Rent or Lease of Buildings,Detail account under Rent Expense,true
+2100-036,Accounts Payable — Sub 36,Liabilities:Accounts Payable:Sub 36,2100,Accounts payable (A/P),Accounts Payable,Detail account under Accounts Payable,true
+3000-037,Equity — Sub 37,Equity:Sub 37,3000,Equity,Owner's Equity,Detail account under Equity,true
+1200-038,Accounts Receivable — Sub 38,Assets:Accounts Receivable:Sub 38,1200,Accounts receivable (A/R),Accounts Receivable,Detail account under Accounts Receivable,true
+6200-039,Salaries & Wages — Sub 39,Operating Expenses:Salaries & Wages:Sub 39,6200,Expenses,Payroll Expenses,Detail account under Salaries & Wages,false
+5000-040,Cost of Goods Sold — Sub 40,Cost of Goods Sold:Sub 40,5000,Cost of Goods Sold,Supplies & Materials,Detail account under Cost of Goods Sold,true
+1000-041,Assets — Sub 41,Assets:Sub 41,1000,Other Assets,Other Assets,Detail account under Assets,true
+6200-042,Salaries & Wages — Sub 42,Operating Expenses:Salaries & Wages:Sub 42,6200,Expenses,Payroll Expenses,Detail account under Salaries & Wages,false
+2200-043,VAT Payable — Sub 43,Liabilities:VAT Payable:Sub 43,2200,Other Current Liabilities,Sales Tax Payable,Detail account under VAT Payable,false
+1500-044,Inventory Asset — Sub 44,Assets:Inventory Asset:Sub 44,1500,Other Current Assets,Inventory,Detail account under Inventory Asset,false
+2000-045,Liabilities — Sub 45,Liabilities:Sub 45,2000,Other Current Liabilities,Other Current Liabilities,Detail account under Liabilities,true
+4000-046,Revenue — Sub 46,Revenue:Sub 46,4000,Income,Sales of Product Income,Detail account under Revenue,true
+6100-047,Rent Expense — Sub 47,Operating Expenses:Rent Expense:Sub 47,6100,Expenses,Rent or Lease of Buildings,Detail account under Rent Expense,true
+4000-048,Revenue — Sub 48,Revenue:Sub 48,4000,Income,Sales of Product Income,Detail account under Revenue,false
+5000-049,Cost of Goods Sold — Sub 49,Cost of Goods Sold:Sub 49,5000,Cost of Goods Sold,Supplies & Materials,Detail account under Cost of Goods Sold,true
+3100-050,Retained Earnings — Sub 50,Equity:Retained Earnings:Sub 50,3100,Equity,Retained Earnings,Detail account under Retained Earnings,true
+2100-051,Accounts Payable — Sub 51,Liabilities:Accounts Payable:Sub 51,2100,Accounts payable (A/P),Accounts Payable,Detail account under Accounts Payable,true
+6300-052,Utilities — Sub 52,Operating Expenses:Utilities:Sub 52,6300,Expenses,Utilities,Detail account under Utilities,false
+1200-053,Accounts Receivable — Sub 53,Assets:Accounts Receivable:Sub 53,1200,Accounts receivable (A/R),Accounts Receivable,Detail account under Accounts Receivable,true
+1000-054,Assets — Sub 54,Assets:Sub 54,1000,Other Assets,Other Assets,Detail account under Assets,true
+2200-055,VAT Payable — Sub 55,Liabilities:VAT Payable:Sub 55,2200,Other Current Liabilities,Sales Tax Payable,Detail account under VAT Payable,true
+1020-056,Main Operating Account — Sub 56,Assets:Main Operating Account:Sub 56,1020,Bank,Checking,Detail account under Main Operating Account,true
+6000-057,Operating Expenses — Sub 57,Operating Expenses:Sub 57,6000,Expenses,Office/General Administrative,Detail account under Operating Expenses,true
+2200-058,VAT Payable — Sub 58,Liabilities:VAT Payable:Sub 58,2200,Other Current Liabilities,Sales Tax Payable,Detail account under VAT Payable,false
+1010-059,Cash on Hand — Sub 59,Assets:Cash on Hand:Sub 59,1010,Bank,Cash on hand,Detail account under Cash on Hand,true
+1020-060,Main Operating Account — Sub 60,Assets:Main Operating Account:Sub 60,1020,Bank,Checking,Detail account under Main Operating Account,true
+2100-061,Accounts Payable — Sub 61,Liabilities:Accounts Payable:Sub 61,2100,Accounts payable (A/P),Accounts Payable,Detail account under Accounts Payable,false
+6300-062,Utilities — Sub 62,Operating Expenses:Utilities:Sub 62,6300,Expenses,Utilities,Detail account under Utilities,true
+4100-063,Consulting Revenue — Sub 63,Revenue:Consulting Revenue:Sub 63,4100,Income,Service/Fee Income,Detail account under Consulting Revenue,false
+1020-064,Main Operating Account — Sub 64,Assets:Main Operating Account:Sub 64,1020,Bank,Checking,Detail account under Main Operating Account,true
+6100-065,Rent Expense — Sub 65,Operating Expenses:Rent Expense:Sub 65,6100,Expenses,Rent or Lease of Buildings,Detail account under Rent Expense,true
+1500-066,Inventory Asset — Sub 66,Assets:Inventory Asset:Sub 66,1500,Other Current Assets,Inventory,Detail account under Inventory Asset,true
+2000-067,Liabilities — Sub 67,Liabilities:Sub 67,2000,Other Current Liabilities,Other Current Liabilities,Detail account under Liabilities,true
+2100-068,Accounts Payable — Sub 68,Liabilities:Accounts Payable:Sub 68,2100,Accounts payable (A/P),Accounts Payable,Detail account under Accounts Payable,true
+2200-069,VAT Payable — Sub 69,Liabilities:VAT Payable:Sub 69,2200,Other Current Liabilities,Sales Tax Payable,Detail account under VAT Payable,false
+5000-070,Cost of Goods Sold — Sub 70,Cost of Goods Sold:Sub 70,5000,Cost of Goods Sold,Supplies & Materials,Detail account under Cost of Goods Sold,true
+3000-071,Equity — Sub 71,Equity:Sub 71,3000,Equity,Owner's Equity,Detail account under Equity,true
+1500-072,Inventory Asset — Sub 72,Assets:Inventory Asset:Sub 72,1500,Other Current Assets,Inventory,Detail account under Inventory Asset,true
+1020-073,Main Operating Account — Sub 73,Assets:Main Operating Account:Sub 73,1020,Bank,Checking,Detail account under Main Operating Account,true
+2200-074,VAT Payable — Sub 74,Liabilities:VAT Payable:Sub 74,2200,Other Current Liabilities,Sales Tax Payable,Detail account under VAT Payable,false
+1010-075,Cash on Hand — Sub 75,Assets:Cash on Hand:Sub 75,1010,Bank,Cash on hand,Detail account under Cash on Hand,false
+1000-076,Assets — Sub 76,Assets:Sub 76,1000,Other Assets,Other Assets,Detail account under Assets,false
+2100-077,Accounts Payable — Sub 77,Liabilities:Accounts Payable:Sub 77,2100,Accounts payable (A/P),Accounts Payable,Detail account under Accounts Payable,true
+1020-078,Main Operating Account — Sub 78,Assets:Main Operating Account:Sub 78,1020,Bank,Checking,Detail account under Main Operating Account,true
+4100-079,Consulting Revenue — Sub 79,Revenue:Consulting Revenue:Sub 79,4100,Income,Service/Fee Income,Detail account under Consulting Revenue,true
+3000-080,Equity — Sub 80,Equity:Sub 80,3000,Equity,Owner's Equity,Detail account under Equity,true
+2000-081,Liabilities — Sub 81,Liabilities:Sub 81,2000,Other Current Liabilities,Other Current Liabilities,Detail account under Liabilities,false
+2100-082,Accounts Payable — Sub 82,Liabilities:Accounts Payable:Sub 82,2100,Accounts payable (A/P),Accounts Payable,Detail account under Accounts Payable,false
+6100-083,Rent Expense — Sub 83,Operating Expenses:Rent Expense:Sub 83,6100,Expenses,Rent or Lease of Buildings,Detail account under Rent Expense,true
+3100-084,Retained Earnings — Sub 84,Equity:Retained Earnings:Sub 84,3100,Equity,Retained Earnings,Detail account under Retained Earnings,true
+6000-085,Operating Expenses — Sub 85,Operating Expenses:Sub 85,6000,Expenses,Office/General Administrative,Detail account under Operating Expenses,true
+6000-086,Operating Expenses — Sub 86,Operating Expenses:Sub 86,6000,Expenses,Office/General Administrative,Detail account under Operating Expenses,true
+6100-087,Rent Expense — Sub 87,Operating Expenses:Rent Expense:Sub 87,6100,Expenses,Rent or Lease of Buildings,Detail account under Rent Expense,false
+6200-088,Salaries & Wages — Sub 88,Operating Expenses:Salaries & Wages:Sub 88,6200,Expenses,Payroll Expenses,Detail account under Salaries & Wages,false
+4100-089,Consulting Revenue — Sub 89,Revenue:Consulting Revenue:Sub 89,4100,Income,Service/Fee Income,Detail account under Consulting Revenue,true
+2200-090,VAT Payable — Sub 90,Liabilities:VAT Payable:Sub 90,2200,Other Current Liabilities,Sales Tax Payable,Detail account under VAT Payable,false
+3100-091,Retained Earnings — Sub 91,Equity:Retained Earnings:Sub 91,3100,Equity,Retained Earnings,Detail account under Retained Earnings,false
+1010-092,Cash on Hand — Sub 92,Assets:Cash on Hand:Sub 92,1010,Bank,Cash on hand,Detail account under Cash on Hand,false
+6100-093,Rent Expense — Sub 93,Operating Expenses:Rent Expense:Sub 93,6100,Expenses,Rent or Lease of Buildings,Detail account under Rent Expense,true
+6300-094,Utilities — Sub 94,Operating Expenses:Utilities:Sub 94,6300,Expenses,Utilities,Detail account under Utilities,true
+4000-095,Revenue — Sub 95,Revenue:Sub 95,4000,Income,Sales of Product Income,Detail account under Revenue,true
+6300-096,Utilities — Sub 96,Operating Expenses:Utilities:Sub 96,6300,Expenses,Utilities,Detail account under Utilities,true
+1000-097,Assets — Sub 97,Assets:Sub 97,1000,Other Assets,Other Assets,Detail account under Assets,true
+1000-098,Assets — Sub 98,Assets:Sub 98,1000,Other Assets,Other Assets,Detail account under Assets,false
+3100-099,Retained Earnings — Sub 99,Equity:Retained Earnings:Sub 99,3100,Equity,Retained Earnings,Detail account under Retained Earnings,true

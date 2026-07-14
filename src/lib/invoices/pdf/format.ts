@@ -1,7 +1,9 @@
+import { DEFAULT_CURRENCY, normalizeCurrency } from '@/lib/currency/constants'
+
 export function formatMoney(amount: number, currency: string): string {
-  return new Intl.NumberFormat('en-SA', {
+  return new Intl.NumberFormat('en', {
     style: 'currency',
-    currency: currency || 'SAR',
+    currency: normalizeCurrency(currency || DEFAULT_CURRENCY),
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(amount)

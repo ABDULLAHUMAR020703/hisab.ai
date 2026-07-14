@@ -1,0 +1,11 @@
+Name,Rate (%),Type,Default,Active
+Standard VAT (15%),15,VAT,true,true
+Zero Rated (0%),0,VAT,false,true
+Exempt Supply,0,VAT,false,true
+Withholding Tax (5%),5,WITHHOLDING,false,true
+GCC Reverse Charge (15%),15,VAT,false,true
+Regional Tax — Zone 6,14.56,WITHHOLDING,false,true
+Regional Tax — Zone 7,3.71,VAT,false,true
+Regional Tax — Zone 8,19.75,VAT,false,true
+Regional Tax — Zone 9,3.85,ZATCA,false,false
+Regional Tax — Zone 10,2.67,ZATCA,false,true

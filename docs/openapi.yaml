@@ -1,0 +1,152 @@
+openapi: 3.1.0
+info:
+  title: hisab.ai ERP API
+  version: 1.0.0
+  description: |
+    Enterprise accounting ERP API. Authentication via Supabase session cookies
+    for dashboard routes, or API keys (hsk_*) for programmatic access.
+servers:
+  - url: https://app.hisab.ai
+    description: Production
+  - url: http://localhost:3000
+    description: Local development
+
+tags:
+  - name: Health
+  - name: Auth
+  - name: Accounting
+  - name: Sales
+  - name: Platform
+
+paths:
+  /api/health:
+    get:
+      tags: [Health]
+      summary: Health check with optional diagnostics
+      parameters:
+        - name: diagnostics
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Service healthy
+        '503':
+          description: Service degraded
+
+  /api/ready:
+    get:
+      tags: [Health]
+      summary: Readiness probe
+      responses:
+        '200': { description: Ready }
+        '503': { description: Not ready }
+
+  /api/live:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      responses:
+        '200': { description: Alive }
+
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register new user and company
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, companyName]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+                companyName: { type: string }
+            example:
+              email: admin@acme.sa
+              password: SecurePass123
+              companyName: Acme Trading
+      responses:
+        '201': { description: Created }
+        '400': { description: Validation error }
+        '401': { description: Unauthorized }
+
+  /api/invoices:
+    get:
+      tags: [Sales]
+      summary: List invoices for active company
+      security: [{ cookieAuth: [] }]
+      responses:
+        '200':
+          description: Invoice list
+          content:
+            application/json:
+              example: [{ id: uuid, invoice_no: INV-001, total: 1150, status: OPEN }]
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Sales]
+      summary: Create invoice
+      security: [{ cookieAuth: [] }]
+      responses:
+        '201': { description: Created }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/platform/notifications:
+    get:
+      tags: [Platform]
+      summary: List platform notifications
+      security: [{ cookieAuth: [] }]
+      parameters:
+        - name: unread
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200': { description: Notifications }
+
+  /api/platform/webhooks:
+    post:
+      tags: [Platform]
+      summary: Create webhook endpoint (OWNER/ADMIN only)
+      security: [{ cookieAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, url]
+              properties:
+                name: { type: string }
+                url: { type: string, format: uri }
+                events: { type: array, items: { type: string } }
+            example:
+              name: Invoice Approved
+              url: https://api.example.com/hooks/invoices
+              events: [invoice.approved]
+      responses:
+        '201': { description: Created with secret }
+        '400': { description: SSRF blocked or invalid URL }
+        '403': { description: Forbidden }
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sb-access-token
+    apiKeyAuth:
+      type: http
+      scheme: bearer
+      description: API key prefixed with hsk_
+
+  responses:
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          example: { error: Unauthorized }
+    Forbidden:
+      description: Insufficient role
+      content:
+        application/json:
+          example: { error: Forbidden }

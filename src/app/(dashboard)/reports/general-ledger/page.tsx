@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { formatDate, formatCurrency } from '@/lib/utils'
+import { formatDate } from '@/lib/utils'
+import { useFormatCurrency } from '@/hooks/use-company-currency'
 
 interface Account { id: string; accountNo: string; name: string }
 interface LedgerEntry {
@@ -16,6 +17,7 @@ interface LedgerData {
 }
 
 export default function GeneralLedgerPage() {
+  const formatCurrency = useFormatCurrency()
   const [accounts, setAccounts] = useState<Account[]>([])
   const [accountId, setAccountId] = useState('')
   const [from, setFrom] = useState(new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0])

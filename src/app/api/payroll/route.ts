@@ -2,6 +2,8 @@
 import { getPayrollRepository } from '@/lib/db/provider'
 import { prisma } from '@/lib/prisma'
 import { getNextSequence } from '@/lib/sequences'
+import { resolveCompanyId } from '@/lib/tenant'
+import { maybeStartWorkflow } from '@/lib/workflow/integration'
 
 export async function GET(request: Request) {
   try {
@@ -20,9 +22,9 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    await requireAuth()
+    const user = await requireAuth()
     const body = await request.json()
-    const { employeeId, periodStart, periodEnd, period, allowances, deductions, notes } = body
+    const { employeeId, periodStart, periodEnd, period, allowances, deductions, taxRate, notes } = body
 
     if (!employeeId) {
       return Response.json({ error: 'employeeId is required' }, { status: 400 })
@@ -50,7 +52,8 @@ export async function POST(request: Request) {
     const totalAllowances = allowances || 0
     const totalDeductions = deductions || 0
     const grossSalary = basicSalary + totalAllowances
-    const taxAmount = 0
+    const effectiveTaxRate = Number(taxRate ?? 0)
+    const taxAmount = grossSalary * (effectiveTaxRate / 100)
     const netSalary = grossSalary - totalDeductions - taxAmount
 
     const payrollNo = await getNextSequence('PAYROLL', 'PRL-')
@@ -73,10 +76,22 @@ export async function POST(request: Request) {
             { type: 'EARNING', description: 'Basic Salary', amount: basicSalary },
             ...(totalAllowances > 0 ? [{ type: 'EARNING', description: 'Allowances', amount: totalAllowances }] : []),
             ...(totalDeductions > 0 ? [{ type: 'DEDUCTION', description: 'Deductions', amount: totalDeductions }] : []),
+            ...(taxAmount > 0 ? [{ type: 'DEDUCTION', description: 'Tax', amount: taxAmount }] : []),
           ],
         },
       },
       include: { employee: { select: { name: true } }, lines: true },
+    })
+
+    const companyId = await resolveCompanyId()
+    await maybeStartWorkflow({
+      entityType: 'PAYROLL',
+      entityId: payroll.id,
+      entityLabel: payroll.payrollNo,
+      amount: netSalary,
+      departmentId: employee.departmentId ?? null,
+      submittedById: user.id,
+      companyId,
     })
 
     return Response.json(payroll, { status: 201 })

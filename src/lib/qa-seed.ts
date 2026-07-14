@@ -2,6 +2,8 @@ import 'server-only'
 import { createHash, randomUUID } from 'crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { DEFAULT_COMPANY_ID } from '@/lib/supabase/env'
+import { seedDefaultChartOfAccounts } from '@/lib/accounting/default-coa'
+import { ensureCurrentFiscalPeriod } from '@/lib/accounting/fiscal-periods'
 
 export interface QaSeedResult {
   status: 'seeded'
@@ -84,6 +86,8 @@ async function upsertRows<T extends Record<string, unknown>>(
 
 export async function seedQaData(): Promise<QaSeedResult> {
   await ensureFoundation()
+  await seedDefaultChartOfAccounts(COMPANY_ID)
+  await ensureCurrentFiscalPeriod(COMPANY_ID)
 
   const now = new Date()
   const createdById = await getSeedUserId()

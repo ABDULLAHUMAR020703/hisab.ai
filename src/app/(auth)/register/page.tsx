@@ -2,9 +2,14 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Building2, Eye, EyeOff, Lock, Mail, TrendingUp, User } from 'lucide-react'
 import { PRODUCT_NAME } from '@/lib/brand'
+import {
+  REGISTRATION_COUNTRIES,
+  SUPPORTED_CURRENCIES,
+  defaultCurrencyForCountry,
+} from '@/lib/currency/constants'
 
 export default function RegisterPage() {
   const router = useRouter()
@@ -14,11 +19,20 @@ export default function RegisterPage() {
     email: '',
     password: '',
     confirmPassword: '',
+    country: 'Saudi Arabia',
+    currency: 'SAR',
   })
   const [showPwd, setShowPwd] = useState(false)
   const [showConfirmPwd, setShowConfirmPwd] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    setForm((current) => ({
+      ...current,
+      currency: defaultCurrencyForCountry(current.country),
+    }))
+  }, [form.country])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -79,6 +93,33 @@ export default function RegisterPage() {
 
           <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
             <Field icon={<Building2 size={16} />} label="Company name" value={form.companyName} onChange={(v) => setForm({ ...form, companyName: v })} required />
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">Country</label>
+              <select
+                value={form.country}
+                onChange={(e) => setForm({ ...form, country: e.target.value })}
+                required
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                {REGISTRATION_COUNTRIES.map((entry) => (
+                  <option key={entry.name} value={entry.name}>{entry.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">Primary currency</label>
+              <select
+                value={form.currency}
+                onChange={(e) => setForm({ ...form, currency: e.target.value })}
+                required
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                {SUPPORTED_CURRENCIES.map((entry) => (
+                  <option key={entry.code} value={entry.code}>{entry.code} — {entry.name}</option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-400 mt-2">Used for accounting, invoices, and reports. You can change this later in Settings.</p>
+            </div>
             <Field icon={<User size={16} />} label="Full name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} required />
             <Field icon={<Mail size={16} />} label="Email" type="email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} required autoComplete="email" />
             <div>

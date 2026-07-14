@@ -1,6 +1,6 @@
 import 'server-only'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
-import { findCompanyById } from '@/lib/db/company.repository'
+import { DEFAULT_CURRENCY, normalizeCurrency } from '@/lib/currency/constants'
 import type { CompanyRole } from '@/lib/db/types'
 import { TenantAccessError } from '@/lib/tenant-error'
 import { getSupabaseAnonKey, getSupabaseUrl } from './env'
@@ -13,6 +13,8 @@ export interface AppUser {
   role: string
   companyId: string
   companyName: string
+  country: string
+  currency: string
   avatarUrl: string | null
   isActive: boolean
 }
@@ -99,7 +101,7 @@ export async function getAppUser(userId: string, email: string): Promise<AppUser
   const admin = createAdminClient()
   const companyId = await resolvePrimaryCompanyId(userId)
 
-  const [{ data: profile, error: profileError }, { data: membership, error: membershipError }, company] =
+  const [{ data: profile, error: profileError }, { data: membership, error: membershipError }, { data: company, error: companyError }] =
     await Promise.all([
       admin.from('profiles').select('full_name, avatar_url, is_active').eq('id', userId).maybeSingle(),
       admin
@@ -108,11 +110,16 @@ export async function getAppUser(userId: string, email: string): Promise<AppUser
         .eq('company_id', companyId)
         .eq('user_id', userId)
         .maybeSingle(),
-      findCompanyById(companyId, admin),
+      admin
+        .from('companies')
+        .select('company_name, country, currency')
+        .eq('id', companyId)
+        .maybeSingle(),
     ])
 
   if (profileError) throw profileError
   if (membershipError) throw membershipError
+  if (companyError) throw companyError
   if (!membership) {
     throw new TenantAccessError('Company membership not found for this account.')
   }
@@ -122,7 +129,9 @@ export async function getAppUser(userId: string, email: string): Promise<AppUser
     name: (profile?.full_name as string | null | undefined) ?? email.split('@')[0],
     email,
     companyId,
-    companyName: company?.companyName ?? 'Company',
+    companyName: company?.company_name ?? 'Company',
+    country: String(company?.country ?? 'Saudi Arabia'),
+    currency: normalizeCurrency(String(company?.currency ?? DEFAULT_CURRENCY)),
     avatarUrl: (profile?.avatar_url as string | null | undefined) ?? null,
     role: publicRole((membership?.role as string | null | undefined) ?? 'ACCOUNTANT'),
     isActive: Boolean((profile?.is_active ?? true) && (membership?.is_active ?? true)),
@@ -140,7 +149,12 @@ export async function listAppUsers(companyId: string): Promise<(AppUser & { crea
 
   if (error) throw error
 
-  const company = await findCompanyById(companyId, admin)
+  const { data: companyRow, error: companyError } = await admin
+    .from('companies')
+    .select('company_name, country, currency')
+    .eq('id', companyId)
+    .maybeSingle()
+  if (companyError) throw companyError
 
   const users = await Promise.all(
     (data ?? []).map(async (row) => {
@@ -159,7 +173,9 @@ export async function listAppUsers(companyId: string): Promise<(AppUser & { crea
         name: profile?.full_name ?? userEmail.split('@')[0],
         email: userEmail,
         companyId,
-        companyName: company?.companyName ?? 'Company',
+        companyName: companyRow?.company_name ?? 'Company',
+        country: String(companyRow?.country ?? 'Saudi Arabia'),
+        currency: normalizeCurrency(String(companyRow?.currency ?? DEFAULT_CURRENCY)),
         avatarUrl: profile?.avatar_url ?? null,
         role: publicRole(row.role as string | null),
         isActive: Boolean((row.is_active ?? true) && (profile?.is_active ?? true)),

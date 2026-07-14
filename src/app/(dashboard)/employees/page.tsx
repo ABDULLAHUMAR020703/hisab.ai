@@ -2,12 +2,15 @@
 
 import { useEffect, useState } from 'react'
 import { Plus, RefreshCw, Edit2 } from 'lucide-react'
-import { formatCurrency, cn } from '@/lib/utils'
+import { cn } from '@/lib/utils'
+import { useCompanyCurrency, useFormatCurrency } from '@/hooks/use-company-currency'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { Input, Select } from '@/components/ui/input'
 import { PageHeader, SearchBar, FilterBar } from '@/components/ui/page-header'
+import { ModuleImportExportToolbar } from '@/components/import-export/ModuleImportExportToolbar'
+import { EMPLOYEE_FIELDS } from '@/lib/import-export/registry/modules/employees.fields'
 import { readApiError } from '@/lib/api-client'
 
 interface Employee {
@@ -17,6 +20,8 @@ interface Employee {
 }
 
 export default function EmployeesPage() {
+  const formatCurrency = useFormatCurrency()
+  const { currency } = useCompanyCurrency()
   const [employees, setEmployees] = useState<Employee[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
@@ -73,7 +78,18 @@ export default function EmployeesPage() {
         title="Employees"
         subtitle={`${active} active · ${formatCurrency(totalPayroll)}/month payroll`}
         breadcrumb={[{ label: 'Operations' }, { label: 'Employees' }]}
-        action={<Button onClick={openCreate}><Plus size={15} /> New Employee</Button>}
+        action={(
+          <div className="flex items-center gap-2">
+            <ModuleImportExportToolbar
+              moduleKey="employees"
+              moduleLabel="Employees"
+              fields={EMPLOYEE_FIELDS}
+              filters={search ? { search } : {}}
+              onImportSuccess={load}
+            />
+            <Button onClick={openCreate}><Plus size={15} /> New Employee</Button>
+          </div>
+        )}
       />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -158,7 +174,7 @@ export default function EmployeesPage() {
           </div>
           <Input label="Joining Date" type="date" required value={form.joiningDate} onChange={e => setForm({ ...form, joiningDate: e.target.value })} />
           <div className="grid grid-cols-2 gap-4">
-            <Input label="Salary (SAR)" type="number" required value={form.salary} onChange={e => setForm({ ...form, salary: parseFloat(e.target.value) || 0 })} />
+            <Input label={`Salary (${currency})`} type="number" required value={form.salary} onChange={e => setForm({ ...form, salary: parseFloat(e.target.value) || 0 })} />
             <Select label="Salary Type" value={form.salaryType} onChange={e => setForm({ ...form, salaryType: e.target.value })}>
               <option value="MONTHLY">Monthly</option>
               <option value="HOURLY">Hourly</option>

@@ -1,0 +1,55 @@
+import { requireAuth } from '@/lib/auth'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { resolveCompanyId } from '@/lib/tenant'
+
+export async function GET() {
+  try {
+    await requireAuth()
+    const companyId = await resolveCompanyId()
+    const client = createAdminClient()
+    const { data, error } = await client
+      .from('workflow_delegations')
+      .select('*')
+      .eq('company_id', companyId)
+      .eq('is_active', true)
+      .order('starts_at', { ascending: false })
+
+    if (error) throw error
+    return Response.json(data ?? [])
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Unauthorized') {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    return Response.json({ error: String(error) }, { status: 500 })
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const user = await requireAuth()
+    const companyId = await resolveCompanyId()
+    const body = await request.json()
+    const client = createAdminClient()
+
+    const { data, error } = await client
+      .from('workflow_delegations')
+      .insert({
+        company_id: companyId,
+        delegator_user_id: body.delegatorUserId ?? user.id,
+        delegate_user_id: body.delegateUserId,
+        starts_at: body.startsAt ?? new Date().toISOString(),
+        ends_at: body.endsAt ?? null,
+        is_active: true,
+      })
+      .select('*')
+      .single()
+
+    if (error) throw error
+    return Response.json(data, { status: 201 })
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Unauthorized') {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    return Response.json({ error: String(error) }, { status: 500 })
+  }
+}

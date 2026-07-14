@@ -11,6 +11,8 @@ export async function GET() {
       role: user.role,
       companyId: user.companyId,
       companyName: user.companyName,
+      country: user.country,
+      currency: user.currency,
       avatarUrl: user.avatarUrl,
     })
   } catch (error) {

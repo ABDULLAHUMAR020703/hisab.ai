@@ -1,0 +1,92 @@
+[
+  {
+    "operation": "csv-parse",
+    "rows": 10,
+    "format": "csv",
+    "ms": 0.26
+  },
+  {
+    "operation": "excel-parse",
+    "rows": 10,
+    "format": "xlsx",
+    "ms": 8.28
+  },
+  {
+    "operation": "validate",
+    "rows": 10,
+    "format": "csv",
+    "ms": 12.48
+  },
+  {
+    "operation": "auto-map",
+    "rows": 10,
+    "format": "csv",
+    "ms": 0.14
+  },
+  {
+    "operation": "csv-export",
+    "rows": 10,
+    "format": "csv",
+    "ms": 0.22
+  },
+  {
+    "operation": "csv-parse",
+    "rows": 100,
+    "format": "csv",
+    "ms": 1.51
+  },
+  {
+    "operation": "excel-parse",
+    "rows": 100,
+    "format": "xlsx",
+    "ms": 13.72
+  },
+  {
+    "operation": "validate",
+    "rows": 100,
+    "format": "csv",
+    "ms": 38.17
+  },
+  {
+    "operation": "auto-map",
+    "rows": 100,
+    "format": "csv",
+    "ms": 0.15
+  },
+  {
+    "operation": "csv-export",
+    "rows": 100,
+    "format": "csv",
+    "ms": 0.41
+  },
+  {
+    "operation": "csv-parse",
+    "rows": 1000,
+    "format": "csv",
+    "ms": 6.84
+  },
+  {
+    "operation": "excel-parse",
+    "rows": 1000,
+    "format": "xlsx",
+    "ms": 62.22
+  },
+  {
+    "operation": "validate",
+    "rows": 1000,
+    "format": "csv",
+    "ms": 264.09
+  },
+  {
+    "operation": "auto-map",
+    "rows": 1000,
+    "format": "csv",
+    "ms": 0.1
+  },
+  {
+    "operation": "csv-export",
+    "rows": 1000,
+    "format": "csv",
+    "ms": 4.91
+  }
+]

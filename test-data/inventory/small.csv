@@ -1,0 +1,11 @@
+Name,Item Code,Description,Category,Unit,Cost Price,Sale Price,Quantity,Min Quantity,Active
+Dell Latitude 5540 Laptop,SKU-10000,Commercial hardware offering,Hardware,PCS,3689.58,4913.86,20,8,true
+HP LaserJet Pro M404dn,SKU-10001,Commercial hardware offering,Hardware,PCS,1275.3,1688.31,493,8,true
+Cisco Catalyst 9200 Switch,SKU-10002,Commercial hardware offering,Hardware,PCS,205.65,250.37,432,22,true
+Microsoft 365 Business Premium,SKU-10003,Professional software offering,Software,LIC,717.91,1017.04,115,5,true
+Adobe Creative Cloud Team,SKU-10004,Professional software offering,Software,LIC,3185.93,3960.97,313,15,true
+Annual IT Support Contract,SKU-10005,Professional services offering,Services,YR,1142.93,1566.2,98,11,true
+Cloud Hosting — AWS EC2,SKU-10006,Professional services offering,Services,MO,3879.43,5796.51,459,24,true
+Office Ergonomic Chair,SKU-10007,Commercial furniture offering,Furniture,PCS,1194.55,1422.44,326,18,true
+A4 Copy Paper (500 sheets),SKU-10008,Commercial supplies offering,Supplies,RM,4128.73,6153.86,165,16,true
+ZATCA E-Invoicing Integration,SKU-10009,Professional services offering,Services,MO,1756.03,2268.38,491,18,true

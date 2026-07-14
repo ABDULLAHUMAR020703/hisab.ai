@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { Plus, RefreshCw, DollarSign, Upload, FileUp } from 'lucide-react'
-import { formatDate, formatCurrency, cn } from '@/lib/utils'
+import { formatDate, formatCurrency as formatAmount, cn } from '@/lib/utils'
+import { useCompanyCurrency, useFormatCurrency } from '@/hooks/use-company-currency'
+import { ALLOWED_CURRENCIES } from '@/lib/currency/constants'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
@@ -17,13 +19,15 @@ interface Account { id: string; accountNo: string; name: string }
 interface BillLine { description: string; quantity: number; unitPrice: number; taxRate: number; accountId?: string }
 interface Bill {
   id: string; billNo: string; vendor: { name: string }; date: string; dueDate: string
-  total: number; balance: number; amountPaid: number; status: string
+  total: number; balance: number; amountPaid: number; status: string; currency?: string
 }
 
 const EMPTY_LINE: BillLine = { description: '', quantity: 1, unitPrice: 0, taxRate: 15, accountId: '' }
 const STATUSES = ['DRAFT', 'APPROVED', 'PAID', 'PARTIAL', 'OVERDUE']
 
 export default function BillsPage() {
+  const formatPrimary = useFormatCurrency()
+  const { currency: primaryCurrency } = useCompanyCurrency()
   const [bills, setBills] = useState<Bill[]>([])
   const [vendors, setVendors] = useState<Vendor[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
@@ -39,7 +43,8 @@ export default function BillsPage() {
 
   const [form, setForm] = useState({
     vendorId: '', date: new Date().toISOString().split('T')[0],
-    dueDate: '', notes: '', reference: '', lines: [{ ...EMPTY_LINE }]
+    dueDate: '', notes: '', reference: '', currency: 'SAR',
+    lines: [{ ...EMPTY_LINE }]
   })
   const [payForm, setPayForm] = useState({ amount: 0, method: 'BANK_TRANSFER', reference: '', date: new Date().toISOString().split('T')[0] })
 
@@ -66,6 +71,17 @@ export default function BillsPage() {
   const subtotal = form.lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0)
   const taxAmount = form.lines.reduce((s, l) => s + l.quantity * l.unitPrice * (l.taxRate / 100), 0)
   const total = subtotal + taxAmount
+  const formatFormAmount = (amount: number) => formatAmount(amount, form.currency)
+  const formatBillAmount = (bill: Bill, amount: number) => formatAmount(amount, bill.currency ?? primaryCurrency)
+
+  function openCreateBill() {
+    setForm({
+      vendorId: '', date: new Date().toISOString().split('T')[0],
+      dueDate: '', notes: '', reference: '', currency: primaryCurrency,
+      lines: [{ ...EMPTY_LINE }],
+    })
+    setShowModal(true)
+  }
 
   async function handleSave() {
     setSaving(true)
@@ -93,13 +109,13 @@ export default function BillsPage() {
     <div className="p-6 max-w-[1600px] mx-auto space-y-5">
       <PageHeader
         title="Bills"
-        subtitle={`${bills.length} bills · ${formatCurrency(bills.reduce((s, b) => s + b.total, 0))} total`}
+        subtitle={`${bills.length} bills · ${formatPrimary(bills.reduce((s, b) => s + b.total, 0))} total`}
         breadcrumb={[{ label: 'Expenses' }, { label: 'Bills' }]}
         action={
           <div className="flex items-center gap-2">
             <Button variant="outline" onClick={() => setShowUpload(true)}><FileUp size={14} /> Upload Bill</Button>
             <Button variant="outline" onClick={() => setShowImport(true)}><Upload size={14} /> Import CSV</Button>
-            <Button onClick={() => { setForm({ vendorId: '', date: new Date().toISOString().split('T')[0], dueDate: '', notes: '', reference: '', lines: [{ ...EMPTY_LINE }] }); setShowModal(true) }}><Plus size={15} /> New Bill</Button>
+            <Button onClick={openCreateBill}><Plus size={15} /> New Bill</Button>
           </div>
         }
       />
@@ -136,11 +152,11 @@ export default function BillsPage() {
                   <td className="px-4 py-3 font-semibold text-slate-800 text-sm">{b.vendor.name}</td>
                   <td className="px-4 py-3 text-xs text-slate-500">{formatDate(b.date)}</td>
                   <td className="px-4 py-3 text-xs text-slate-500">{formatDate(b.dueDate)}</td>
-                  <td className="px-4 py-3 text-right font-semibold text-slate-900 tabular text-sm">{formatCurrency(b.total)}</td>
-                  <td className="px-4 py-3 text-right text-xs text-emerald-600 font-medium tabular">{formatCurrency(b.amountPaid)}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-slate-900 tabular text-sm">{formatBillAmount(b, b.total)}</td>
+                  <td className="px-4 py-3 text-right text-xs text-emerald-600 font-medium tabular">{formatBillAmount(b, b.amountPaid)}</td>
                   <td className="px-4 py-3 text-right">
                     <span className={cn('text-xs font-semibold tabular', b.balance > 0 ? 'text-rose-600' : 'text-slate-300')}>
-                      {b.balance > 0 ? formatCurrency(b.balance) : '—'}
+                      {b.balance > 0 ? formatBillAmount(b, b.balance) : '—'}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-center"><Badge status={b.status} /></td>
@@ -173,7 +189,15 @@ export default function BillsPage() {
             </Select>
             <Input label="Bill Date" type="date" required value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
             <Input label="Due Date" type="date" required value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })} />
+            <Select label="Currency" required value={form.currency} onChange={e => setForm({ ...form, currency: e.target.value })}>
+              {ALLOWED_CURRENCIES.map((entry) => (
+                <option key={entry.code} value={entry.code}>{entry.code} — {entry.name}</option>
+              ))}
+            </Select>
           </div>
+          <p className="text-xs text-slate-400 -mt-3">
+            Defaults to your company primary currency ({primaryCurrency}). Changing this affects only this bill.
+          </p>
           <Input label="Vendor Reference #" value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} placeholder="Vendor invoice number" />
           <div>
             <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">Line Items</label>
@@ -199,16 +223,16 @@ export default function BillsPage() {
                       <td className="px-2 py-2 w-20"><input type="number" min="0" value={line.quantity} onChange={e => updateLine(idx, 'quantity', parseFloat(e.target.value) || 0)} className="input-base text-xs py-1.5 text-right" /></td>
                       <td className="px-2 py-2 w-28"><input type="number" min="0" value={line.unitPrice} onChange={e => updateLine(idx, 'unitPrice', parseFloat(e.target.value) || 0)} className="input-base text-xs py-1.5 text-right" /></td>
                       <td className="px-2 py-2 w-20"><input type="number" min="0" max="100" value={line.taxRate} onChange={e => updateLine(idx, 'taxRate', parseFloat(e.target.value) || 0)} className="input-base text-xs py-1.5 text-right" /></td>
-                      <td className="px-3 py-2 text-right text-sm font-semibold text-slate-700 tabular whitespace-nowrap">{formatCurrency(line.quantity * line.unitPrice * (1 + line.taxRate / 100))}</td>
+                      <td className="px-3 py-2 text-right text-sm font-semibold text-slate-700 tabular whitespace-nowrap">{formatFormAmount(line.quantity * line.unitPrice * (1 + line.taxRate / 100))}</td>
                       <td className="px-2 py-2 text-center"><button onClick={() => setForm(f => ({ ...f, lines: f.lines.filter((_, i) => i !== idx) }))} className="w-6 h-6 rounded-lg bg-red-50 text-red-400 hover:bg-red-100 hover:text-red-600 flex items-center justify-center text-base">×</button></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               <div className="bg-slate-50 border-t border-slate-200 px-4 py-3 flex flex-col items-end gap-1">
-                <div className="flex gap-8 text-sm"><span className="text-slate-500">Subtotal:</span><span className="font-medium tabular w-28 text-right">{formatCurrency(subtotal)}</span></div>
-                <div className="flex gap-8 text-sm"><span className="text-slate-500">VAT:</span><span className="font-medium tabular w-28 text-right">{formatCurrency(taxAmount)}</span></div>
-                <div className="flex gap-8 text-base font-bold border-t border-slate-200 pt-1 mt-1"><span className="text-slate-800">Total:</span><span className="text-rose-600 tabular w-28 text-right">{formatCurrency(total)}</span></div>
+                <div className="flex gap-8 text-sm"><span className="text-slate-500">Subtotal:</span><span className="font-medium tabular w-28 text-right">{formatFormAmount(subtotal)}</span></div>
+                <div className="flex gap-8 text-sm"><span className="text-slate-500">VAT:</span><span className="font-medium tabular w-28 text-right">{formatFormAmount(taxAmount)}</span></div>
+                <div className="flex gap-8 text-base font-bold border-t border-slate-200 pt-1 mt-1"><span className="text-slate-800">Total:</span><span className="text-rose-600 tabular w-28 text-right">{formatFormAmount(total)}</span></div>
               </div>
             </div>
             <button onClick={() => setForm(f => ({ ...f, lines: [...f.lines, { ...EMPTY_LINE }] }))} className="mt-2 flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 font-medium">
@@ -220,7 +244,7 @@ export default function BillsPage() {
       </Modal>
 
       <Modal open={showPayModal} onClose={() => setShowPayModal(false)} title="Record Payment"
-        subtitle={selectedBill ? `${selectedBill.billNo} · Balance: ${formatCurrency(selectedBill.balance)}` : ''} size="sm"
+        subtitle={selectedBill ? `${selectedBill.billNo} · Balance: ${formatBillAmount(selectedBill, selectedBill.balance)}` : ''} size="sm"
         footer={<><Button variant="outline" onClick={() => setShowPayModal(false)}>Cancel</Button><Button variant="success" onClick={handlePayment}><DollarSign size={14} /> Record</Button></>}
       >
         <div className="space-y-4">

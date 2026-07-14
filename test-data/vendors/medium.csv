@@ -1,0 +1,101 @@
+Name,Email,Phone,Address,City,Country,Tax ID / VAT,Payment Terms (days),Active
+Al Rajhi Trading Establishment,alrajhitradingestabl@hisab.ai,+966534776961,"King Fahd Road, Olaya District",Riyadh,Saudi Arabia,310000000484323,30,false
+Lahore Textile Mills (Pvt) Ltd,lahoretextilemillspv@dubaimarina.ae,+923034467028,"Ferozepur Road, Gulberg III",Lahore,Pakistan,,30,true
+Dubai Marina Real Estate LLC,dubaimarinarealestat@hisab.ai,+971539575548,"Marina Walk, Dubai Marina",Dubai,United Arab Emirates,,60,true
+Saudi National Logistics Co.,saudinationallogisti@sharjahind.ae,+966519237608,"Prince Sultan Street, Al Rawdah",Jeddah,Saudi Arabia,310000000331310,60,true
+Karachi Port Services,karachiportservices@dubaimarina.ae,+923004456290,"M.A. Jinnah Road, Saddar",Karachi,Pakistan,,45,true
+Abu Dhabi Energy Trading,abudhabienergytradin@gulfpetro.com.sa,+971586139784,"Khalifa Street, Al Markaziyah",Abu Dhabi,United Arab Emirates,,30,true
+Gulf Petrochemical Supplies,gulfpetrochemicalsup@riyadh-digital.sa,+966545149846,"King Saud Street, Al Faisaliyah",Dammam,Saudi Arabia,310000000763900,30,true
+Islamabad IT Consultants,islamabaditconsultan@riyadh-digital.sa,+923039539412,"Blue Area, Jinnah Avenue",Islamabad,Pakistan,,60,active
+Sharjah Industrial Equipment,sharjahindustrialequ@lahoretextile.co.pk,+971568143085,Industrial Area 15,Sharjah,United Arab Emirates,,30,active
+Riyadh Digital Solutions,riyadhdigitalsolutio@sharjahind.ae,+966574780590,"Tahlia Street, Al Mohammadiyah",Riyadh,Saudi Arabia,310000000146329,45,yes
+Faisalabad Agro Exports,faisalabadagroexport@hisab.ai,+923001665018,"Sargodha Road, Madina Town",Faisalabad,Pakistan,,45,yes
+Ajman Free Zone Trading,ajmanfreezonetrading@gulfpetro.com.sa,+971571526844,Sheikh Rashid Bin Humaid Street,Ajman,United Arab Emirates,,15,true
+Eastern Province Contracting,easternprovincecontr@sharjahind.ae,+966561842238,"Corniche Road, Al Khobar",Khobar,Saudi Arabia,310000000378134,15,active
+Rawalpindi Engineering Works,rawalpindiengineerin@sharjahind.ae,+923099191475,"Murree Road, Satellite Town",Rawalpindi,Pakistan,,60,true
+RAK Ceramics Distribution,rakceramicsdistribut@sharjahind.ae,+971589752744,Al Nakheel Area,Ras Al Khaimah,United Arab Emirates,,15,active
+مؤسسة النخيل للتجارة,billing16@gulfpetro.com.sa,+966526678544,طريق الملك عبدالعزيز، حي الملز,Riyadh,Saudi Arabia,310000000210359,45,yes
+شركة الرياض للمقاولات,billing17@riyadh-digital.sa,+966569292092,حي النرجس، شارع أنس بن مالك,Riyadh,Saudi Arabia,310000000334115,15,yes
+Makkah Hospitality Group,makkahhospitalitygro@hisab.ai,+966573708312,Ibrahim Al Khalil Street,Makkah,Saudi Arabia,310000000430804,45,yes
+Tabuk Agricultural Supplies,tabukagriculturalsup@lahoretextile.co.pk,+966591136859,"Airport Road, Industrial Area",Tabuk,Saudi Arabia,310000000171930,15,true
+Jazan Fisheries Export,jazanfisheriesexport@sharjahind.ae,+966569639178,Corniche Boulevard,Jazan,Saudi Arabia,310000000675350,15,yes
+Al Rajhi Trading Establishment — Branch 2,alrajhitradingestabl@lahoretextile.co.pk,+966594570988,"King Fahd Road, Olaya District",Riyadh,Saudi Arabia,310000000131266,45,true
+Lahore Textile Mills (Pvt) Ltd — Branch 2,lahoretextilemillspv@sharjahind.ae,+923068735788,"Ferozepur Road, Gulberg III",Lahore,Pakistan,,60,false
+Dubai Marina Real Estate LLC — Branch 2,dubaimarinarealestat@riyadh-digital.sa,+971596669764,"Marina Walk, Dubai Marina",Dubai,United Arab Emirates,,30,active
+Saudi National Logistics Co. — Branch 2,saudinationallogisti@karachiport.pk,+966537810572,"Prince Sultan Street, Al Rawdah",Jeddah,Saudi Arabia,310000000657138,45,false
+Karachi Port Services — Branch 2,karachiportservicesb@karachiport.pk,+923059026686,"M.A. Jinnah Road, Saddar",Karachi,Pakistan,,45,false
+Abu Dhabi Energy Trading — Branch 2,abudhabienergytradin@alrajhi.com.sa,+971582026929,"Khalifa Street, Al Markaziyah",Abu Dhabi,United Arab Emirates,,30,yes
+Gulf Petrochemical Supplies — Branch 2,gulfpetrochemicalsup@gulfpetro.com.sa,+966511931498,"King Saud Street, Al Faisaliyah",Dammam,Saudi Arabia,310000000256790,15,false
+Islamabad IT Consultants — Branch 2,islamabaditconsultan@lahoretextile.co.pk,+923075501112,"Blue Area, Jinnah Avenue",Islamabad,Pakistan,,30,active
+Sharjah Industrial Equipment — Branch 2,sharjahindustrialequ@dubaimarina.ae,+971554221512,Industrial Area 15,Sharjah,United Arab Emirates,,60,active
+Riyadh Digital Solutions — Branch 2,riyadhdigitalsolutio@riyadh-digital.sa,+966580599060,"Tahlia Street, Al Mohammadiyah",Riyadh,Saudi Arabia,310000000350320,45,yes
+Faisalabad Agro Exports — Branch 2,faisalabadagroexport@lahoretextile.co.pk,+923087312088,"Sargodha Road, Madina Town",Faisalabad,Pakistan,,30,active
+Ajman Free Zone Trading — Branch 2,ajmanfreezonetrading@karachiport.pk,+971577006897,Sheikh Rashid Bin Humaid Street,Ajman,United Arab Emirates,,15,false
+Eastern Province Contracting — Branch 2,easternprovincecontr@riyadh-digital.sa,+966526178392,"Corniche Road, Al Khobar",Khobar,Saudi Arabia,310000000509202,30,true
+Rawalpindi Engineering Works — Branch 2,rawalpindiengineerin@alrajhi.com.sa,+923063100816,"Murree Road, Satellite Town",Rawalpindi,Pakistan,,30,active
+RAK Ceramics Distribution — Branch 2,rakceramicsdistribut@alrajhi.com.sa,+971597277033,Al Nakheel Area,Ras Al Khaimah,United Arab Emirates,,45,true
+مؤسسة النخيل للتجارة — Branch 2,branch2@karachiport.pk,+966513354576,طريق الملك عبدالعزيز، حي الملز,Riyadh,Saudi Arabia,310000000557271,60,true
+شركة الرياض للمقاولات — Branch 2,branch2@riyadh-digital.sa,+966563445051,حي النرجس، شارع أنس بن مالك,Riyadh,Saudi Arabia,310000000533663,45,true
+Makkah Hospitality Group — Branch 2,makkahhospitalitygro@dubaimarina.ae,+966553233164,Ibrahim Al Khalil Street,Makkah,Saudi Arabia,310000000432649,15,active
+Tabuk Agricultural Supplies — Branch 2,tabukagriculturalsup@riyadh-digital.sa,+966569291810,"Airport Road, Industrial Area",Tabuk,Saudi Arabia,310000000185827,15,true
+Jazan Fisheries Export — Branch 2,jazanfisheriesexport@hisab.ai,+966575349506,Corniche Boulevard,Jazan,Saudi Arabia,310000000418292,60,false
+Al Rajhi Trading Establishment — Branch 3,alrajhitradingestabl@sharjahind.ae,+966540703229,"King Fahd Road, Olaya District",Riyadh,Saudi Arabia,310000000790937,15,false
+Lahore Textile Mills (Pvt) Ltd — Branch 3,lahoretextilemillspv@gulfpetro.com.sa,+923031067771,"Ferozepur Road, Gulberg III",Lahore,Pakistan,,30,true
+Dubai Marina Real Estate LLC — Branch 3,dubaimarinarealestat@dubaimarina.ae,+971587676963,"Marina Walk, Dubai Marina",Dubai,United Arab Emirates,,15,true
+Saudi National Logistics Co. — Branch 3,saudinationallogisti@dubaimarina.ae,+966598346370,"Prince Sultan Street, Al Rawdah",Jeddah,Saudi Arabia,310000000587843,30,active
+Karachi Port Services — Branch 3,karachiportservicesb@sharjahind.ae,+923058094021,"M.A. Jinnah Road, Saddar",Karachi,Pakistan,,60,active
+Abu Dhabi Energy Trading — Branch 3,abudhabienergytradin@dubaimarina.ae,+971518825114,"Khalifa Street, Al Markaziyah",Abu Dhabi,United Arab Emirates,,30,yes
+Gulf Petrochemical Supplies — Branch 3,gulfpetrochemicalsup@alrajhi.com.sa,+966520386680,"King Saud Street, Al Faisaliyah",Dammam,Saudi Arabia,310000000757998,15,active
+Islamabad IT Consultants — Branch 3,islamabaditconsultan@dubaimarina.ae,+923074719057,"Blue Area, Jinnah Avenue",Islamabad,Pakistan,,45,false
+Sharjah Industrial Equipment — Branch 3,sharjahindustrialequ@sharjahind.ae,+971533736652,Industrial Area 15,Sharjah,United Arab Emirates,,15,yes
+Riyadh Digital Solutions — Branch 3,riyadhdigitalsolutio@alrajhi.com.sa,+966540334394,"Tahlia Street, Al Mohammadiyah",Riyadh,Saudi Arabia,310000000102486,15,true
+Faisalabad Agro Exports — Branch 3,faisalabadagroexport@alrajhi.com.sa,+923077310293,"Sargodha Road, Madina Town",Faisalabad,Pakistan,,45,false
+Ajman Free Zone Trading — Branch 3,ajmanfreezonetrading@lahoretextile.co.pk,+971513582440,Sheikh Rashid Bin Humaid Street,Ajman,United Arab Emirates,,30,true
+Eastern Province Contracting — Branch 3,easternprovincecontr@karachiport.pk,+966557857153,"Corniche Road, Al Khobar",Khobar,Saudi Arabia,310000000792999,15,active
+Rawalpindi Engineering Works — Branch 3,rawalpindiengineerin@alrajhi.com.sa,+923089551183,"Murree Road, Satellite Town",Rawalpindi,Pakistan,,60,active
+RAK Ceramics Distribution — Branch 3,rakceramicsdistribut@karachiport.pk,+971541110396,Al Nakheel Area,Ras Al Khaimah,United Arab Emirates,,30,false
+مؤسسة النخيل للتجارة — Branch 3,branch3@dubaimarina.ae,+966579346119,طريق الملك عبدالعزيز، حي الملز,Riyadh,Saudi Arabia,310000000501514,30,false
+شركة الرياض للمقاولات — Branch 3,branch3@lahoretextile.co.pk,+966589846945,حي النرجس، شارع أنس بن مالك,Riyadh,Saudi Arabia,310000000433379,30,false
+Makkah Hospitality Group — Branch 3,makkahhospitalitygro@alrajhi.com.sa,+966563702339,Ibrahim Al Khalil Street,Makkah,Saudi Arabia,310000000036185,45,active
+Tabuk Agricultural Supplies — Branch 3,tabukagriculturalsup@riyadh-digital.sa,+966569309274,"Airport Road, Industrial Area",Tabuk,Saudi Arabia,310000000612814,30,yes
+Jazan Fisheries Export — Branch 3,jazanfisheriesexport@riyadh-digital.sa,+966529352213,Corniche Boulevard,Jazan,Saudi Arabia,310000000380141,45,active
+Al Rajhi Trading Establishment — Branch 4,alrajhitradingestabl@riyadh-digital.sa,+966520674768,"King Fahd Road, Olaya District",Riyadh,Saudi Arabia,310000000645198,30,active
+Lahore Textile Mills (Pvt) Ltd — Branch 4,lahoretextilemillspv@sharjahind.ae,+923028126905,"Ferozepur Road, Gulberg III",Lahore,Pakistan,,45,false
+Dubai Marina Real Estate LLC — Branch 4,dubaimarinarealestat@dubaimarina.ae,+971520654791,"Marina Walk, Dubai Marina",Dubai,United Arab Emirates,,45,false
+Saudi National Logistics Co. — Branch 4,saudinationallogisti@dubaimarina.ae,+966555026481,"Prince Sultan Street, Al Rawdah",Jeddah,Saudi Arabia,310000000294561,45,false
+Karachi Port Services — Branch 4,karachiportservicesb@karachiport.pk,+923016867407,"M.A. Jinnah Road, Saddar",Karachi,Pakistan,,60,active
+Abu Dhabi Energy Trading — Branch 4,abudhabienergytradin@dubaimarina.ae,+971532669532,"Khalifa Street, Al Markaziyah",Abu Dhabi,United Arab Emirates,,60,true
+Gulf Petrochemical Supplies — Branch 4,gulfpetrochemicalsup@alrajhi.com.sa,+966551199483,"King Saud Street, Al Faisaliyah",Dammam,Saudi Arabia,310000000600319,30,true
+Islamabad IT Consultants — Branch 4,islamabaditconsultan@riyadh-digital.sa,+923062040671,"Blue Area, Jinnah Avenue",Islamabad,Pakistan,,45,active
+Sharjah Industrial Equipment — Branch 4,sharjahindustrialequ@hisab.ai,+971553112922,Industrial Area 15,Sharjah,United Arab Emirates,,60,true
+Riyadh Digital Solutions — Branch 4,riyadhdigitalsolutio@riyadh-digital.sa,+966513273011,"Tahlia Street, Al Mohammadiyah",Riyadh,Saudi Arabia,310000000133708,30,false
+Faisalabad Agro Exports — Branch 4,faisalabadagroexport@alrajhi.com.sa,+923089178552,"Sargodha Road, Madina Town",Faisalabad,Pakistan,,60,active
+Ajman Free Zone Trading — Branch 4,ajmanfreezonetrading@hisab.ai,+971559686236,Sheikh Rashid Bin Humaid Street,Ajman,United Arab Emirates,,30,true
+Eastern Province Contracting — Branch 4,easternprovincecontr@alrajhi.com.sa,+966562552507,"Corniche Road, Al Khobar",Khobar,Saudi Arabia,310000000065333,60,true
+Rawalpindi Engineering Works — Branch 4,rawalpindiengineerin@gulfpetro.com.sa,+923084408437,"Murree Road, Satellite Town",Rawalpindi,Pakistan,,15,true
+RAK Ceramics Distribution — Branch 4,rakceramicsdistribut@hisab.ai,+971567811797,Al Nakheel Area,Ras Al Khaimah,United Arab Emirates,,30,active
+مؤسسة النخيل للتجارة — Branch 4,branch4@gulfpetro.com.sa,+966593793080,طريق الملك عبدالعزيز، حي الملز,Riyadh,Saudi Arabia,310000000848989,30,true
+شركة الرياض للمقاولات — Branch 4,branch4@hisab.ai,+966590442456,حي النرجس، شارع أنس بن مالك,Riyadh,Saudi Arabia,310000000299214,15,active
+Makkah Hospitality Group — Branch 4,makkahhospitalitygro@dubaimarina.ae,+966527218003,Ibrahim Al Khalil Street,Makkah,Saudi Arabia,310000000854486,45,true
+Tabuk Agricultural Supplies — Branch 4,tabukagriculturalsup@riyadh-digital.sa,+966512135161,"Airport Road, Industrial Area",Tabuk,Saudi Arabia,310000000111515,60,false
+Jazan Fisheries Export — Branch 4,jazanfisheriesexport@karachiport.pk,+966550982382,Corniche Boulevard,Jazan,Saudi Arabia,310000000416118,30,false
+Al Rajhi Trading Establishment — Branch 5,alrajhitradingestabl@hisab.ai,+966543523120,"King Fahd Road, Olaya District",Riyadh,Saudi Arabia,310000000833126,30,active
+Lahore Textile Mills (Pvt) Ltd — Branch 5,lahoretextilemillspv@sharjahind.ae,+923025601582,"Ferozepur Road, Gulberg III",Lahore,Pakistan,,15,false
+Dubai Marina Real Estate LLC — Branch 5,dubaimarinarealestat@lahoretextile.co.pk,+971535006742,"Marina Walk, Dubai Marina",Dubai,United Arab Emirates,,60,active
+Saudi National Logistics Co. — Branch 5,saudinationallogisti@riyadh-digital.sa,+966539490748,"Prince Sultan Street, Al Rawdah",Jeddah,Saudi Arabia,310000000403495,60,active
+Karachi Port Services — Branch 5,karachiportservicesb@riyadh-digital.sa,+923007095938,"M.A. Jinnah Road, Saddar",Karachi,Pakistan,,15,true
+Abu Dhabi Energy Trading — Branch 5,abudhabienergytradin@alrajhi.com.sa,+971582045252,"Khalifa Street, Al Markaziyah",Abu Dhabi,United Arab Emirates,,15,false
+Gulf Petrochemical Supplies — Branch 5,gulfpetrochemicalsup@alrajhi.com.sa,+966565172296,"King Saud Street, Al Faisaliyah",Dammam,Saudi Arabia,310000000358574,45,false
+Islamabad IT Consultants — Branch 5,islamabaditconsultan@karachiport.pk,+923041949232,"Blue Area, Jinnah Avenue",Islamabad,Pakistan,,15,true
+Sharjah Industrial Equipment — Branch 5,sharjahindustrialequ@riyadh-digital.sa,+971537728955,Industrial Area 15,Sharjah,United Arab Emirates,,45,true
+Riyadh Digital Solutions — Branch 5,riyadhdigitalsolutio@dubaimarina.ae,+966573151670,"Tahlia Street, Al Mohammadiyah",Riyadh,Saudi Arabia,310000000794857,30,active
+Faisalabad Agro Exports — Branch 5,faisalabadagroexport@alrajhi.com.sa,+923091533003,"Sargodha Road, Madina Town",Faisalabad,Pakistan,,45,false
+Ajman Free Zone Trading — Branch 5,ajmanfreezonetrading@karachiport.pk,+971560054026,Sheikh Rashid Bin Humaid Street,Ajman,United Arab Emirates,,45,false
+Eastern Province Contracting — Branch 5,easternprovincecontr@riyadh-digital.sa,+966566117298,"Corniche Road, Al Khobar",Khobar,Saudi Arabia,310000000272178,60,active
+Rawalpindi Engineering Works — Branch 5,rawalpindiengineerin@dubaimarina.ae,+923029805759,"Murree Road, Satellite Town",Rawalpindi,Pakistan,,60,active
+RAK Ceramics Distribution — Branch 5,rakceramicsdistribut@alrajhi.com.sa,+971510653706,Al Nakheel Area,Ras Al Khaimah,United Arab Emirates,,30,active
+مؤسسة النخيل للتجارة — Branch 5,branch5@dubaimarina.ae,+966549529574,طريق الملك عبدالعزيز، حي الملز,Riyadh,Saudi Arabia,310000000882769,15,true
+شركة الرياض للمقاولات — Branch 5,branch5@alrajhi.com.sa,+966580613083,حي النرجس، شارع أنس بن مالك,Riyadh,Saudi Arabia,310000000763636,60,true
+Makkah Hospitality Group — Branch 5,makkahhospitalitygro@hisab.ai,+966571282434,Ibrahim Al Khalil Street,Makkah,Saudi Arabia,310000000553854,30,false
+Tabuk Agricultural Supplies — Branch 5,tabukagriculturalsup@gulfpetro.com.sa,+966592166604,"Airport Road, Industrial Area",Tabuk,Saudi Arabia,310000000459794,45,false
+Jazan Fisheries Export — Branch 5,jazanfisheriesexport@alrajhi.com.sa,+966562697998,Corniche Boulevard,Jazan,Saudi Arabia,310000000191173,30,true

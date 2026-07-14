@@ -1,6 +1,8 @@
 ﻿import { requireAuth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { getNextSequence } from '@/lib/sequences'
+import { resolveCompanyId } from '@/lib/tenant'
+import { maybeStartWorkflow } from '@/lib/workflow/integration'
 
 export async function GET(request: Request) {
   try {
@@ -77,6 +79,16 @@ export async function POST(request: Request) {
         },
       },
       include: { lines: { include: { account: true } } },
+    })
+
+    const companyId = await resolveCompanyId()
+    await maybeStartWorkflow({
+      entityType: 'JOURNAL_ENTRY',
+      entityId: entry.id,
+      entityLabel: entry.entryNo,
+      amount: totalDebit,
+      submittedById: user.id,
+      companyId,
     })
 
     return Response.json(entry, { status: 201 })

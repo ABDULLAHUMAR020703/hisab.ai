@@ -1,0 +1,101 @@
+Code,Name,Type,Description,Active
+RYD-001,Riyadh Head Office,LOCATION,Geographic cost tracking,true
+CLS-002,Administration,CLASS,Functional cost tracking,true
+PRJ-003,ERP Implementation,PROJECT,Project cost tracking,true
+RYD-004,Riyadh Warehouse,LOCATION,Geographic cost tracking,true
+CLS-005,Sales & Marketing,CLASS,Functional cost tracking,true
+PRJ-006,ZATCA Phase 2 Rollout,PROJECT,Project cost tracking,true
+RYD-007,Riyadh Showroom,LOCATION,Geographic cost tracking,true
+CLS-008,Finance & Accounting,CLASS,Functional cost tracking,true
+PRJ-009,Warehouse Expansion,PROJECT,Project cost tracking,true
+JED-010,Jeddah Branch,LOCATION,Geographic cost tracking,true
+CLS-011,Operations,CLASS,Functional cost tracking,true
+PRJ-012,Mobile App Development,PROJECT,Project cost tracking,true
+JED-013,Jeddah Distribution Center,LOCATION,Geographic cost tracking,true
+CLS-014,Human Resources,CLASS,Functional cost tracking,true
+PRJ-015,Office Renovation 2026,PROJECT,Project cost tracking,true
+DMM-016,Dammam Regional Office,LOCATION,Geographic cost tracking,true
+DMM-017,Eastern Province Depot,LOCATION,Geographic cost tracking,true
+PRJ-X018,Mobile App Development Extension 18,PROJECT,Additional project center,true
+CLS-X019,Finance & Accounting Extension 19,CLASS,Additional class center,true
+CLS-X020,Human Resources Extension 20,CLASS,Additional class center,true
+PRJ-X021,ERP Implementation Extension 21,PROJECT,Additional project center,true
+PRJ-X022,Mobile App Development Extension 22,PROJECT,Additional project center,true
+PRJ-X023,Office Renovation 2026 Extension 23,PROJECT,Additional project center,true
+CLS-X024,Human Resources Extension 24,CLASS,Additional class center,true
+CLS-X025,Sales & Marketing Extension 25,CLASS,Additional class center,true
+PRJ-X026,ZATCA Phase 2 Rollout Extension 26,PROJECT,Additional project center,true
+JED-X027,Jeddah Distribution Center Extension 27,LOCATION,Additional location center,true
+CLS-X028,Operations Extension 28,CLASS,Additional class center,true
+JED-X029,Jeddah Distribution Center Extension 29,LOCATION,Additional location center,true
+DMM-X030,Dammam Regional Office Extension 30,LOCATION,Additional location center,true
+PRJ-X031,ZATCA Phase 2 Rollout Extension 31,PROJECT,Additional project center,true
+CLS-X032,Operations Extension 32,CLASS,Additional class center,true
+JED-X033,Jeddah Branch Extension 33,LOCATION,Additional location center,true
+DMM-X034,Eastern Province Depot Extension 34,LOCATION,Additional location center,true
+JED-X035,Jeddah Distribution Center Extension 35,LOCATION,Additional location center,true
+RYD-X036,Riyadh Warehouse Extension 36,LOCATION,Additional location center,true
+RYD-X037,Riyadh Warehouse Extension 37,LOCATION,Additional location center,true
+DMM-X038,Eastern Province Depot Extension 38,LOCATION,Additional location center,true
+DMM-X039,Dammam Regional Office Extension 39,LOCATION,Additional location center,true
+CLS-X040,Sales & Marketing Extension 40,CLASS,Additional class center,true
+CLS-X041,Human Resources Extension 41,CLASS,Additional class center,true
+DMM-X042,Eastern Province Depot Extension 42,LOCATION,Additional location center,true
+JED-X043,Jeddah Branch Extension 43,LOCATION,Additional location center,true
+JED-X044,Jeddah Branch Extension 44,LOCATION,Additional location center,true
+JED-X045,Jeddah Branch Extension 45,LOCATION,Additional location center,true
+PRJ-X046,ZATCA Phase 2 Rollout Extension 46,PROJECT,Additional project center,true
+CLS-X047,Human Resources Extension 47,CLASS,Additional class center,true
+PRJ-X048,ERP Implementation Extension 48,PROJECT,Additional project center,true
+PRJ-X049,ERP Implementation Extension 49,PROJECT,Additional project center,true
+RYD-X050,Riyadh Head Office Extension 50,LOCATION,Additional location center,true
+JED-X051,Jeddah Distribution Center Extension 51,LOCATION,Additional location center,true
+JED-X052,Jeddah Distribution Center Extension 52,LOCATION,Additional location center,true
+PRJ-X053,ZATCA Phase 2 Rollout Extension 53,PROJECT,Additional project center,true
+DMM-X054,Eastern Province Depot Extension 54,LOCATION,Additional location center,true
+DMM-X055,Eastern Province Depot Extension 55,LOCATION,Additional location center,true
+DMM-X056,Dammam Regional Office Extension 56,LOCATION,Additional location center,true
+PRJ-X057,Warehouse Expansion Extension 57,PROJECT,Additional project center,true
+RYD-X058,Riyadh Warehouse Extension 58,LOCATION,Additional location center,true
+CLS-X059,Human Resources Extension 59,CLASS,Additional class center,true
+RYD-X060,Riyadh Head Office Extension 60,LOCATION,Additional location center,true
+RYD-X061,Riyadh Head Office Extension 61,LOCATION,Additional location center,true
+RYD-X062,Riyadh Warehouse Extension 62,LOCATION,Additional location center,true
+RYD-X063,Riyadh Showroom Extension 63,LOCATION,Additional location center,true
+RYD-X064,Riyadh Showroom Extension 64,LOCATION,Additional location center,true
+RYD-X065,Riyadh Head Office Extension 65,LOCATION,Additional location center,true
+DMM-X066,Dammam Regional Office Extension 66,LOCATION,Additional location center,true
+JED-X067,Jeddah Branch Extension 67,LOCATION,Additional location center,true
+PRJ-X068,Warehouse Expansion Extension 68,PROJECT,Additional project center,true
+JED-X069,Jeddah Branch Extension 69,LOCATION,Additional location center,true
+DMM-X070,Eastern Province Depot Extension 70,LOCATION,Additional location center,true
+RYD-X071,Riyadh Showroom Extension 71,LOCATION,Additional location center,true
+RYD-X072,Riyadh Head Office Extension 72,LOCATION,Additional location center,true
+PRJ-X073,ERP Implementation Extension 73,PROJECT,Additional project center,true
+RYD-X074,Riyadh Warehouse Extension 74,LOCATION,Additional location center,true
+PRJ-X075,ERP Implementation Extension 75,PROJECT,Additional project center,true
+RYD-X076,Riyadh Showroom Extension 76,LOCATION,Additional location center,true
+DMM-X077,Eastern Province Depot Extension 77,LOCATION,Additional location center,true
+JED-X078,Jeddah Branch Extension 78,LOCATION,Additional location center,true
+DMM-X079,Dammam Regional Office Extension 79,LOCATION,Additional location center,true
+RYD-X080,Riyadh Warehouse Extension 80,LOCATION,Additional location center,true
+RYD-X081,Riyadh Warehouse Extension 81,LOCATION,Additional location center,true
+PRJ-X082,ERP Implementation Extension 82,PROJECT,Additional project center,true
+CLS-X083,Operations Extension 83,CLASS,Additional class center,true
+RYD-X084,Riyadh Head Office Extension 84,LOCATION,Additional location center,true
+PRJ-X085,Office Renovation 2026 Extension 85,PROJECT,Additional project center,true
+PRJ-X086,Mobile App Development Extension 86,PROJECT,Additional project center,true
+RYD-X087,Riyadh Warehouse Extension 87,LOCATION,Additional location center,true
+CLS-X088,Finance & Accounting Extension 88,CLASS,Additional class center,true
+DMM-X089,Dammam Regional Office Extension 89,LOCATION,Additional location center,true
+DMM-X090,Dammam Regional Office Extension 90,LOCATION,Additional location center,true
+CLS-X091,Operations Extension 91,CLASS,Additional class center,true
+JED-X092,Jeddah Distribution Center Extension 92,LOCATION,Additional location center,true
+PRJ-X093,Mobile App Development Extension 93,PROJECT,Additional project center,true
+DMM-X094,Eastern Province Depot Extension 94,LOCATION,Additional location center,true
+DMM-X095,Dammam Regional Office Extension 95,LOCATION,Additional location center,true
+DMM-X096,Dammam Regional Office Extension 96,LOCATION,Additional location center,true
+RYD-X097,Riyadh Showroom Extension 97,LOCATION,Additional location center,true
+RYD-X098,Riyadh Showroom Extension 98,LOCATION,Additional location center,true
+RYD-X099,Riyadh Showroom Extension 99,LOCATION,Additional location center,true
+JED-X100,Jeddah Branch Extension 100,LOCATION,Additional location center,true

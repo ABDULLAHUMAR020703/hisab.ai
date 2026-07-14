@@ -29,6 +29,20 @@ export interface CustomerListOptions {
   balanceFilter?: CustomerBalanceFilter
   sortBy?: CustomerSortField
   sortDir?: 'asc' | 'desc'
+  includeOutstanding?: boolean
+}
+
+export interface CustomerBatchDuplicateInput {
+  rowNumber: number
+  email?: string | null
+  taxId?: string | null
+  name?: string | null
+}
+
+export interface CustomerBatchDuplicateMatch {
+  rowNumber: number
+  existingId: string
+  matchedOn: string[]
 }
 
 export interface CustomerCreateInput {
@@ -41,6 +55,7 @@ export interface CustomerCreateInput {
   taxId?: string | null
   creditLimit?: number
   paymentTerms?: number
+  isActive?: boolean
 }
 
 export interface CustomerUpdateInput {
@@ -56,10 +71,18 @@ export interface CustomerUpdateInput {
   isActive?: boolean
 }
 
+export interface CustomerDuplicateCriteria {
+  email?: string | null
+  taxId?: string | null
+  name?: string | null
+}
+
 export interface CustomerRepository {
   findMany(options?: CustomerListOptions): Promise<CustomerRecord[]>
   getFilterFacets(): Promise<CustomerFilterFacets>
   findById(id: string): Promise<CustomerRecord | null>
+  findDuplicate(criteria: CustomerDuplicateCriteria): Promise<CustomerRecord | null>
+  findDuplicatesBatch(inputs: CustomerBatchDuplicateInput[]): Promise<CustomerBatchDuplicateMatch[]>
   create(input: CustomerCreateInput): Promise<CustomerRecord>
   update(id: string, input: CustomerUpdateInput): Promise<CustomerRecord>
   delete(id: string): Promise<void>

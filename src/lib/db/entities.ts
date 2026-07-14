@@ -47,8 +47,11 @@ export interface ChartOfAccountRecord {
   fullName: string
   name: string
   parentNo: string | null
+  parentId: string | null
   accountType: string
   subType: string
+  canonicalType: string | null
+  normalBalance: string | null
   isActive: boolean
   description: string | null
   balance: number
@@ -73,6 +76,7 @@ export interface PaymentRecord {
   id: string
   paymentNo: string
   date: Date
+  currency: string
   amount: number
   method: string
   reference: string | null
@@ -162,6 +166,27 @@ export interface EmployeeRecord {
   isActive: boolean
   createdAt: Date
   updatedAt: Date
+}
+
+export interface CostCenterRecord {
+  id: string
+  code: string
+  name: string
+  type: string
+  description: string | null
+  isActive: boolean
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface TaxRateRecord {
+  id: string
+  name: string
+  rate: number
+  type: string
+  isDefault: boolean
+  isActive: boolean
+  createdAt: Date
 }
 
 export interface PayrollLineRecord {

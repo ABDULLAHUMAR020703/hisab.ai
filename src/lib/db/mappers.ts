@@ -1,3 +1,4 @@
+import { DEFAULT_CURRENCY, normalizeCurrency } from '@/lib/currency/constants'
 import type {
   CompanyRecord,
   CompanySettingsRecord,
@@ -54,7 +55,7 @@ export function mapCompanySettingsRows(
     logoUrl: (company.logo_url as string | null) ?? null,
     logoStoragePath: (company.logo_storage_path as string | null) ?? null,
     logoUploadedAt: toDate(company.logo_uploaded_at as string | null | undefined),
-    currency: String(company.currency ?? 'SAR'),
+    currency: normalizeCurrency(String(company.currency ?? DEFAULT_CURRENCY)),
     fiscalYearStart: String(company.fiscal_year_start ?? '01-01'),
     zatcaEnabled: Boolean(zatca?.zatca_enabled ?? false),
     zatcaConnected: Boolean(zatca?.zatca_connected ?? false),

@@ -1,6 +1,7 @@
 import { requireAuth } from '@/lib/auth'
 import { getAccountRepository } from '@/lib/db/provider'
 import { prisma } from '@/lib/prisma'
+import { validateAccountDeletable, PostingValidationError } from '@/lib/accounting/validation'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -41,9 +42,13 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   try {
     await requireAuth()
     const { id } = await params
-    await prisma.chartOfAccount.delete({ where: { id } })
+    await validateAccountDeletable(id)
+    await getAccountRepository().delete(id)
     return Response.json({ success: true })
   } catch (error) {
+    if (error instanceof PostingValidationError) {
+      return Response.json({ error: error.message, code: error.code }, { status: 409 })
+    }
     return Response.json({ error: String(error) }, { status: 500 })
   }
 }

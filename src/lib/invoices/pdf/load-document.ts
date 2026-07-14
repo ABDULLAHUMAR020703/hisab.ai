@@ -1,6 +1,7 @@
 import 'server-only'
 import type { CustomerRecord, InvoiceLineRecord, InvoiceRecord } from '@/lib/db/entities'
 import type { CompanySettingsRecord } from '@/lib/db/types'
+import { DEFAULT_CURRENCY, normalizeCurrency } from '@/lib/currency/constants'
 import { getInvoiceRepository, getSettingsRepository } from '@/lib/db/provider'
 import { computeDisplayBusinessStatus } from '@/lib/ui/invoice-status'
 import { resolveInvoiceQrForPdf } from '../qr-for-pdf'
@@ -149,7 +150,7 @@ export async function loadInvoicePdfDocument(invoiceId: string): Promise<Invoice
     date: invoice.date,
     dueDate: invoice.dueDate,
     terms: invoice.terms,
-    currency: invoice.currency || settings.currency || 'SAR',
+    currency: normalizeCurrency(invoice.currency || settings.currency || DEFAULT_CURRENCY),
     businessStatus: computeDisplayBusinessStatus({
       status: invoice.status,
       dueDate: invoice.dueDate,

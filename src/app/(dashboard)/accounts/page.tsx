@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { Input, Select } from '@/components/ui/input'
 import { PageHeader, SearchBar, FilterBar } from '@/components/ui/page-header'
+import { ModuleImportExportToolbar } from '@/components/import-export/ModuleImportExportToolbar'
+import { ACCOUNT_FIELDS } from '@/lib/import-export/registry/modules/accounts.fields'
 import { readApiError } from '@/lib/api-client'
 
 interface Account {
@@ -95,7 +97,21 @@ export default function AccountsPage() {
         title="Chart of Accounts"
         subtitle={`${accounts.length} accounts`}
         breadcrumb={[{ label: 'Accounting' }, { label: 'Chart of Accounts' }]}
-        action={<Button onClick={openCreate}><Plus size={15} /> Add Account</Button>}
+        action={(
+          <div className="flex items-center gap-2">
+            <ModuleImportExportToolbar
+              moduleKey="accounts"
+              moduleLabel="Chart of Accounts"
+              fields={ACCOUNT_FIELDS}
+              filters={{
+                ...(search ? { search } : {}),
+                ...(typeFilter ? { type: typeFilter } : {}),
+              }}
+              onImportSuccess={load}
+            />
+            <Button onClick={openCreate}><Plus size={15} /> Add Account</Button>
+          </div>
+        )}
       />
 
       <FilterBar>

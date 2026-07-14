@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { formatCurrency } from '@/lib/utils'
+import { useFormatCurrency } from '@/hooks/use-company-currency'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, LineChart, Line,
@@ -23,6 +23,7 @@ function formatMonth(key: string) {
 }
 
 export default function CashFlowPage() {
+  const formatCurrency = useFormatCurrency()
   const [from, setFrom] = useState(new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0])
   const [to, setTo] = useState(new Date().toISOString().split('T')[0])
   const [data, setData] = useState<CashFlowData | null>(null)

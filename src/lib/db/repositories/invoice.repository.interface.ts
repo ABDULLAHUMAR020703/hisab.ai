@@ -38,12 +38,14 @@ export interface InvoiceLineInput {
   taxRate: number
   accountId?: string | null
   costCenterId?: string | null
+  inventoryItemId?: string | null
 }
 
 export interface InvoiceCreateInput {
   customerId: string
   date: string | Date
   dueDate: string | Date
+  currency?: string | null
   lines: InvoiceLineInput[]
   notes?: string | null
   terms?: string | null
@@ -56,6 +58,7 @@ export interface InvoiceUpdateInput {
   customerId?: string
   date?: string | Date
   dueDate?: string | Date
+  currency?: string | null
   lines?: InvoiceLineInput[]
   notes?: string | null
   terms?: string | null

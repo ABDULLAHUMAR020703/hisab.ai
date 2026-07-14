@@ -1,5 +1,8 @@
 import { requireAuth } from '@/lib/auth'
+import { postBillToLedger } from '@/lib/accounting/document-posting'
+import { resolveTransactionCurrency } from '@/lib/currency/company'
 import { prisma } from '@/lib/prisma'
+import { resolveCompanyId } from '@/lib/tenant'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -39,22 +42,31 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     const total = subtotal + taxAmount
     const balance = total - existing.amountPaid
+    const resolvedCurrency = body.currency !== undefined
+      ? await resolveTransactionCurrency(body.currency)
+      : existing.currency
 
     await prisma.billLine.deleteMany({ where: { billId: id } })
 
+    const nextStatus = body.status || existing.status
     const bill = await prisma.bill.update({
       where: { id },
       data: {
         vendorId: body.vendorId,
         date: new Date(body.date),
         dueDate: new Date(body.dueDate),
+        currency: resolvedCurrency,
         subtotal,
         taxAmount,
         total,
         balance,
         notes: body.notes,
         reference: body.reference,
-        status: body.status || existing.status,
+        status: nextStatus,
+        approvalStatus: body.approvalStatus ?? existing.approvalStatus,
+        purchaseOrderId: body.purchaseOrderId !== undefined ? (body.purchaseOrderId || null) : existing.purchaseOrderId,
+        isRecurring: body.isRecurring ?? existing.isRecurring,
+        recurringDay: body.recurringDay !== undefined ? body.recurringDay : existing.recurringDay,
         lines: {
           create: processedLines.map((l: {
             description: string; quantity: number; unitPrice: number
@@ -72,6 +84,11 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       },
       include: { vendor: { select: { name: true } }, lines: true },
     })
+
+    if (nextStatus === 'RECEIVED' && existing.status !== 'RECEIVED') {
+      const companyId = await resolveCompanyId()
+      await postBillToLedger(id, companyId)
+    }
 
     return Response.json(bill)
   } catch (error) {

@@ -5,7 +5,10 @@ import type { CustomerRecord } from '../entities'
 import { queryByIdOrLegacy, resolveCompanyId, supabaseDb } from '../repository-utils'
 import { resolveSequenceRepository } from '../sequence-resolver'
 import type {
+  CustomerBatchDuplicateInput,
+  CustomerBatchDuplicateMatch,
   CustomerCreateInput,
+  CustomerDuplicateCriteria,
   CustomerListOptions,
   CustomerRepository,
   CustomerUpdateInput,
@@ -90,7 +93,9 @@ export const supabaseCustomerRepository: CustomerRepository = {
     if (error) throw error
 
     let customers = (data ?? []).map(mapCustomerRow)
-    customers = await attachOutstanding(customers, companyId)
+    if (options.includeOutstanding !== false) {
+      customers = await attachOutstanding(customers, companyId)
+    }
 
     if (options.vatFilter === 'valid_trn') {
       customers = customers.filter((c) => Boolean(c.taxId?.trim()) && isSaudiVatTrn(c.taxId!))
@@ -155,6 +160,138 @@ export const supabaseCustomerRepository: CustomerRepository = {
     }
   },
 
+  async findDuplicate(criteria: CustomerDuplicateCriteria) {
+    const db = supabaseDb()
+    const companyId = await resolveCompanyId()
+
+    const email = criteria.email?.trim()
+    if (email) {
+      const { data, error } = await db
+        .from('customers')
+        .select('*')
+        .eq('company_id', companyId)
+        .ilike('email', email)
+        .is('deleted_at', null)
+        .limit(1)
+        .maybeSingle()
+      if (error) throw error
+      if (data) return mapCustomerRow(data)
+    }
+
+    const taxId = criteria.taxId?.trim()
+    if (taxId) {
+      const { data, error } = await db
+        .from('customers')
+        .select('*')
+        .eq('company_id', companyId)
+        .eq('tax_id', taxId)
+        .is('deleted_at', null)
+        .limit(1)
+        .maybeSingle()
+      if (error) throw error
+      if (data) return mapCustomerRow(data)
+    }
+
+    const name = criteria.name?.trim()
+    if (name) {
+      const { data, error } = await db
+        .from('customers')
+        .select('*')
+        .eq('company_id', companyId)
+        .ilike('name', name)
+        .is('deleted_at', null)
+        .limit(1)
+        .maybeSingle()
+      if (error) throw error
+      if (data) return mapCustomerRow(data)
+    }
+
+    return null
+  },
+
+  async findDuplicatesBatch(inputs: CustomerBatchDuplicateInput[]) {
+    if (inputs.length === 0) return []
+
+    const db = supabaseDb()
+    const companyId = await resolveCompanyId()
+
+    const taxIds = [...new Set(inputs.map((item) => item.taxId?.trim()).filter(Boolean) as string[])]
+    const emails = [...new Set(inputs.map((item) => item.email?.trim().toLowerCase()).filter(Boolean) as string[])]
+    const names = [...new Set(inputs.map((item) => item.name?.trim().toLowerCase()).filter(Boolean) as string[])]
+
+    const byTaxId = new Map<string, CustomerRecord>()
+    const byEmail = new Map<string, CustomerRecord>()
+    const byName = new Map<string, CustomerRecord>()
+
+    if (taxIds.length > 0) {
+      const { data, error } = await db
+        .from('customers')
+        .select('*')
+        .eq('company_id', companyId)
+        .in('tax_id', taxIds)
+        .is('deleted_at', null)
+      if (error) throw error
+      for (const row of data ?? []) {
+        const customer = mapCustomerRow(row)
+        if (customer.taxId) byTaxId.set(customer.taxId, customer)
+      }
+    }
+
+    const needsEmailOrName = emails.length > 0 || names.length > 0
+    if (needsEmailOrName) {
+      const { data, error } = await db
+        .from('customers')
+        .select('id, email, tax_id, name')
+        .eq('company_id', companyId)
+        .is('deleted_at', null)
+      if (error) throw error
+
+      const emailSet = new Set(emails)
+      const nameSet = new Set(names)
+
+      for (const row of data ?? []) {
+        const customer = mapCustomerRow(row)
+        if (customer.email && emailSet.has(customer.email.toLowerCase())) {
+          byEmail.set(customer.email.toLowerCase(), customer)
+        }
+        if (nameSet.has(customer.name.toLowerCase())) {
+          byName.set(customer.name.toLowerCase(), customer)
+        }
+      }
+    }
+
+    const matches: CustomerBatchDuplicateMatch[] = []
+    for (const input of inputs) {
+      const email = input.email?.trim().toLowerCase()
+      const taxId = input.taxId?.trim()
+      const name = input.name?.trim().toLowerCase()
+
+      let existing: CustomerRecord | undefined
+      const matchedOn: string[] = []
+
+      if (email && byEmail.has(email)) {
+        existing = byEmail.get(email)
+        matchedOn.push('email')
+      } else if (taxId && byTaxId.has(taxId)) {
+        existing = byTaxId.get(taxId)
+        matchedOn.push('taxId')
+      } else if (name && byName.has(name)) {
+        existing = byName.get(name)
+        matchedOn.push('name')
+      }
+
+      if (existing) {
+        matches.push({
+          rowNumber: input.rowNumber,
+          existingId: existing.id,
+          matchedOn: matchedOn.length ? matchedOn : ['name'],
+        })
+      }
+    }
+
+    return matches
+  },
+
   async findById(id: string) {
     const db = supabaseDb()
     const companyId = await resolveCompanyId()
@@ -197,6 +334,7 @@ export const supabaseCustomerRepository: CustomerRepository = {
         tax_id: input.taxId ?? null,
         credit_limit: input.creditLimit ?? 0,
         payment_terms: input.paymentTerms ?? 30,
+        is_active: input.isActive ?? true,
       })
       .select('*')
       .single()

@@ -1,16 +1,44 @@
 import { requireAuth } from '@/lib/auth'
+import { findSystemAccount } from '@/lib/accounting/posting-service'
+import { queryLedgerEntries } from '@/lib/accounting/ledger'
 import { prisma } from '@/lib/prisma'
+import { resolveCompanyId } from '@/lib/tenant'
 
 type TaxRow = { taxAmount: number; subtotal: number }
 
 export async function GET(request: Request) {
   try {
     await requireAuth()
+    const companyId = await resolveCompanyId()
     const { searchParams } = new URL(request.url)
     const from = searchParams.get('from') ? new Date(searchParams.get('from')!) : new Date(new Date().getFullYear(), 0, 1)
     const to = searchParams.get('to') ? new Date(searchParams.get('to')!) : new Date()
 
-    // VAT collected (from invoices)
+    const [vatPayableId, vatReceivableId] = await Promise.all([
+      findSystemAccount(companyId, { nameContains: 'VAT Payable' }),
+      findSystemAccount(companyId, { nameContains: 'VAT Receivable' }),
+    ])
+
+    let vatCollected = 0
+    let vatPaid = 0
+    let ledgerUsed = false
+
+    if (vatPayableId || vatReceivableId) {
+      const ledgerRows = await queryLedgerEntries({ companyId, from, to })
+      const payableCredit = ledgerRows
+        .filter((r) => r.accountId === vatPayableId)
+        .reduce((s, r) => s + r.credit - r.debit, 0)
+      const receivableDebit = ledgerRows
+        .filter((r) => r.accountId === vatReceivableId)
+        .reduce((s, r) => s + r.debit - r.credit, 0)
+
+      if (payableCredit > 0 || receivableDebit > 0) {
+        vatCollected = payableCredit
+        vatPaid = receivableDebit
+        ledgerUsed = true
+      }
+    }
+
     const invoices = await prisma.invoice.findMany({
       where: {
         date: { gte: from, lte: to },
@@ -20,10 +48,11 @@ export async function GET(request: Request) {
     })
 
     const invoiceRows = invoices as TaxRow[]
-    const vatCollected = invoiceRows.reduce((s: number, i: TaxRow) => s + i.taxAmount, 0)
     const salesAmount = invoiceRows.reduce((s: number, i: TaxRow) => s + i.subtotal, 0)
+    if (!ledgerUsed) {
+      vatCollected = invoiceRows.reduce((s: number, i: TaxRow) => s + i.taxAmount, 0)
+    }
 
-    // VAT paid (from bills)
     const bills = await prisma.bill.findMany({
       where: {
         date: { gte: from, lte: to },
@@ -33,8 +62,10 @@ export async function GET(request: Request) {
     })
 
     const billRows = bills as TaxRow[]
-    const vatPaid = billRows.reduce((s: number, b: TaxRow) => s + b.taxAmount, 0)
     const purchasesAmount = billRows.reduce((s: number, b: TaxRow) => s + b.subtotal, 0)
+    if (!ledgerUsed) {
+      vatPaid = billRows.reduce((s: number, b: TaxRow) => s + b.taxAmount, 0)
+    }
 
     const vatPayable = vatCollected - vatPaid
 
@@ -44,6 +75,7 @@ export async function GET(request: Request) {
       purchases: { amount: purchasesAmount, vatPaid, billCount: bills.length },
       vatPayable,
       summary: vatPayable > 0 ? 'VAT PAYABLE TO ZATCA' : 'VAT REFUNDABLE FROM ZATCA',
+      source: ledgerUsed ? 'ledger_entries' : 'documents',
     })
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {

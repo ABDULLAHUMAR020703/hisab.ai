@@ -3,7 +3,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatDate } from '@/lib/utils'
+import { useFormatCurrency } from '@/hooks/use-company-currency'
 import { PRODUCT_NAME } from '@/lib/brand'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -99,6 +100,7 @@ const ACTIVITY_ICONS: Record<string, typeof FileText> = {
 }
 
 function CustomTooltip({ active, payload, label }: { active?: boolean; payload?: { name: string; value: number; color: string }[]; label?: string }) {
+  const formatCurrency = useFormatCurrency()
   if (!active || !payload?.length) return null
   return (
     <div className="bg-white border border-slate-200 rounded-xl shadow-xl p-3 min-w-[160px]">
@@ -117,6 +119,7 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
 }
 
 export default function DashboardPage() {
+  const formatCurrency = useFormatCurrency()
   const router = useRouter()
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -517,6 +520,7 @@ function StatusGroup({ title, items, showAmount = true }: {
   items: { status: string; count: number; total?: number | null }[]
   showAmount?: boolean
 }) {
+  const formatCurrency = useFormatCurrency()
   if (!items.length) return null
   return (
     <div>

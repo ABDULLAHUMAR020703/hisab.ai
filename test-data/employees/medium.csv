@@ -1,0 +1,101 @@
+Name,Email,Phone,Department,Position,Joining Date,Salary,Salary Type,Bank Account,Active
+Ahmed Al-Farsi,ahmedalfarsi@karachiport.pk,+966581162817,Finance,Chief Accountant,2024-09-19,24517.99,HOURLY,SA8236308884760364890000,true
+Fatima Al-Harbi,fatimaalharbi@lahoretextile.co.pk,+971598316231,Human Resources,HR Manager,2023-07-02,15276.62,HOURLY,SA5434930216148495675000,true
+Omar Hassan,omarhassan@sharjahind.ae,+966577169304,Sales,Sales Executive,2021-04-15,26480.46,HOURLY,SA2067460104310885070000,true
+Sara Mahmoud,saramahmoud@karachiport.pk,+966567745890,Operations,Operations Coordinator,2022-08-15,15821.63,MONTHLY,SA8487245055008679620000,true
+Khalid Al-Otaibi,khalidalotaibi@karachiport.pk,+971514818696,IT,Systems Administrator,2025-09-23,22463.43,MONTHLY,SA8871233415929600600000,true
+Noura Al-Shehri,nouraalshehri@riyadh-digital.sa,+971513493333,Marketing,Marketing Specialist,2020-07-26,16911.5,HOURLY,SA2335833263956010340000,true
+Muhammad Ali Khan,muhammadalikhan@alrajhi.com.sa,+923033039816,Procurement,Purchasing Officer,2024-12-05,21004.59,HOURLY,SA4767362026334740220000,true
+Layla Al-Qahtani,laylaalqahtani@gulfpetro.com.sa,+966570661926,Finance,Accounts Payable Clerk,2018-07-21,22761.67,MONTHLY,SA6086159782367758450000,true
+Youssef Ibrahim,youssefibrahim@sharjahind.ae,+971564654081,Warehouse,Inventory Controller,2020-04-27,12277.37,MONTHLY,SA6949890837003476920000,true
+Aisha Rahman,aisharahman@lahoretextile.co.pk,+971555522879,Customer Service,Support Lead,2023-10-09,11308.35,MONTHLY,SA5295806284225545830000,true
+Ahmed Al-Farsi 11,ahmedalfarsi@gulfpetro.com.sa,+923054475178,Finance,Chief Accountant,2024-02-16,28074.11,MONTHLY,SA4533185164537280800000,true
+Fatima Al-Harbi 12,fatimaalharbi@karachiport.pk,+971588800556,Human Resources,HR Manager,2022-11-02,20908.27,HOURLY,SA2178194860881194470000,true
+Omar Hassan 13,omarhassan@dubaimarina.ae,+923017546608,Sales,Sales Executive,2019-02-22,10385.68,MONTHLY,SA9391828723973594610000,true
+Sara Mahmoud 14,saramahmoud@karachiport.pk,+971544582172,Operations,Operations Coordinator,2020-05-03,27703.36,MONTHLY,SA3406018827506341040000,true
+Khalid Al-Otaibi 15,khalidalotaibi@riyadh-digital.sa,+923025479940,IT,Systems Administrator,2018-11-08,23754.13,MONTHLY,SA5660526945209130650000,true
+Noura Al-Shehri 16,nouraalshehri@riyadh-digital.sa,+966562284539,Marketing,Marketing Specialist,2020-03-23,11981.36,HOURLY,SA3563440469652414325000,true
+Muhammad Ali Khan 17,muhammadalikhan@riyadh-digital.sa,+923067232545,Procurement,Purchasing Officer,2023-10-02,11340.33,HOURLY,SA4532865409948863090000,true
+Layla Al-Qahtani 18,laylaalqahtani@dubaimarina.ae,+966519045543,Finance,Accounts Payable Clerk,2019-11-09,6347.68,MONTHLY,SA6422581673855893316000,true
+Youssef Ibrahim 19,youssefibrahim@riyadh-digital.sa,+966593399756,Warehouse,Inventory Controller,2024-07-17,19009.34,HOURLY,SA4938960231211967770000,true
+Aisha Rahman 20,aisharahman@gulfpetro.com.sa,+971550502028,Customer Service,Support Lead,2018-01-25,29871.61,MONTHLY,SA2270242185308597985000,true
+Ahmed Al-Farsi 21,ahmedalfarsi@lahoretextile.co.pk,+923015852168,Finance,Chief Accountant,2025-05-12,12791.02,MONTHLY,SA8678042684588581320000,true
+Fatima Al-Harbi 22,fatimaalharbi@karachiport.pk,+971527940851,Human Resources,HR Manager,2019-05-26,12632.97,HOURLY,SA1005998241854831576000,true
+Omar Hassan 23,omarhassan@riyadh-digital.sa,+966592643639,Sales,Sales Executive,2021-05-15,14969.84,HOURLY,SA2760494026727974410000,true
+Sara Mahmoud 24,saramahmoud@alrajhi.com.sa,+971558963563,Operations,Operations Coordinator,2021-09-07,23590.3,HOURLY,SA5477118151681497700000,true
+Khalid Al-Otaibi 25,khalidalotaibi@lahoretextile.co.pk,+923045025874,IT,Systems Administrator,2019-04-15,16888.27,MONTHLY,SA1928870168211869897000,true
+Noura Al-Shehri 26,nouraalshehri@riyadh-digital.sa,+971583794175,Marketing,Marketing Specialist,2021-05-23,5476.99,MONTHLY,SA2469545773719437420000,true
+Muhammad Ali Khan 27,muhammadalikhan@hisab.ai,+923007566546,Procurement,Purchasing Officer,2018-10-26,23130.67,HOURLY,SA1671674373792484400000,true
+Layla Al-Qahtani 28,laylaalqahtani@gulfpetro.com.sa,+971524374904,Finance,Accounts Payable Clerk,2018-10-04,7665.74,MONTHLY,SA1214787454437464476000,true
+Youssef Ibrahim 29,youssefibrahim@gulfpetro.com.sa,+923093164109,Warehouse,Inventory Controller,2018-11-07,11996.11,MONTHLY,SA1730819414858706297000,true
+Aisha Rahman 30,aisharahman@gulfpetro.com.sa,+971531891823,Customer Service,Support Lead,2018-10-04,15728.03,MONTHLY,SA8319587445608340206000,true
+Ahmed Al-Farsi 31,ahmedalfarsi@alrajhi.com.sa,+966599310153,Finance,Chief Accountant,2019-05-05,23094.14,MONTHLY,SA5454701697104610500000,true
+Fatima Al-Harbi 32,fatimaalharbi@alrajhi.com.sa,+923072349459,Human Resources,HR Manager,2023-04-20,5826.04,HOURLY,SA4198616124829277390000,true
+Omar Hassan 33,omarhassan@lahoretextile.co.pk,+971535446938,Sales,Sales Executive,2020-11-24,12268.04,HOURLY,SA3127496886625885962000,true
+Sara Mahmoud 34,saramahmoud@gulfpetro.com.sa,+923019427860,Operations,Operations Coordinator,2024-05-26,20170.76,HOURLY,SA9310398978018201887000,true
+Khalid Al-Otaibi 35,khalidalotaibi@riyadh-digital.sa,+971577186182,IT,Systems Administrator,2024-04-18,5633.38,MONTHLY,SA6565403055469505490000,true
+Noura Al-Shehri 36,nouraalshehri@riyadh-digital.sa,+923038396382,Marketing,Marketing Specialist,2021-07-19,19412.08,MONTHLY,SA8879003338143229480000,true
+Muhammad Ali Khan 37,muhammadalikhan@sharjahind.ae,+966522048942,Procurement,Purchasing Officer,2022-08-05,7102.09,HOURLY,SA3588640649849548930000,true
+Layla Al-Qahtani 38,laylaalqahtani@gulfpetro.com.sa,+966522943616,Finance,Accounts Payable Clerk,2018-05-24,25699.02,MONTHLY,SA9506308199185878039000,true
+Youssef Ibrahim 39,youssefibrahim@gulfpetro.com.sa,+966526674113,Warehouse,Inventory Controller,2024-03-17,13486.05,HOURLY,SA9746691989479586480000,true
+Aisha Rahman 40,aisharahman@alrajhi.com.sa,+971598130551,Customer Service,Support Lead,2018-12-27,12570.18,MONTHLY,SA5873871224932372560000,true
+Ahmed Al-Farsi 41,ahmedalfarsi@sharjahind.ae,+923076666574,Finance,Chief Accountant,2019-04-14,15079,MONTHLY,SA5317760211438871920000,true
+Fatima Al-Harbi 42,fatimaalharbi@karachiport.pk,+923061481742,Human Resources,HR Manager,2021-08-10,10864.08,HOURLY,SA9059347650734707710000,true
+Omar Hassan 43,omarhassan@sharjahind.ae,+923081997258,Sales,Sales Executive,2023-03-06,17161.21,MONTHLY,SA5506245172559283674000,true
+Sara Mahmoud 44,saramahmoud@sharjahind.ae,+966515063255,Operations,Operations Coordinator,2023-08-22,23276.61,MONTHLY,SA8594599045277573170000,true
+Khalid Al-Otaibi 45,khalidalotaibi@lahoretextile.co.pk,+971581256531,IT,Systems Administrator,2025-11-27,29633.02,MONTHLY,SA2225140036898665130000,true
+Noura Al-Shehri 46,nouraalshehri@riyadh-digital.sa,+971513836034,Marketing,Marketing Specialist,2021-11-19,20870.19,HOURLY,SA7803674286534078419500,true
+Muhammad Ali Khan 47,muhammadalikhan@riyadh-digital.sa,+971570187533,Procurement,Purchasing Officer,2023-06-25,28513.08,MONTHLY,SA1216700629866681993000,true
+Layla Al-Qahtani 48,laylaalqahtani@karachiport.pk,+923058392169,Finance,Accounts Payable Clerk,2021-10-09,15833.32,MONTHLY,SA7034768070187419652000,true
+Youssef Ibrahim 49,youssefibrahim@karachiport.pk,+966558012763,Warehouse,Inventory Controller,2021-09-20,29153.43,MONTHLY,SA9170149637525901200000,true
+Aisha Rahman 50,aisharahman@gulfpetro.com.sa,+923047593742,Customer Service,Support Lead,2021-03-16,21307.51,HOURLY,SA1106199555820785463000,true
+Ahmed Al-Farsi 51,ahmedalfarsi@karachiport.pk,+923096692825,Finance,Chief Accountant,2021-08-25,15637.44,HOURLY,SA5281482057925313700000,true
+Fatima Al-Harbi 52,fatimaalharbi@dubaimarina.ae,+971561922338,Human Resources,HR Manager,2021-12-15,16799.53,HOURLY,SA2422918962454423310000,true
+Omar Hassan 53,omarhassan@karachiport.pk,+966582135458,Sales,Sales Executive,2018-09-14,17776.63,MONTHLY,SA2425725651532411576000,true
+Sara Mahmoud 54,saramahmoud@riyadh-digital.sa,+923065824702,Operations,Operations Coordinator,2019-01-20,17722.38,HOURLY,SA1665098061063326890000,true
+Khalid Al-Otaibi 55,khalidalotaibi@sharjahind.ae,+971519200991,IT,Systems Administrator,2023-09-08,5270.6,MONTHLY,SA9051206455822102725000,true
+Noura Al-Shehri 56,nouraalshehri@sharjahind.ae,+971567550800,Marketing,Marketing Specialist,2021-02-22,12848.89,HOURLY,SA5995058343675918880000,true
+Muhammad Ali Khan 57,muhammadalikhan@sharjahind.ae,+923071959010,Procurement,Purchasing Officer,2019-04-17,19421.75,MONTHLY,SA4244208156177774070000,true
+Layla Al-Qahtani 58,laylaalqahtani@lahoretextile.co.pk,+966535624586,Finance,Accounts Payable Clerk,2018-11-07,25943.31,HOURLY,SA6432798178587108850000,true
+Youssef Ibrahim 59,youssefibrahim@lahoretextile.co.pk,+923036452169,Warehouse,Inventory Controller,2018-11-19,24534.17,HOURLY,SA9654105322179384530000,true
+Aisha Rahman 60,aisharahman@hisab.ai,+971583564436,Customer Service,Support Lead,2024-04-02,6329.13,MONTHLY,SA4543633108003996310000,true
+Ahmed Al-Farsi 61,ahmedalfarsi@lahoretextile.co.pk,+966540536414,Finance,Chief Accountant,2019-05-18,23716.82,HOURLY,SA6390854110405780370000,true
+Fatima Al-Harbi 62,fatimaalharbi@gulfpetro.com.sa,+966551710146,Human Resources,HR Manager,2022-03-24,25190.75,MONTHLY,SA6238089871290139850000,true
+Omar Hassan 63,omarhassan@lahoretextile.co.pk,+923052550802,Sales,Sales Executive,2023-06-13,25801.33,HOURLY,SA8569918856956064700000,true
+Sara Mahmoud 64,saramahmoud@sharjahind.ae,+923072984928,Operations,Operations Coordinator,2018-01-11,12568.4,HOURLY,SA4712187811569310724000,true
+Khalid Al-Otaibi 65,khalidalotaibi@hisab.ai,+971517736729,IT,Systems Administrator,2021-11-06,27611.49,HOURLY,SA7384292352828197180000,true
+Noura Al-Shehri 66,nouraalshehri@gulfpetro.com.sa,+966566672791,Marketing,Marketing Specialist,2022-07-23,24278.65,HOURLY,SA2203889783029444516000,true
+Muhammad Ali Khan 67,muhammadalikhan@lahoretextile.co.pk,+966563092102,Procurement,Purchasing Officer,2023-07-01,27923.07,HOURLY,SA9792884859791956840000,true
+Layla Al-Qahtani 68,laylaalqahtani@lahoretextile.co.pk,+971576632685,Finance,Accounts Payable Clerk,2025-07-12,11143.85,HOURLY,SA7425216170423664153000,true
+Youssef Ibrahim 69,youssefibrahim@lahoretextile.co.pk,+923029433222,Warehouse,Inventory Controller,2023-01-03,13498.18,MONTHLY,SA4968878053268417720000,true
+Aisha Rahman 70,aisharahman@dubaimarina.ae,+966548772836,Customer Service,Support Lead,2023-03-09,6976.33,HOURLY,SA3963675234094262125000,true
+Ahmed Al-Farsi 71,ahmedalfarsi@lahoretextile.co.pk,+966524129327,Finance,Chief Accountant,2021-11-26,10676.01,HOURLY,SA1077132768416777260000,true
+Fatima Al-Harbi 72,fatimaalharbi@dubaimarina.ae,+923036396320,Human Resources,HR Manager,2021-08-12,21162.3,MONTHLY,SA4099112256686203170000,true
+Omar Hassan 73,omarhassan@alrajhi.com.sa,+971562554522,Sales,Sales Executive,2022-04-19,18286.66,MONTHLY,SA9104691772651858628000,true
+Sara Mahmoud 74,saramahmoud@riyadh-digital.sa,+966597047158,Operations,Operations Coordinator,2025-02-27,11321.43,HOURLY,SA4731927533983252943000,true
+Khalid Al-Otaibi 75,khalidalotaibi@gulfpetro.com.sa,+966530712030,IT,Systems Administrator,2018-03-09,17336.24,HOURLY,SA3368614729703404010000,true
+Noura Al-Shehri 76,nouraalshehri@alrajhi.com.sa,+923094289862,Marketing,Marketing Specialist,2022-05-25,7696.57,HOURLY,SA6715658351359888910000,true
+Muhammad Ali Khan 77,muhammadalikhan@dubaimarina.ae,+966510485828,Procurement,Purchasing Officer,2021-06-22,17528.06,HOURLY,SA4193366280011832720000,true
+Layla Al-Qahtani 78,laylaalqahtani@hisab.ai,+971550777319,Finance,Accounts Payable Clerk,2020-11-14,15682.08,MONTHLY,SA6761897631408646700000,true
+Youssef Ibrahim 79,youssefibrahim@alrajhi.com.sa,+966521413039,Warehouse,Inventory Controller,2024-05-17,10822,HOURLY,SA7755268028285354380000,true
+Aisha Rahman 80,aisharahman@karachiport.pk,+971572836368,Customer Service,Support Lead,2021-01-01,15560.27,HOURLY,SA8951759150391444560000,true
+Ahmed Al-Farsi 81,ahmedalfarsi@riyadh-digital.sa,+966540204461,Finance,Chief Accountant,2019-10-19,14226.63,HOURLY,SA4022033701837062836000,true
+Fatima Al-Harbi 82,fatimaalharbi@alrajhi.com.sa,+971592899453,Human Resources,HR Manager,2023-07-13,20214.87,MONTHLY,SA4351269238302484150000,true
+Omar Hassan 83,omarhassan@alrajhi.com.sa,+923021612111,Sales,Sales Executive,2022-09-20,18060.39,MONTHLY,SA1544346957351081075000,true
+Sara Mahmoud 84,saramahmoud@riyadh-digital.sa,+923041174267,Operations,Operations Coordinator,2021-03-18,18788.87,MONTHLY,SA5569040860980749130000,true
+Khalid Al-Otaibi 85,khalidalotaibi@alrajhi.com.sa,+971517373166,IT,Systems Administrator,2023-09-26,27666.66,HOURLY,SA3141094067553058270000,true
+Noura Al-Shehri 86,nouraalshehri@riyadh-digital.sa,+966575179710,Marketing,Marketing Specialist,2020-01-07,26907.23,HOURLY,SA5170874887052923440000,true
+Muhammad Ali Khan 87,muhammadalikhan@karachiport.pk,+923024506317,Procurement,Purchasing Officer,2021-09-28,29353.05,MONTHLY,SA4163920634356327360000,true
+Layla Al-Qahtani 88,laylaalqahtani@sharjahind.ae,+971578784563,Finance,Accounts Payable Clerk,2019-12-27,20827.65,HOURLY,SA8190799986734054980000,true
+Youssef Ibrahim 89,youssefibrahim@gulfpetro.com.sa,+971534127395,Warehouse,Inventory Controller,2023-09-03,22715.45,HOURLY,SA4995748427347280080000,true
+Aisha Rahman 90,aisharahman@hisab.ai,+971546774630,Customer Service,Support Lead,2023-03-20,25234.09,MONTHLY,SA8068539661797694865000,true
+Ahmed Al-Farsi 91,ahmedalfarsi@alrajhi.com.sa,+971598885440,Finance,Chief Accountant,2018-07-05,24155.41,HOURLY,SA8154885568027384580000,true
+Fatima Al-Harbi 92,fatimaalharbi@karachiport.pk,+966598957748,Human Resources,HR Manager,2019-09-04,6927.49,HOURLY,SA8836801377288065850000,true
+Omar Hassan 93,omarhassan@gulfpetro.com.sa,+971518304687,Sales,Sales Executive,2020-03-15,7884.2,MONTHLY,SA9246212127082981170000,true
+Sara Mahmoud 94,saramahmoud@gulfpetro.com.sa,+971519468469,Operations,Operations Coordinator,2023-06-10,28675.83,HOURLY,SA7413570405612699687000,true
+Khalid Al-Otaibi 95,khalidalotaibi@riyadh-digital.sa,+971544404914,IT,Systems Administrator,2018-05-23,19394.99,MONTHLY,SA4810384313506074250000,true
+Noura Al-Shehri 96,nouraalshehri@alrajhi.com.sa,+923054465657,Marketing,Marketing Specialist,2023-10-20,5974.53,HOURLY,SA5669767046952620150000,true
+Muhammad Ali Khan 97,muhammadalikhan@alrajhi.com.sa,+971580683550,Procurement,Purchasing Officer,2019-04-10,26826.43,HOURLY,SA5032808125484734775000,true
+Layla Al-Qahtani 98,laylaalqahtani@lahoretextile.co.pk,+923045703205,Finance,Accounts Payable Clerk,2023-12-28,29627.22,HOURLY,SA8839763676119036970000,true
+Youssef Ibrahim 99,youssefibrahim@dubaimarina.ae,+966577260357,Warehouse,Inventory Controller,2022-01-23,26736.62,MONTHLY,SA3785348941921256490000,true
+Aisha Rahman 100,aisharahman@karachiport.pk,+971547887744,Customer Service,Support Lead,2023-07-01,18442.75,MONTHLY,SA3263814368308521800000,true

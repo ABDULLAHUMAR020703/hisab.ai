@@ -1,5 +1,6 @@
 import 'server-only'
 import type { InvoiceType } from '@/lib/db/prisma-types'
+import { getCompanyPrimaryCurrency, resolveTransactionCurrency } from '@/lib/currency/company'
 import { classifySalesInvoiceType, isAdjustableTaxInvoice, resolveZatcaInvoiceType } from '@/lib/zatca/classification'
 import { randomUUID } from 'crypto'
 import {
@@ -44,6 +45,7 @@ function processLines(lines: InvoiceLineInput[]) {
       amount,
       accountId: line.accountId || null,
       costCenterId: line.costCenterId || null,
+      inventoryItemId: line.inventoryItemId || null,
     }
   })
   return { processedLines, subtotal, taxAmount, total: subtotal + taxAmount }
@@ -121,6 +123,7 @@ async function buildLineRows(
       invoice_id: invoiceId,
       account_id: await resolveScopedUuid('chart_of_accounts', line.accountId, companyId),
       cost_center_id: await resolveScopedUuid('cost_centers', line.costCenterId, companyId),
+      inventory_item_id: await resolveScopedUuid('inventory_items', line.inventoryItemId, companyId),
       description: line.description,
       quantity: line.quantity,
       unit_price: line.unitPrice,
@@ -290,6 +293,7 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
     const issueDate = new Date(input.date)
     const createdById = await resolveProfileUuid(input.createdById)
     const invoiceType = await resolveInvoiceTypeForCustomer(customerId, companyId)
+    const currency = await resolveTransactionCurrency(input.currency)
 
     const { data, error } = await db
       .from('invoices')
@@ -302,6 +306,7 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
         date: issueDate.toISOString(),
         issue_time: formatIssueTime(issueDate),
         due_date: new Date(input.dueDate).toISOString(),
+        currency,
         subtotal,
         tax_amount: taxAmount,
         total,
@@ -362,6 +367,7 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
         date: issueDate.toISOString(),
         issue_time: formatIssueTime(issueDate),
         due_date: new Date(input.dueDate).toISOString(),
+        currency: source.currency,
         subtotal,
         tax_amount: taxAmount,
         total,
@@ -409,6 +415,9 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
     if (input.notes !== undefined) patch.notes = input.notes
     if (input.terms !== undefined) patch.terms = input.terms
     if (input.status !== undefined) patch.status = input.status
+    if (input.currency !== undefined) {
+      patch.currency = await resolveTransactionCurrency(input.currency)
+    }
 
     const noteType = await resolveStoredNoteInvoiceType(invoiceId, companyId)
     const customerIdForClassification = input.customerId !== undefined

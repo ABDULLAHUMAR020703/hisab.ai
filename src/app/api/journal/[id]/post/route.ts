@@ -1,21 +1,47 @@
 import { requireAuth } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { postJournalEntry } from '@/lib/accounting/posting-service'
+import { extractClientIp } from '@/lib/accounting/posting-audit'
+import { PostingValidationError } from '@/lib/accounting/validation'
+import { resolveCompanyId } from '@/lib/tenant'
+import { requireApprovedWorkflow, WorkflowError } from '@/lib/workflow/integration'
 
-export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireAuth()
+    const user = await requireAuth()
     const { id } = await params
-    const entry = await prisma.journalEntry.findUnique({ where: { id } })
-    if (!entry) return Response.json({ error: 'Not found' }, { status: 404 })
-    if (entry.status === 'POSTED') return Response.json({ error: 'Already posted' }, { status: 400 })
+    const companyId = await resolveCompanyId()
+    const body = await req.json().catch(() => ({}))
+    const reason = typeof body.reason === 'string' ? body.reason : undefined
 
-    const updated = await prisma.journalEntry.update({
-      where: { id },
-      data: { status: 'POSTED' },
+    await requireApprovedWorkflow('JOURNAL_ENTRY', id, companyId)
+
+    const postingSequence = await postJournalEntry(id, {
+      userId: user.id,
+      reason,
+      ipAddress: extractClientIp(req),
     })
 
-    return Response.json(updated)
+    return Response.json({ success: true, status: 'POSTED', postingSequence })
   } catch (error) {
-    return Response.json({ error: String(error) }, { status: 500 })
+    if (error instanceof Error && error.message === 'Unauthorized') {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    if (error instanceof PostingValidationError) {
+      return Response.json({ error: error.message, code: error.code }, { status: 400 })
+    }
+    if (error instanceof WorkflowError) {
+      return Response.json({ error: error.message, code: error.code }, { status: 400 })
+    }
+    const message = error instanceof Error ? error.message : String(error)
+    if (message.includes('not found')) {
+      return Response.json({ error: 'Not found' }, { status: 404 })
+    }
+    if (message.includes('Already posted') || message.includes('Duplicate posting')) {
+      return Response.json({ error: message }, { status: 400 })
+    }
+    if (message.includes('closed')) {
+      return Response.json({ error: message }, { status: 409 })
+    }
+    return Response.json({ error: message }, { status: 500 })
   }
 }

@@ -1,20 +1,22 @@
 'use client'
 
 import { useState } from 'react'
-import { formatCurrency } from '@/lib/utils'
+import { useCompanyCurrency, useFormatCurrency } from '@/hooks/use-company-currency'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 
 interface PLData {
   period: { from: string; to: string }
-  revenue: { total: number; taxCollected: number; byAccount: { name: string; amount: number }[] }
+  revenue: { total: number; byAccount: { name: string; amount: number }[] }
   cogs: { total: number }
   grossProfit: number
-  expenses: { fromExpenses: number; fromBills: number; total: number }
+  expenses: { total: number; byAccount: { name: string; amount: number }[] }
   netProfit: number
 }
 
 export default function ProfitLossPage() {
+  const formatCurrency = useFormatCurrency()
+  const { currency } = useCompanyCurrency()
   const [from, setFrom] = useState(new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0])
   const [to, setTo] = useState(new Date().toISOString().split('T')[0])
   const [data, setData] = useState<PLData | null>(null)
@@ -102,7 +104,7 @@ export default function ProfitLossPage() {
               <thead>
                 <tr className="bg-gray-50 border-b text-xs text-gray-500 uppercase">
                   <th className="px-5 py-3 text-left font-medium">Item</th>
-                  <th className="px-5 py-3 text-right font-medium">Amount (SAR)</th>
+                  <th className="px-5 py-3 text-right font-medium">Amount ({currency})</th>
                 </tr>
               </thead>
               <tbody>
@@ -136,14 +138,12 @@ export default function ProfitLossPage() {
                   </td>
                   <td />
                 </tr>
-                <tr className="border-b">
-                  <td className="px-5 py-2 pl-10 text-gray-600">Direct Expenses</td>
-                  <td className="px-5 py-2 text-right text-gray-800">({formatCurrency(data.expenses.fromExpenses)})</td>
-                </tr>
-                <tr className="border-b">
-                  <td className="px-5 py-2 pl-10 text-gray-600">Bills (Supplier Costs)</td>
-                  <td className="px-5 py-2 text-right text-gray-800">({formatCurrency(data.expenses.fromBills)})</td>
-                </tr>
+                {data.expenses.byAccount.map((item) => (
+                  <tr key={item.name} className="border-b">
+                    <td className="px-5 py-2 pl-10 text-gray-600">{item.name}</td>
+                    <td className="px-5 py-2 text-right text-gray-800">({formatCurrency(item.amount)})</td>
+                  </tr>
+                ))}
                 <tr className="border-b bg-gray-50">
                   <td className="px-5 py-2.5 font-semibold pl-10 text-gray-700">Total Expenses</td>
                   <td className="px-5 py-2.5 text-right font-semibold text-red-600">({formatCurrency(data.expenses.total)})</td>

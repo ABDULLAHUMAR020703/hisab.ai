@@ -1,0 +1,4 @@
+Name,Rate (%),Type,Default,Active
+Bad Rate,fifteen,VAT,false,true
+Negative Rate,-5,VAT,false,true
+Standard VAT (15%),15,VAT,true,true

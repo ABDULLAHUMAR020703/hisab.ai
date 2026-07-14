@@ -1,20 +1,22 @@
 'use client'
 
 import { useState } from 'react'
-import { formatCurrency } from '@/lib/utils'
+import { useFormatCurrency } from '@/hooks/use-company-currency'
 
 interface BSData {
   asOf: string
-  assets: { items: { accountNo: string; name: string; balance: number }[]; total: number; ar: number }
-  liabilities: { items: { accountNo: string; name: string; balance: number }[]; total: number; ap: number }
+  assets: { items: { accountNo: string; name: string; balance: number }[]; total: number }
+  liabilities: { items: { accountNo: string; name: string; balance: number }[]; total: number }
   equity: { items: { accountNo: string; name: string; balance: number }[]; total: number }
   totalLiabilitiesAndEquity: number
+  isBalanced?: boolean
 }
 
-function Section({ title, items, ar, ap, total, color }: {
+function Section({ title, items, total, color }: {
   title: string; items: { accountNo: string; name: string; balance: number }[]
-  ar?: number; ap?: number; total: number; color: string
+  total: number; color: string
 }) {
+  const formatCurrency = useFormatCurrency()
   return (
     <div>
       <h3 className={`text-sm font-bold uppercase tracking-wide px-5 py-2.5 ${color}`}>{title}</h3>
@@ -26,18 +28,6 @@ function Section({ title, items, ar, ap, total, color }: {
           </div>
         )
       ))}
-      {ar !== undefined && ar > 0 && (
-        <div className="flex justify-between px-5 py-2 border-b text-sm hover:bg-gray-50">
-          <span className="text-gray-600">Accounts Receivable (outstanding)</span>
-          <span className="font-medium text-gray-800">{formatCurrency(ar)}</span>
-        </div>
-      )}
-      {ap !== undefined && ap > 0 && (
-        <div className="flex justify-between px-5 py-2 border-b text-sm hover:bg-gray-50">
-          <span className="text-gray-600">Accounts Payable (outstanding)</span>
-          <span className="font-medium text-gray-800">{formatCurrency(ap)}</span>
-        </div>
-      )}
       <div className="flex justify-between px-5 py-2.5 bg-gray-50 font-semibold text-sm">
         <span>Total {title}</span>
         <span>{formatCurrency(total)}</span>
@@ -47,6 +37,7 @@ function Section({ title, items, ar, ap, total, color }: {
 }
 
 export default function BalanceSheetPage() {
+  const formatCurrency = useFormatCurrency()
   const [asOf, setAsOf] = useState(new Date().toISOString().split('T')[0])
   const [data, setData] = useState<BSData | null>(null)
   const [loading, setLoading] = useState(false)
@@ -86,10 +77,10 @@ export default function BalanceSheetPage() {
             <div className="px-5 py-3 border-b bg-blue-600">
               <h2 className="text-white font-bold text-base">ASSETS</h2>
             </div>
-            <Section title="Assets" items={data.assets.items} ar={data.assets.ar} total={data.assets.total + data.assets.ar} color="bg-blue-50 text-blue-700" />
+            <Section title="Assets" items={data.assets.items} total={data.assets.total} color="bg-blue-50 text-blue-700" />
             <div className="flex justify-between px-5 py-3 bg-blue-600 text-white font-bold">
               <span>TOTAL ASSETS</span>
-              <span>{formatCurrency(data.assets.total + data.assets.ar)}</span>
+              <span>{formatCurrency(data.assets.total)}</span>
             </div>
           </div>
 
@@ -98,11 +89,11 @@ export default function BalanceSheetPage() {
             <div className="px-5 py-3 border-b bg-orange-600">
               <h2 className="text-white font-bold text-base">LIABILITIES & EQUITY</h2>
             </div>
-            <Section title="Liabilities" items={data.liabilities.items} ap={data.liabilities.ap} total={data.liabilities.total + data.liabilities.ap} color="bg-orange-50 text-orange-700" />
+            <Section title="Liabilities" items={data.liabilities.items} total={data.liabilities.total} color="bg-orange-50 text-orange-700" />
             <Section title="Equity" items={data.equity.items} total={data.equity.total} color="bg-purple-50 text-purple-700" />
             <div className="flex justify-between px-5 py-3 bg-orange-600 text-white font-bold">
               <span>TOTAL LIABILITIES & EQUITY</span>
-              <span>{formatCurrency(data.totalLiabilitiesAndEquity + data.liabilities.ap)}</span>
+              <span>{formatCurrency(data.totalLiabilitiesAndEquity)}</span>
             </div>
           </div>
         </div>

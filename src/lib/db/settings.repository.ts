@@ -1,5 +1,6 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { DEFAULT_CURRENCY, normalizeCurrency } from '@/lib/currency/constants'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveCompanyId } from '@/lib/tenant'
 import { mapCompanySettingsRows } from './mappers'
@@ -64,7 +65,7 @@ export async function createCompanySettings(
       country: input.country ?? 'Saudi Arabia',
       phone: input.phone ?? null,
       email: input.email ?? null,
-      currency: input.currency ?? 'SAR',
+      currency: normalizeCurrency(input.currency ?? DEFAULT_CURRENCY),
       fiscal_year_start: input.fiscalYearStart ?? '01-01',
     })
     .select('*')
@@ -119,7 +120,7 @@ export async function updateCompanySettings(
       ? input.logoUploadedAt.toISOString()
       : null
   }
-  if (input.currency !== undefined) companyPatch.currency = input.currency
+  if (input.currency !== undefined) companyPatch.currency = normalizeCurrency(input.currency)
   if (input.fiscalYearStart !== undefined) companyPatch.fiscal_year_start = input.fiscalYearStart
 
   if (Object.keys(companyPatch).length > 0) {

@@ -1,5 +1,7 @@
 import { requireAuth } from '@/lib/auth'
+import { postInvoiceToLedger } from '@/lib/accounting/document-posting'
 import { getInvoiceRepository } from '@/lib/db/provider'
+import { resolveCompanyId } from '@/lib/tenant'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -21,15 +23,23 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     await requireAuth()
     const { id } = await params
     const body = await request.json()
+    const existing = await getInvoiceRepository().findById(id)
     const invoice = await getInvoiceRepository().update(id, {
       customerId: body.customerId,
       date: body.date,
       dueDate: body.dueDate,
+      currency: body.currency,
       lines: body.lines,
       notes: body.notes,
       terms: body.terms,
       status: body.status,
     })
+
+    if (body.status === 'SENT' && existing?.status !== 'SENT') {
+      const companyId = await resolveCompanyId()
+      await postInvoiceToLedger(id, companyId)
+    }
+
     return Response.json(invoice)
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {

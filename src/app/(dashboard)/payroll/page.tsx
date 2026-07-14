@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { Plus, RefreshCw, CheckCircle } from 'lucide-react'
-import { formatCurrency, formatDate, cn } from '@/lib/utils'
+import { formatDate, cn } from '@/lib/utils'
+import { useCompanyCurrency, useFormatCurrency } from '@/hooks/use-company-currency'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
@@ -18,6 +19,8 @@ interface PayrollEntry {
 }
 
 export default function PayrollPage() {
+  const formatCurrency = useFormatCurrency()
+  const { currency } = useCompanyCurrency()
   const [payrolls, setPayrolls] = useState<PayrollEntry[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
@@ -158,8 +161,8 @@ export default function PayrollPage() {
             </div>
           )}
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Allowances (SAR)" type="number" value={form.allowances} onChange={e => setForm({ ...form, allowances: parseFloat(e.target.value) || 0 })} />
-            <Input label="Deductions (SAR)" type="number" value={form.deductions} onChange={e => setForm({ ...form, deductions: parseFloat(e.target.value) || 0 })} />
+            <Input label={`Allowances (${currency})`} type="number" value={form.allowances} onChange={e => setForm({ ...form, allowances: parseFloat(e.target.value) || 0 })} />
+            <Input label={`Deductions (${currency})`} type="number" value={form.deductions} onChange={e => setForm({ ...form, deductions: parseFloat(e.target.value) || 0 })} />
           </div>
           <Input label="Tax Rate (%)" type="number" min="0" max="100" value={form.taxRate} onChange={e => setForm({ ...form, taxRate: parseFloat(e.target.value) || 0 })} />
           {selectedEmp && (

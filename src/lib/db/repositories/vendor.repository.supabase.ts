@@ -4,7 +4,10 @@ import type { VendorRecord } from '../entities'
 import { queryByIdOrLegacy, resolveCompanyId, supabaseDb } from '../repository-utils'
 import { resolveSequenceRepository } from '../sequence-resolver'
 import type {
+  VendorBatchDuplicateInput,
+  VendorBatchDuplicateMatch,
   VendorCreateInput,
+  VendorDuplicateCriteria,
   VendorListOptions,
   VendorRepository,
   VendorUpdateInput,
@@ -61,7 +64,7 @@ export const supabaseVendorRepository: VendorRepository = {
     if (error) throw error
 
     const vendors = (data ?? []).map(mapVendorRow)
-    if (vendors.length === 0) return vendors
+    if (vendors.length === 0 || options.includeOutstanding === false) return vendors
 
     const ids = vendors.map((v) => v.id)
     const { data: bills, error: billError } = await db
@@ -80,6 +83,137 @@ export const supabaseVendorRepository: VendorRepository = {
         .reduce((s, b) => s + Number(b.balance), 0)
       return { ...v, outstandingBalance }
     })
+  },
+
+  async findDuplicate(criteria: VendorDuplicateCriteria) {
+    const db = supabaseDb()
+    const companyId = await resolveCompanyId()
+
+    const email = criteria.email?.trim()
+    if (email) {
+      const { data, error } = await db
+        .from('vendors')
+        .select('*')
+        .eq('company_id', companyId)
+        .ilike('email', email)
+        .is('deleted_at', null)
+        .limit(1)
+        .maybeSingle()
+      if (error) throw error
+      if (data) return mapVendorRow(data)
+    }
+
+    const taxId = criteria.taxId?.trim()
+    if (taxId) {
+      const { data, error } = await db
+        .from('vendors')
+        .select('*')
+        .eq('company_id', companyId)
+        .eq('tax_id', taxId)
+        .is('deleted_at', null)
+        .limit(1)
+        .maybeSingle()
+      if (error) throw error
+      if (data) return mapVendorRow(data)
+    }
+
+    const name = criteria.name?.trim()
+    if (name) {
+      const { data, error } = await db
+        .from('vendors')
+        .select('*')
+        .eq('company_id', companyId)
+        .ilike('name', name)
+        .is('deleted_at', null)
+        .limit(1)
+        .maybeSingle()
+      if (error) throw error
+      if (data) return mapVendorRow(data)
+    }
+
+    return null
+  },
+
+  async findDuplicatesBatch(inputs: VendorBatchDuplicateInput[]) {
+    if (inputs.length === 0) return []
+
+    const db = supabaseDb()
+    const companyId = await resolveCompanyId()
+
+    const taxIds = [...new Set(inputs.map((item) => item.taxId?.trim()).filter(Boolean) as string[])]
+    const emails = [...new Set(inputs.map((item) => item.email?.trim().toLowerCase()).filter(Boolean) as string[])]
+    const names = [...new Set(inputs.map((item) => item.name?.trim().toLowerCase()).filter(Boolean) as string[])]
+
+    const byTaxId = new Map<string, VendorRecord>()
+    const byEmail = new Map<string, VendorRecord>()
+    const byName = new Map<string, VendorRecord>()
+
+    if (taxIds.length > 0) {
+      const { data, error } = await db
+        .from('vendors')
+        .select('*')
+        .eq('company_id', companyId)
+        .in('tax_id', taxIds)
+        .is('deleted_at', null)
+      if (error) throw error
+      for (const row of data ?? []) {
+        const vendor = mapVendorRow(row)
+        if (vendor.taxId) byTaxId.set(vendor.taxId, vendor)
+      }
+    }
+
+    if (emails.length > 0 || names.length > 0) {
+      const { data, error } = await db
+        .from('vendors')
+        .select('id, email, tax_id, name')
+        .eq('company_id', companyId)
+        .is('deleted_at', null)
+      if (error) throw error
+
+      const emailSet = new Set(emails)
+      const nameSet = new Set(names)
+
+      for (const row of data ?? []) {
+        const vendor = mapVendorRow(row)
+        if (vendor.email && emailSet.has(vendor.email.toLowerCase())) {
+          byEmail.set(vendor.email.toLowerCase(), vendor)
+        }
+        if (nameSet.has(vendor.name.toLowerCase())) {
+          byName.set(vendor.name.toLowerCase(), vendor)
+        }
+      }
+    }
+
+    const matches: VendorBatchDuplicateMatch[] = []
+    for (const input of inputs) {
+      const email = input.email?.trim().toLowerCase()
+      const taxId = input.taxId?.trim()
+      const name = input.name?.trim().toLowerCase()
+
+      let existing: VendorRecord | undefined
+      const matchedOn: string[] = []
+
+      if (email && byEmail.has(email)) {
+        existing = byEmail.get(email)
+        matchedOn.push('email')
+      } else if (taxId && byTaxId.has(taxId)) {
+        existing = byTaxId.get(taxId)
+        matchedOn.push('taxId')
+      } else if (name && byName.has(name)) {
+        existing = byName.get(name)
+        matchedOn.push('name')
+      }
+
+      if (existing) {
+        matches.push({
+          rowNumber: input.rowNumber,
+          existingId: existing.id,
+          matchedOn: matchedOn.length ? matchedOn : ['name'],
+        })
+      }
+    }
+
+    return matches
   },
 
   async findById(id: string) {
@@ -123,6 +257,7 @@ export const supabaseVendorRepository: VendorRepository = {
         country: input.country ?? null,
         tax_id: input.taxId ?? null,
         payment_terms: input.paymentTerms ?? 30,
+        is_active: input.isActive ?? true,
       })
       .select('*')
       .single()

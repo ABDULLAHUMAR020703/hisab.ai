@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { Upload, Camera, RefreshCw, FileImage } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useFormatCurrency } from '@/hooks/use-company-currency'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/ui/page-header'
@@ -15,6 +16,7 @@ interface Receipt {
 }
 
 export default function ReceiptsPage() {
+  const formatCurrency = useFormatCurrency()
   const [receipts, setReceipts] = useState<Receipt[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
@@ -126,7 +128,7 @@ export default function ReceiptsPage() {
               <div className="p-3">
                 <p className="text-xs font-semibold text-slate-700 truncate">{r.fileName}</p>
                 {r.vendor && <p className="text-xs text-slate-500 mt-0.5">{r.vendor}</p>}
-                {r.amount && <p className="text-xs font-bold text-indigo-600 mt-1">{r.amount?.toLocaleString('en-SA', { style: 'currency', currency: 'SAR' })}</p>}
+                {r.amount && <p className="text-xs font-bold text-indigo-600 mt-1">{formatCurrency(r.amount)}</p>}
                 <div className="mt-2">
                   <Badge status={r.status} />
                 </div>

@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { Plus, RefreshCw, Send, DollarSign, RotateCcw, Eye, Shield, FileDown, FileMinus, FilePlus, ChevronLeft, ChevronRight, Edit2 } from 'lucide-react'
-import { formatDate, formatCurrency, cn } from '@/lib/utils'
+import { formatDate, formatCurrency as formatAmount, cn } from '@/lib/utils'
+import { useCompanyCurrency, useFormatCurrency } from '@/hooks/use-company-currency'
+import { ALLOWED_CURRENCIES } from '@/lib/currency/constants'
 import { readApiError } from '@/lib/api-client'
 import { BusinessBadge, ZatcaBadge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -24,6 +26,7 @@ interface InvoiceLine { description: string; quantity: number; unitPrice: number
 interface Invoice {
   id: string; invoiceNo: string; customer: { name: string }; date: string; dueDate: string
   total: number; balance: number; amountPaid: number; status: string; isRecurring: boolean
+  currency?: string
   invoiceType?: string; zatcaStatus?: string; referencedInvoiceNo?: string | null
 }
 
@@ -46,6 +49,8 @@ const STATUSES = ['DRAFT', 'SENT', 'PAID', 'PARTIAL', 'OVERDUE']
 const EMPTY_LINE: InvoiceLine = { description: '', quantity: 1, unitPrice: 0, taxRate: 15, accountId: '' }
 
 export default function InvoicesPage() {
+  const formatPrimary = useFormatCurrency()
+  const { currency: primaryCurrency, isSaudi } = useCompanyCurrency()
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [listTotal, setListTotal] = useState(0)
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -70,7 +75,7 @@ export default function InvoicesPage() {
   const [saving, setSaving] = useState(false)
   const [showAdjustmentModal, setShowAdjustmentModal] = useState(false)
   const [adjustmentType, setAdjustmentType] = useState<'CREDIT_NOTE' | 'DEBIT_NOTE'>('CREDIT_NOTE')
-  const [adjustmentSource, setAdjustmentSource] = useState<{ id: string; invoiceNo: string } | null>(null)
+  const [adjustmentSource, setAdjustmentSource] = useState<{ id: string; invoiceNo: string; currency?: string } | null>(null)
   const [adjustmentForm, setAdjustmentForm] = useState({
     date: new Date().toISOString().split('T')[0],
     dueDate: '',
@@ -81,6 +86,7 @@ export default function InvoicesPage() {
   const [form, setForm] = useState({
     customerId: '', date: new Date().toISOString().split('T')[0],
     dueDate: '', notes: '', terms: 'Net 30', isRecurring: false,
+    currency: 'SAR',
     lines: [{ ...EMPTY_LINE }]
   })
   const [payForm, setPayForm] = useState({
@@ -170,6 +176,11 @@ export default function InvoicesPage() {
   const subtotal = form.lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0)
   const taxAmount = form.lines.reduce((s, l) => s + l.quantity * l.unitPrice * (l.taxRate / 100), 0)
   const total = subtotal + taxAmount
+  const formatFormAmount = (amount: number) => formatAmount(amount, form.currency)
+
+  function formatInvoiceAmount(invoice: Pick<Invoice, 'total' | 'balance' | 'amountPaid' | 'currency'>, amount: number) {
+    return formatAmount(amount, invoice.currency ?? primaryCurrency)
+  }
 
   async function handleSave() {
     if (isFutureInvoiceDate(form.date)) {
@@ -226,8 +237,8 @@ export default function InvoicesPage() {
     setShowViewModal(true)
     const [detailRes, statusRes, qrRes] = await Promise.all([
       fetch(`/api/invoices/${inv.id}`),
-      fetch(`/api/zatca/invoices/${inv.id}/status`),
-      fetch(`/api/zatca/invoices/${inv.id}/qr`),
+      isSaudi ? fetch(`/api/zatca/invoices/${inv.id}/status`) : Promise.resolve(null),
+      isSaudi ? fetch(`/api/zatca/invoices/${inv.id}/qr`) : Promise.resolve(null),
     ])
     if (detailRes.ok) {
       const full = await detailRes.json()
@@ -239,9 +250,9 @@ export default function InvoicesPage() {
     } else {
       setSelectedInvoice(inv)
     }
-    if (statusRes.ok) setZatcaStatus(await statusRes.json())
+    if (statusRes?.ok) setZatcaStatus(await statusRes.json())
     else setZatcaStatus(null)
-    if (qrRes.ok) {
+    if (qrRes?.ok) {
       const qr = await qrRes.json()
       setQrPreview(qr.qrDataUrl ?? null)
     }
@@ -290,6 +301,7 @@ export default function InvoicesPage() {
       notes: '',
       terms: 'Net 30',
       isRecurring: false,
+      currency: primaryCurrency,
       lines: [{ ...EMPTY_LINE }],
     })
   }
@@ -321,6 +333,7 @@ export default function InvoicesPage() {
       customerId: full.customerId ?? '',
       date: toDateInputValue(full.date),
       dueDate: toDateInputValue(full.dueDate),
+      currency: full.currency ?? primaryCurrency,
       notes: full.notes ?? '',
       terms: full.terms ?? 'Net 30',
       isRecurring: full.isRecurring ?? false,
@@ -366,10 +379,14 @@ export default function InvoicesPage() {
   }
 
   function canCreateAdjustment(inv: Invoice | null, status: ZatcaInvoiceStatus | null) {
-    if (!inv || !status) return false
+    if (!inv) return false
     const type = inv.invoiceType ?? 'STANDARD'
     if (type !== 'STANDARD' && type !== 'SIMPLIFIED') return false
-    return status.zatcaStatus === 'CLEARED' || status.zatcaStatus === 'REPORTED'
+    if (isSaudi) {
+      if (!status) return false
+      return status.zatcaStatus === 'CLEARED' || status.zatcaStatus === 'REPORTED'
+    }
+    return ['SENT', 'PARTIAL', 'PAID', 'OVERDUE'].includes(computeDisplayBusinessStatus(inv))
   }
 
   function updateAdjustmentLine(idx: number, field: string, value: string | number) {
@@ -381,7 +398,7 @@ export default function InvoicesPage() {
 
   async function openAdjustment(type: 'CREDIT_NOTE' | 'DEBIT_NOTE', inv: Invoice) {
     setAdjustmentType(type)
-    setAdjustmentSource({ id: inv.id, invoiceNo: inv.invoiceNo })
+    setAdjustmentSource({ id: inv.id, invoiceNo: inv.invoiceNo, currency: inv.currency })
     const res = await fetch(`/api/invoices/${inv.id}`)
     if (!res.ok) {
       alert(await readApiError(res))
@@ -445,11 +462,18 @@ export default function InvoicesPage() {
     totalValue: invoices.reduce((s, i) => s + i.total, 0),
   }
 
+  const adjustmentCurrency = adjustmentSource?.currency ?? primaryCurrency
+  const formatAdjustmentAmount = (amount: number) => formatAmount(amount, adjustmentCurrency)
+
+  const invoiceTableHeaders = isSaudi
+    ? ['Invoice #', 'Customer', 'Date', 'Due Date', 'Total', 'Paid', 'Balance', 'Business', 'ZATCA', '']
+    : ['Invoice #', 'Customer', 'Date', 'Due Date', 'Total', 'Paid', 'Balance', 'Business', '']
+
   return (
     <div className="p-6 max-w-[1600px] mx-auto space-y-4">
       <PageHeader
         title="Invoices"
-        subtitle={`${stats.total} invoices · ${formatCurrency(stats.totalValue)} total`}
+        subtitle={`${stats.total} invoices · ${formatPrimary(stats.totalValue)} total`}
         breadcrumb={[{ label: 'Income' }, { label: 'Invoices' }]}
         action={
           <Button onClick={openCreate}>
@@ -464,7 +488,7 @@ export default function InvoicesPage() {
           { label: 'Total Invoices', value: stats.total, color: 'text-slate-700' },
           { label: 'Paid', value: stats.paid, color: 'text-emerald-600' },
           { label: 'Outstanding', value: stats.outstanding, color: 'text-amber-600' },
-          { label: 'Total Value', value: formatCurrency(stats.totalValue), color: 'text-indigo-600' },
+          { label: 'Total Value', value: formatPrimary(stats.totalValue), color: 'text-indigo-600' },
         ].map(s => (
           <div key={s.label} className="bg-white rounded-xl border border-slate-200 px-4 py-3">
             <p className="text-xs text-slate-400 font-medium">{s.label}</p>
@@ -500,7 +524,7 @@ export default function InvoicesPage() {
           <table className="w-full data-table">
             <thead>
               <tr className="border-b border-slate-100">
-                {['Invoice #', 'Customer', 'Date', 'Due Date', 'Total', 'Paid', 'Balance', 'Business', 'ZATCA', ''].map((h, i) => (
+                {invoiceTableHeaders.map((h, i) => (
                   <th key={i} className={cn(
                     'px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap',
                     ['Total', 'Paid', 'Balance'].includes(h) ? 'text-right' : 'text-left',
@@ -513,13 +537,13 @@ export default function InvoicesPage() {
               {loading ? (
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i}>
-                    {Array.from({ length: 10 }).map((_, j) => (
+                    {Array.from({ length: invoiceTableHeaders.length }).map((_, j) => (
                       <td key={j} className="px-4 py-3"><div className="skeleton h-4 rounded" /></td>
                     ))}
                   </tr>
                 ))
               ) : invoices.length === 0 ? (
-                <tr><td colSpan={10} className="px-4 py-16 text-center text-slate-400 text-sm">No invoices found</td></tr>
+                <tr><td colSpan={invoiceTableHeaders.length} className="px-4 py-16 text-center text-slate-400 text-sm">No invoices found</td></tr>
               ) : invoices.map(inv => (
                 <tr key={inv.id} className="hover:bg-slate-50/60 transition-colors">
                   <td className="px-4 py-3">
@@ -532,19 +556,21 @@ export default function InvoicesPage() {
                   <td className="px-4 py-3 text-sm text-slate-700 font-medium">{inv.customer.name}</td>
                   <td className="px-4 py-3 text-xs text-slate-500">{formatDate(inv.date)}</td>
                   <td className="px-4 py-3 text-xs text-slate-500">{formatDate(inv.dueDate)}</td>
-                  <td className="px-4 py-3 text-right text-sm font-semibold text-slate-900 tabular">{formatCurrency(inv.total)}</td>
-                  <td className="px-4 py-3 text-right text-xs text-emerald-600 font-medium tabular">{formatCurrency(inv.amountPaid)}</td>
+                  <td className="px-4 py-3 text-right text-sm font-semibold text-slate-900 tabular">{formatInvoiceAmount(inv, inv.total)}</td>
+                  <td className="px-4 py-3 text-right text-xs text-emerald-600 font-medium tabular">{formatInvoiceAmount(inv, inv.amountPaid)}</td>
                   <td className="px-4 py-3 text-right">
                     <span className={cn('text-xs font-semibold tabular', inv.balance > 0 ? 'text-amber-600' : 'text-slate-300')}>
-                      {inv.balance > 0 ? formatCurrency(inv.balance) : '—'}
+                      {inv.balance > 0 ? formatInvoiceAmount(inv, inv.balance) : '—'}
                     </span>
                   </td>
                   <td className="px-4 py-3">
                     <BusinessBadge status={computeDisplayBusinessStatus(inv)} />
                   </td>
+                  {isSaudi && (
                   <td className="px-4 py-3">
                     <ZatcaBadge status={inv.zatcaStatus ?? 'DRAFT'} />
                   </td>
+                  )}
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
                       <button onClick={() => openView(inv)}
@@ -592,7 +618,9 @@ export default function InvoicesPage() {
         open={showModal}
         onClose={() => { setShowModal(false); resetInvoiceForm() }}
         title={editingInvoiceId ? 'Edit Invoice' : 'New Invoice'}
-        subtitle={editingInvoiceId ? 'Update invoice details before ZATCA submission' : 'Create a new customer invoice'}
+        subtitle={editingInvoiceId
+          ? (isSaudi ? 'Update invoice details before ZATCA submission' : 'Update invoice details')
+          : 'Create a new customer invoice'}
         size="xl"
         footer={
           <>
@@ -625,7 +653,15 @@ export default function InvoicesPage() {
               }}
             />
             <Input label="Due Date" type="date" required value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })} />
+            <Select label="Currency" required value={form.currency} onChange={e => setForm({ ...form, currency: e.target.value })}>
+              {ALLOWED_CURRENCIES.map((entry) => (
+                <option key={entry.code} value={entry.code}>{entry.code} — {entry.name}</option>
+              ))}
+            </Select>
           </div>
+          <p className="text-xs text-slate-400 -mt-3">
+            Defaults to your company primary currency ({primaryCurrency}). Changing this affects only this invoice.
+          </p>
 
           {/* Lines */}
           <div>
@@ -671,7 +707,7 @@ export default function InvoicesPage() {
                           className="input-base text-xs py-1.5 text-right" />
                       </td>
                       <td className="px-3 py-2 text-right text-sm font-semibold text-slate-700 tabular whitespace-nowrap">
-                        {formatCurrency(line.quantity * line.unitPrice * (1 + line.taxRate / 100))}
+                        {formatFormAmount(line.quantity * line.unitPrice * (1 + line.taxRate / 100))}
                       </td>
                       <td className="px-2 py-2 text-center">
                         <button onClick={() => setForm(f => ({ ...f, lines: f.lines.filter((_, i) => i !== idx) }))}
@@ -687,15 +723,15 @@ export default function InvoicesPage() {
               <div className="bg-slate-50 border-t border-slate-200 px-4 py-3 flex flex-col items-end gap-1">
                 <div className="flex gap-8 text-sm">
                   <span className="text-slate-500">Subtotal:</span>
-                  <span className="font-medium text-slate-700 tabular w-28 text-right">{formatCurrency(subtotal)}</span>
+                  <span className="font-medium text-slate-700 tabular w-28 text-right">{formatFormAmount(subtotal)}</span>
                 </div>
                 <div className="flex gap-8 text-sm">
                   <span className="text-slate-500">VAT:</span>
-                  <span className="font-medium text-slate-700 tabular w-28 text-right">{formatCurrency(taxAmount)}</span>
+                  <span className="font-medium text-slate-700 tabular w-28 text-right">{formatFormAmount(taxAmount)}</span>
                 </div>
                 <div className="flex gap-8 text-base font-bold border-t border-slate-200 pt-1 mt-1">
                   <span className="text-slate-800">Total:</span>
-                  <span className="text-indigo-600 tabular w-28 text-right">{formatCurrency(total)}</span>
+                  <span className="text-indigo-600 tabular w-28 text-right">{formatFormAmount(total)}</span>
                 </div>
               </div>
             </div>
@@ -757,7 +793,7 @@ export default function InvoicesPage() {
                 </Button>
               )}
               <Button variant="outline" size="sm" onClick={() => setShowViewModal(false)}>Close</Button>
-              {zatcaStatus?.canSubmit && (
+              {isSaudi && zatcaStatus?.canSubmit && (
                 <Button size="sm" onClick={handleZatcaSubmit} loading={submittingZatca}>
                   <Shield size={14} /> Submit to ZATCA
                 </Button>
@@ -770,7 +806,9 @@ export default function InvoicesPage() {
           <div className="space-y-5">
             <div className="flex flex-wrap gap-2">
               <BusinessBadge status={computeDisplayBusinessStatus(selectedInvoice)} />
-              <ZatcaBadge status={zatcaStatus?.zatcaStatus ?? selectedInvoice.zatcaStatus ?? 'DRAFT'} />
+              {isSaudi && (
+                <ZatcaBadge status={zatcaStatus?.zatcaStatus ?? selectedInvoice.zatcaStatus ?? 'DRAFT'} />
+              )}
               <span className="badge bg-slate-50 text-slate-600 border border-slate-200">{formatInvoiceTypeLabel(selectedInvoice.invoiceType)}</span>
             </div>
             <div className="grid grid-cols-2 gap-3 text-sm">
@@ -781,8 +819,9 @@ export default function InvoicesPage() {
               {selectedInvoice.referencedInvoiceNo && (
                 <div><p className="text-xs text-slate-400">References</p><p className="font-medium">{selectedInvoice.referencedInvoiceNo}</p></div>
               )}
-              <div><p className="text-xs text-slate-400">Total</p><p className="font-semibold text-indigo-600">{formatCurrency(selectedInvoice.total)}</p></div>
-              <div><p className="text-xs text-slate-400">Balance</p><p className="font-medium">{formatCurrency(selectedInvoice.balance)}</p></div>
+              <div><p className="text-xs text-slate-400">Currency</p><p className="font-medium">{selectedInvoice.currency ?? primaryCurrency}</p></div>
+              <div><p className="text-xs text-slate-400">Total</p><p className="font-semibold text-indigo-600">{formatInvoiceAmount(selectedInvoice, selectedInvoice.total)}</p></div>
+              <div><p className="text-xs text-slate-400">Balance</p><p className="font-medium">{formatInvoiceAmount(selectedInvoice, selectedInvoice.balance)}</p></div>
             </div>
 
             {canCreateAdjustment(selectedInvoice, zatcaStatus) && (
@@ -790,7 +829,9 @@ export default function InvoicesPage() {
                 <div>
                   <h3 className="font-semibold text-slate-800">Adjustments</h3>
                   <p className="text-xs text-slate-500 mt-1">
-                    Create a ZATCA credit or debit note linked to this invoice via BillingReference.
+                    {isSaudi
+                      ? 'Create a ZATCA credit or debit note linked to this invoice via BillingReference.'
+                      : 'Create a credit or debit note linked to this invoice.'}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -804,6 +845,7 @@ export default function InvoicesPage() {
               </div>
             )}
 
+            {isSaudi && (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
               <div className="flex items-center gap-2">
                 <Shield size={16} className="text-emerald-600" />
@@ -859,6 +901,7 @@ export default function InvoicesPage() {
               {zatcaMsg && <p className="text-sm text-emerald-600">{zatcaMsg}</p>}
               {zatcaErr && <p className="text-sm text-red-600">{zatcaErr}</p>}
             </div>
+            )}
           </div>
         )}
       </Modal>
@@ -921,7 +964,7 @@ export default function InvoicesPage() {
                           className="input-base text-xs py-1.5 text-right" />
                       </td>
                       <td className="px-3 py-2 text-right text-sm font-semibold text-slate-700 tabular whitespace-nowrap">
-                        {formatCurrency(line.quantity * line.unitPrice * (1 + line.taxRate / 100))}
+                        {formatFormAmount(line.quantity * line.unitPrice * (1 + line.taxRate / 100))}
                       </td>
                       <td className="px-2 py-2 text-center">
                         <button onClick={() => setAdjustmentForm(f => ({ ...f, lines: f.lines.filter((_, i) => i !== idx) }))}
@@ -936,15 +979,15 @@ export default function InvoicesPage() {
               <div className="bg-slate-50 border-t border-slate-200 px-4 py-3 flex flex-col items-end gap-1">
                 <div className="flex gap-8 text-sm">
                   <span className="text-slate-500">Subtotal:</span>
-                  <span className="font-medium text-slate-700 tabular w-28 text-right">{formatCurrency(adjustmentSubtotal)}</span>
+                  <span className="font-medium text-slate-700 tabular w-28 text-right">{formatAdjustmentAmount(adjustmentSubtotal)}</span>
                 </div>
                 <div className="flex gap-8 text-sm">
                   <span className="text-slate-500">VAT:</span>
-                  <span className="font-medium text-slate-700 tabular w-28 text-right">{formatCurrency(adjustmentTax)}</span>
+                  <span className="font-medium text-slate-700 tabular w-28 text-right">{formatAdjustmentAmount(adjustmentTax)}</span>
                 </div>
                 <div className="flex gap-8 text-base font-bold border-t border-slate-200 pt-1 mt-1">
                   <span className="text-slate-800">Total:</span>
-                  <span className="text-indigo-600 tabular w-28 text-right">{formatCurrency(adjustmentTotal)}</span>
+                  <span className="text-indigo-600 tabular w-28 text-right">{formatAdjustmentAmount(adjustmentTotal)}</span>
                 </div>
               </div>
             </div>
@@ -966,7 +1009,7 @@ export default function InvoicesPage() {
         open={showPayModal}
         onClose={() => setShowPayModal(false)}
         title="Record Payment"
-        subtitle={selectedInvoice ? `${selectedInvoice.invoiceNo} · Balance: ${formatCurrency(selectedInvoice.balance)}` : ''}
+        subtitle={selectedInvoice ? `${selectedInvoice.invoiceNo} · Balance: ${formatInvoiceAmount(selectedInvoice, selectedInvoice.balance)}` : ''}
         size="sm"
         footer={
           <>

@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { Input } from '@/components/ui/input'
 import { PageHeader, SearchBar, FilterBar } from '@/components/ui/page-header'
+import { ModuleImportExportToolbar } from '@/components/import-export/ModuleImportExportToolbar'
+import { VENDOR_FIELDS } from '@/lib/import-export/registry/modules/vendors.fields'
 import { readApiError } from '@/lib/api-client'
 
 interface Vendor {
@@ -75,7 +77,18 @@ export default function VendorsPage() {
         title="Vendors & Suppliers"
         subtitle={`${vendors.length} vendors`}
         breadcrumb={[{ label: 'Expenses' }, { label: 'Vendors' }]}
-        action={<Button onClick={openCreate}><Plus size={15} /> New Vendor</Button>}
+        action={(
+          <div className="flex items-center gap-2">
+            <ModuleImportExportToolbar
+              moduleKey="vendors"
+              moduleLabel="Vendors"
+              fields={VENDOR_FIELDS}
+              filters={search ? { search } : {}}
+              onImportSuccess={load}
+            />
+            <Button onClick={openCreate}><Plus size={15} /> New Vendor</Button>
+          </div>
+        )}
       />
 
       <FilterBar>

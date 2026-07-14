@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { Plus, Search, Check, AlertCircle, Upload } from 'lucide-react'
-import { formatDate, formatCurrency } from '@/lib/utils'
+import { formatDate } from '@/lib/utils'
+import { useFormatCurrency } from '@/hooks/use-company-currency'
 import { CsvImportModal } from '@/components/ui/csv-import-modal'
 import { readApiError } from '@/lib/api-client'
 
@@ -25,6 +26,7 @@ const STATUS_COLORS: Record<string, string> = {
 const EMPTY_LINE: JournalLine = { accountId: '', costCenterId: '', description: '', debit: 0, credit: 0, taxRate: 0 }
 
 export default function JournalPage() {
+  const formatCurrency = useFormatCurrency()
   const [entries, setEntries] = useState<JournalEntry[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [costCenters, setCostCenters] = useState<CostCenter[]>([])

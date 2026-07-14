@@ -2,11 +2,14 @@
 
 import { useEffect, useState } from 'react'
 import { Plus, RefreshCw, Edit2, AlertTriangle } from 'lucide-react'
-import { formatCurrency, cn } from '@/lib/utils'
+import { cn } from '@/lib/utils'
+import { useCompanyCurrency, useFormatCurrency } from '@/hooks/use-company-currency'
 import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { Input } from '@/components/ui/input'
 import { PageHeader, SearchBar, FilterBar } from '@/components/ui/page-header'
+import { ModuleImportExportToolbar } from '@/components/import-export/ModuleImportExportToolbar'
+import { INVENTORY_FIELDS } from '@/lib/import-export/registry/modules/inventory.fields'
 import { readApiError } from '@/lib/api-client'
 
 interface InventoryItem {
@@ -15,6 +18,8 @@ interface InventoryItem {
 }
 
 export default function InventoryPage() {
+  const formatCurrency = useFormatCurrency()
+  const { currency } = useCompanyCurrency()
   const [items, setItems] = useState<InventoryItem[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
@@ -71,7 +76,18 @@ export default function InventoryPage() {
         title="Inventory"
         subtitle={`${items.length} items · ${formatCurrency(totalValue)} total value`}
         breadcrumb={[{ label: 'Operations' }, { label: 'Inventory' }]}
-        action={<Button onClick={openCreate}><Plus size={15} /> New Item</Button>}
+        action={(
+          <div className="flex items-center gap-2">
+            <ModuleImportExportToolbar
+              moduleKey="inventory"
+              moduleLabel="Inventory"
+              fields={INVENTORY_FIELDS}
+              filters={search ? { search } : {}}
+              onImportSuccess={load}
+            />
+            <Button onClick={openCreate}><Plus size={15} /> New Item</Button>
+          </div>
+        )}
       />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -154,8 +170,8 @@ export default function InventoryPage() {
             <Input label="Unit" value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })} placeholder="PCS, KG, L, M..." />
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <Input label="Cost Price (SAR)" type="number" value={form.costPrice} onChange={e => setForm({ ...form, costPrice: parseFloat(e.target.value) || 0 })} />
-            <Input label="Sale Price (SAR)" type="number" value={form.salePrice} onChange={e => setForm({ ...form, salePrice: parseFloat(e.target.value) || 0 })} />
+            <Input label={`Cost Price (${currency})`} type="number" value={form.costPrice} onChange={e => setForm({ ...form, costPrice: parseFloat(e.target.value) || 0 })} />
+            <Input label={`Sale Price (${currency})`} type="number" value={form.salePrice} onChange={e => setForm({ ...form, salePrice: parseFloat(e.target.value) || 0 })} />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <Input label="Current Quantity" type="number" value={form.quantity} onChange={e => setForm({ ...form, quantity: parseFloat(e.target.value) || 0 })} />

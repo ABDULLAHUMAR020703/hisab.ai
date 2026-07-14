@@ -1,9 +1,18 @@
 ﻿'use client'
 
 import Link from 'next/link'
-import { BarChart3, TrendingUp, Scale, Activity, BookOpen, ArrowRight } from 'lucide-react'
+import { BarChart3, TrendingUp, Scale, Activity, BookOpen, ArrowRight, ListChecks, LayoutGrid, Wand2 } from 'lucide-react'
 
 const REPORTS = [
+  {
+    title: 'Trial Balance',
+    description: 'Debit and credit totals for all accounts — verify books balance',
+    href: '/reports/trial-balance',
+    icon: ListChecks,
+    color: 'from-amber-500 to-amber-600',
+    bg: 'bg-amber-50',
+    iconColor: 'text-amber-600',
+  },
   {
     title: 'Profit & Loss',
     description: 'Income vs expenses, net profit or loss for any period',
@@ -40,6 +49,54 @@ const REPORTS = [
     bg: 'bg-sky-50',
     iconColor: 'text-sky-600',
   },
+  {
+    title: 'Aged AR',
+    description: 'Outstanding receivables by aging bucket',
+    href: '/reports/aged-ar',
+    icon: BarChart3,
+    color: 'from-rose-500 to-rose-600',
+    bg: 'bg-rose-50',
+    iconColor: 'text-rose-600',
+  },
+  {
+    title: 'Aged AP',
+    description: 'Outstanding payables by aging bucket',
+    href: '/reports/aged-ap',
+    icon: BarChart3,
+    color: 'from-orange-500 to-orange-600',
+    bg: 'bg-orange-50',
+    iconColor: 'text-orange-600',
+  },
+]
+
+const ENTERPRISE = [
+  {
+    title: 'Enterprise Reports',
+    description: '40+ financial, operational, and analytics reports with export',
+    href: '/reports/enterprise',
+    icon: LayoutGrid,
+    color: 'from-violet-500 to-purple-600',
+    bg: 'bg-violet-50',
+    iconColor: 'text-violet-600',
+  },
+  {
+    title: 'Executive Analytics',
+    description: 'KPIs, trends, turnover ratios, and working capital',
+    href: '/reports/analytics',
+    icon: BarChart3,
+    color: 'from-cyan-500 to-cyan-600',
+    bg: 'bg-cyan-50',
+    iconColor: 'text-cyan-600',
+  },
+  {
+    title: 'Report Builder',
+    description: 'Custom reports with grouping, formulas, and saved layouts',
+    href: '/reports/builder',
+    icon: Wand2,
+    color: 'from-fuchsia-500 to-fuchsia-600',
+    bg: 'bg-fuchsia-50',
+    iconColor: 'text-fuchsia-600',
+  },
 ]
 
 export default function ReportsPage() {
@@ -68,6 +125,29 @@ export default function ReportsPage() {
             </Link>
           )
         })}
+      </div>
+
+      <div>
+        <h2 className="text-lg font-semibold text-slate-900 mb-3">Enterprise Reporting</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+          {ENTERPRISE.map(r => {
+            const Icon = r.icon
+            return (
+              <Link key={r.href} href={r.href}
+                className="group bg-white rounded-2xl border border-slate-200 shadow-sm p-6 hover:shadow-md hover:border-violet-200 transition-all duration-200"
+              >
+                <div className={`w-12 h-12 rounded-2xl ${r.bg} flex items-center justify-center mb-4`}>
+                  <Icon size={22} className={r.iconColor} />
+                </div>
+                <h3 className="font-semibold text-slate-900 mb-1.5 group-hover:text-violet-600 transition-colors">{r.title}</h3>
+                <p className="text-sm text-slate-500 leading-relaxed mb-4">{r.description}</p>
+                <div className="flex items-center text-xs font-semibold text-violet-600 group-hover:gap-2 gap-1 transition-all">
+                  Open <ArrowRight size={13} />
+                </div>
+              </Link>
+            )
+          })}
+        </div>
       </div>
 
       <div className="bg-gradient-to-br from-indigo-50 to-violet-50 rounded-2xl border border-indigo-100 p-6">

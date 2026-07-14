@@ -1,0 +1,101 @@
+Name,Item Code,Description,Category,Unit,Cost Price,Sale Price,Quantity,Min Quantity,Active
+Dell Latitude 5540 Laptop,SKU-10000,Commercial hardware offering,Hardware,PCS,3863.98,5367.03,332,15,true
+HP LaserJet Pro M404dn,SKU-10001,Commercial hardware offering,Hardware,PCS,1185.12,1690.86,390,17,true
+Cisco Catalyst 9200 Switch,SKU-10002,Commercial hardware offering,Hardware,PCS,4127.46,5271.1,350,15,true
+Microsoft 365 Business Premium,SKU-10003,Professional software offering,Software,LIC,305.46,396.77,389,24,true
+Adobe Creative Cloud Team,SKU-10004,Professional software offering,Software,LIC,2105.32,2888.66,250,11,true
+Annual IT Support Contract,SKU-10005,Professional services offering,Services,YR,2132.07,2663.9,258,21,true
+Cloud Hosting — AWS EC2,SKU-10006,Professional services offering,Services,MO,1708.4,2410.92,429,24,true
+Office Ergonomic Chair,SKU-10007,Commercial furniture offering,Furniture,PCS,628.41,871.05,268,17,true
+A4 Copy Paper (500 sheets),SKU-10008,Commercial supplies offering,Supplies,RM,2619.32,3514.76,47,17,true
+ZATCA E-Invoicing Integration,SKU-10009,Professional services offering,Services,MO,2214.33,2845,421,22,true
+"Samsung 27"" Monitor",SKU-10010,Commercial hardware offering,Hardware,PCS,4989.76,6965.9,407,16,true
+Network Cabling — Cat6 per meter,SKU-10011,Commercial hardware offering,Hardware,M,4369.54,5106.85,349,7,true
+Dell Latitude 5540 Laptop — Variant 2,SKU-10012,Commercial hardware offering,Hardware,PCS,4450.22,6227.27,126,16,true
+HP LaserJet Pro M404dn — Variant 2,SKU-10013,Commercial hardware offering,Hardware,PCS,4549.64,5786.95,496,5,true
+Cisco Catalyst 9200 Switch — Variant 2,SKU-10014,Commercial hardware offering,Hardware,PCS,2432.3,3439.42,75,12,true
+Microsoft 365 Business Premium — Variant 2,SKU-10015,Professional software offering,Software,LIC,4414.66,6566.16,81,6,true
+Adobe Creative Cloud Team — Variant 2,SKU-10016,Professional software offering,Software,LIC,1803.43,2285.07,113,17,true
+Annual IT Support Contract — Variant 2,SKU-10017,Professional services offering,Services,YR,4370.02,5676.49,336,5,true
+Cloud Hosting — AWS EC2 — Variant 2,SKU-10018,Professional services offering,Services,MO,2814.18,3972.49,89,11,true
+Office Ergonomic Chair — Variant 2,SKU-10019,Commercial furniture offering,Furniture,PCS,3420.11,4783.58,37,16,true
+A4 Copy Paper (500 sheets) — Variant 2,SKU-10020,Commercial supplies offering,Supplies,RM,4357.99,5550.92,138,23,true
+ZATCA E-Invoicing Integration — Variant 2,SKU-10021,Professional services offering,Services,MO,4334.24,6012.71,303,10,true
+"Samsung 27"" Monitor — Variant 2",SKU-10022,Commercial hardware offering,Hardware,PCS,543.44,751.67,249,18,true
+Network Cabling — Cat6 per meter — Variant 2,SKU-10023,Commercial hardware offering,Hardware,M,4125.21,5197.42,190,21,true
+Dell Latitude 5540 Laptop — Variant 3,SKU-10024,Commercial hardware offering,Hardware,PCS,2579.05,3193.68,118,14,true
+HP LaserJet Pro M404dn — Variant 3,SKU-10025,Commercial hardware offering,Hardware,PCS,4840.31,6902.29,53,15,true
+Cisco Catalyst 9200 Switch — Variant 3,SKU-10026,Commercial hardware offering,Hardware,PCS,970.49,1267.32,282,12,true
+Microsoft 365 Business Premium — Variant 3,SKU-10027,Professional software offering,Software,LIC,4664.82,5892.93,200,11,true
+Adobe Creative Cloud Team — Variant 3,SKU-10028,Professional software offering,Software,LIC,3030.41,4407.96,34,15,true
+Annual IT Support Contract — Variant 3,SKU-10029,Professional services offering,Services,YR,4338.03,6318.11,318,22,true
+Cloud Hosting — AWS EC2 — Variant 3,SKU-10030,Professional services offering,Services,MO,700.64,997.49,122,7,true
+Office Ergonomic Chair — Variant 3,SKU-10031,Commercial furniture offering,Furniture,PCS,3881.78,5318.71,189,7,true
+A4 Copy Paper (500 sheets) — Variant 3,SKU-10032,Commercial supplies offering,Supplies,RM,3687,4518.05,219,23,true
+ZATCA E-Invoicing Integration — Variant 3,SKU-10033,Professional services offering,Services,MO,4641.44,5831.16,183,6,true
+"Samsung 27"" Monitor — Variant 3",SKU-10034,Commercial hardware offering,Hardware,PCS,2906.56,4307.52,192,23,true
+Network Cabling — Cat6 per meter — Variant 3,SKU-10035,Commercial hardware offering,Hardware,M,1639.44,2042.3,30,7,true
+Dell Latitude 5540 Laptop — Variant 4,SKU-10036,Commercial hardware offering,Hardware,PCS,4247.39,5297.27,132,11,true
+HP LaserJet Pro M404dn — Variant 4,SKU-10037,Commercial hardware offering,Hardware,PCS,1241.32,1643.78,375,8,true
+Cisco Catalyst 9200 Switch — Variant 4,SKU-10038,Commercial hardware offering,Hardware,PCS,2640.83,3596.4,185,8,true
+Microsoft 365 Business Premium — Variant 4,SKU-10039,Professional software offering,Software,LIC,4134.18,5139.17,119,16,true
+Adobe Creative Cloud Team — Variant 4,SKU-10040,Professional software offering,Software,LIC,1446.27,2088.71,145,17,true
+Annual IT Support Contract — Variant 4,SKU-10041,Professional services offering,Services,YR,3617.75,5115.25,34,11,true
+Cloud Hosting — AWS EC2 — Variant 4,SKU-10042,Professional services offering,Services,MO,2148.4,2931.11,346,10,true
+Office Ergonomic Chair — Variant 4,SKU-10043,Commercial furniture offering,Furniture,PCS,4207.87,5418.95,164,9,true
+A4 Copy Paper (500 sheets) — Variant 4,SKU-10044,Commercial supplies offering,Supplies,RM,4366.97,5471.78,320,7,true
+ZATCA E-Invoicing Integration — Variant 4,SKU-10045,Professional services offering,Services,MO,552.53,645.83,4,17,true
+"Samsung 27"" Monitor — Variant 4",SKU-10046,Commercial hardware offering,Hardware,PCS,1179.08,1703.75,251,17,true
+Network Cabling — Cat6 per meter — Variant 4,SKU-10047,Commercial hardware offering,Hardware,M,1660.38,1929.76,463,16,true
+Dell Latitude 5540 Laptop — Variant 5,SKU-10048,Commercial hardware offering,Hardware,PCS,4753.94,6212.02,194,5,true
+HP LaserJet Pro M404dn — Variant 5,SKU-10049,Commercial hardware offering,Hardware,PCS,441.74,643.35,107,24,true
+Cisco Catalyst 9200 Switch — Variant 5,SKU-10050,Commercial hardware offering,Hardware,PCS,2300.11,3446.03,91,7,true
+Microsoft 365 Business Premium — Variant 5,SKU-10051,Professional software offering,Software,LIC,3562.11,5307.1,185,12,true
+Adobe Creative Cloud Team — Variant 5,SKU-10052,Professional software offering,Software,LIC,2325.29,2952.02,57,15,true
+Annual IT Support Contract — Variant 5,SKU-10053,Professional services offering,Services,YR,1608.2,1853.09,430,20,true
+Cloud Hosting — AWS EC2 — Variant 5,SKU-10054,Professional services offering,Services,MO,1208.58,1560.92,452,15,true
+Office Ergonomic Chair — Variant 5,SKU-10055,Commercial furniture offering,Furniture,PCS,4566.45,5570.02,152,23,true
+A4 Copy Paper (500 sheets) — Variant 5,SKU-10056,Commercial supplies offering,Supplies,RM,85.24,99.82,235,12,true
+ZATCA E-Invoicing Integration — Variant 5,SKU-10057,Professional services offering,Services,MO,2614.01,3332.67,101,23,true
+"Samsung 27"" Monitor — Variant 5",SKU-10058,Commercial hardware offering,Hardware,PCS,2043.97,2963.98,96,17,true
+Network Cabling — Cat6 per meter — Variant 5,SKU-10059,Commercial hardware offering,Hardware,M,2222.31,3135.4,121,7,true
+Dell Latitude 5540 Laptop — Variant 6,SKU-10060,Commercial hardware offering,Hardware,PCS,4636.65,6215.03,371,24,true
+HP LaserJet Pro M404dn — Variant 6,SKU-10061,Commercial hardware offering,Hardware,PCS,2573.02,3653.47,75,10,true
+Cisco Catalyst 9200 Switch — Variant 6,SKU-10062,Commercial hardware offering,Hardware,PCS,2700.64,3486.55,241,14,true
+Microsoft 365 Business Premium — Variant 6,SKU-10063,Professional software offering,Software,LIC,2286.6,3010.16,62,7,true
+Adobe Creative Cloud Team — Variant 6,SKU-10064,Professional software offering,Software,LIC,1493.51,1928.46,207,20,true
+Annual IT Support Contract — Variant 6,SKU-10065,Professional services offering,Services,YR,1463.31,2113.41,409,5,true
+Cloud Hosting — AWS EC2 — Variant 6,SKU-10066,Professional services offering,Services,MO,140.33,169.46,347,5,true
+Office Ergonomic Chair — Variant 6,SKU-10067,Commercial furniture offering,Furniture,PCS,4036.73,5927.36,445,12,true
+A4 Copy Paper (500 sheets) — Variant 6,SKU-10068,Commercial supplies offering,Supplies,RM,393.44,552.93,362,19,true
+ZATCA E-Invoicing Integration — Variant 6,SKU-10069,Professional services offering,Services,MO,439.76,616.04,53,21,true
+"Samsung 27"" Monitor — Variant 6",SKU-10070,Commercial hardware offering,Hardware,PCS,704.69,848.46,391,8,true
+Network Cabling — Cat6 per meter — Variant 6,SKU-10071,Commercial hardware offering,Hardware,M,583.15,677.38,14,7,true
+Dell Latitude 5540 Laptop — Variant 7,SKU-10072,Commercial hardware offering,Hardware,PCS,610.22,895.6,119,9,true
+HP LaserJet Pro M404dn — Variant 7,SKU-10073,Commercial hardware offering,Hardware,PCS,2146.49,3161.34,120,10,true
+Cisco Catalyst 9200 Switch — Variant 7,SKU-10074,Commercial hardware offering,Hardware,PCS,427.72,504.44,154,7,true
+Microsoft 365 Business Premium — Variant 7,SKU-10075,Professional software offering,Software,LIC,4181.78,4969.89,75,19,true
+Adobe Creative Cloud Team — Variant 7,SKU-10076,Professional software offering,Software,LIC,1266.21,1646.32,199,21,true
+Annual IT Support Contract — Variant 7,SKU-10077,Professional services offering,Services,YR,1029.37,1243.25,176,8,true
+Cloud Hosting — AWS EC2 — Variant 7,SKU-10078,Professional services offering,Services,MO,348.31,422.25,496,19,true
+Office Ergonomic Chair — Variant 7,SKU-10079,Commercial furniture offering,Furniture,PCS,1546.56,2046.32,273,18,true
+A4 Copy Paper (500 sheets) — Variant 7,SKU-10080,Commercial supplies offering,Supplies,RM,1644.96,2297.46,50,12,true
+ZATCA E-Invoicing Integration — Variant 7,SKU-10081,Professional services offering,Services,MO,3648.54,4387.29,16,20,true
+"Samsung 27"" Monitor — Variant 7",SKU-10082,Commercial hardware offering,Hardware,PCS,1822.74,2725.28,143,22,true
+Network Cabling — Cat6 per meter — Variant 7,SKU-10083,Commercial hardware offering,Hardware,M,4161.95,5435.2,375,10,true
+Dell Latitude 5540 Laptop — Variant 8,SKU-10084,Commercial hardware offering,Hardware,PCS,1503.61,2190.45,122,10,true
+HP LaserJet Pro M404dn — Variant 8,SKU-10085,Commercial hardware offering,Hardware,PCS,3990.89,5135.98,449,8,true
+Cisco Catalyst 9200 Switch — Variant 8,SKU-10086,Commercial hardware offering,Hardware,PCS,1837.17,2238.77,468,17,true
+Microsoft 365 Business Premium — Variant 8,SKU-10087,Professional software offering,Software,LIC,3595.41,5312.78,51,21,true
+Adobe Creative Cloud Team — Variant 8,SKU-10088,Professional software offering,Software,LIC,1385.45,1899.01,151,22,true
+Annual IT Support Contract — Variant 8,SKU-10089,Professional services offering,Services,YR,3782.57,4383.5,77,17,true
+Cloud Hosting — AWS EC2 — Variant 8,SKU-10090,Professional services offering,Services,MO,3320.15,4335.43,266,18,true
+Office Ergonomic Chair — Variant 8,SKU-10091,Commercial furniture offering,Furniture,PCS,1809.9,2378.35,155,21,true
+A4 Copy Paper (500 sheets) — Variant 8,SKU-10092,Commercial supplies offering,Supplies,RM,2932.42,3381.6,441,20,true
+ZATCA E-Invoicing Integration — Variant 8,SKU-10093,Professional services offering,Services,MO,2801.48,3832.86,76,20,true
+"Samsung 27"" Monitor — Variant 8",SKU-10094,Commercial hardware offering,Hardware,PCS,455.1,544.69,42,16,true
+Network Cabling — Cat6 per meter — Variant 8,SKU-10095,Commercial hardware offering,Hardware,M,1476.4,2155.9,6,13,true
+Dell Latitude 5540 Laptop — Variant 9,SKU-10096,Commercial hardware offering,Hardware,PCS,4197.55,5155.68,142,7,true
+HP LaserJet Pro M404dn — Variant 9,SKU-10097,Commercial hardware offering,Hardware,PCS,4189.8,4822.93,478,6,true
+Cisco Catalyst 9200 Switch — Variant 9,SKU-10098,Commercial hardware offering,Hardware,PCS,3992.83,4924.08,289,8,true
+Microsoft 365 Business Premium — Variant 9,SKU-10099,Professional software offering,Software,LIC,1286.39,1562.76,169,17,true

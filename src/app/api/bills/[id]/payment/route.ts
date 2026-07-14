@@ -1,10 +1,14 @@
 import { requireAuth } from '@/lib/auth'
+import { postPaymentToLedger } from '@/lib/accounting/document-posting'
+import { getCompanyPrimaryCurrency } from '@/lib/currency/company'
 import { prisma } from '@/lib/prisma'
+import { resolveCompanyId } from '@/lib/tenant'
 import { getNextSequence } from '@/lib/sequences'
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     await requireAuth()
+    const companyId = await resolveCompanyId()
     const { id } = await params
     const body = await request.json()
 
@@ -19,16 +23,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const amount = Math.min(requestedAmount, bill.balance)
     const paymentNo = await getNextSequence('PAYMENT', 'PAY-')
+    const currency = bill.currency || await getCompanyPrimaryCurrency()
 
-    await prisma.payment.create({
+    const payment = await prisma.payment.create({
       data: {
         paymentNo,
         billId: id,
         date: new Date(body.date || new Date()),
+        currency,
         amount,
         method: body.method || 'BANK_TRANSFER',
         reference: body.reference,
         notes: body.notes,
+        bankAccountId: body.bankAccountId || null,
       },
     })
 
@@ -40,6 +47,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       where: { id },
       data: { amountPaid: newAmountPaid, balance: newBalance, status: newStatus },
     })
+
+    await postPaymentToLedger(payment.id, companyId)
 
     return Response.json(updated)
   } catch (error) {

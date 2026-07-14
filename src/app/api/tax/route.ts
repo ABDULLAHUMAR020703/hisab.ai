@@ -31,6 +31,10 @@ export async function POST(request: Request) {
         rate,
         type: body.type || 'VAT',
         isDefault: body.isDefault || false,
+        taxMode: body.taxMode,
+        isReverseCharge: body.isReverseCharge,
+        isWithholding: body.isWithholding,
+        regionCode: body.regionCode,
       },
     })
     return Response.json(taxRate, { status: 201 })

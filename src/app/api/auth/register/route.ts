@@ -1,4 +1,7 @@
 import { createCompany, uniqueCompanySlug } from '@/lib/db/company.repository'
+import { seedDefaultChartOfAccounts } from '@/lib/accounting/default-coa'
+import { ensureCurrentFiscalPeriod } from '@/lib/accounting/fiscal-periods'
+import { defaultCurrencyForCountry, normalizeCurrency } from '@/lib/currency/constants'
 import { createClient } from '@/lib/supabase/server'
 import {
   createPasswordAuthClient,
@@ -57,12 +60,21 @@ export async function POST(request: Request) {
       )
     }
 
+    const country = typeof body.country === 'string' && body.country.trim()
+      ? body.country.trim()
+      : 'Saudi Arabia'
+    const currency = normalizeCurrency(
+      typeof body.currency === 'string' && body.currency.trim()
+        ? body.currency.trim()
+        : defaultCurrencyForCountry(country),
+    )
+
     // Always create a new companies.id — company name is legal metadata, not a tenant key.
     const company = await createCompany({
       slug: uniqueCompanySlug(companyName),
       companyName,
-      country: 'Saudi Arabia',
-      currency: 'SAR',
+      country,
+      currency,
     })
 
     await upsertProfileAndMembership({
@@ -73,6 +85,9 @@ export async function POST(request: Request) {
       companyId: company.id,
       isActive: true,
     })
+
+    await seedDefaultChartOfAccounts(company.id)
+    await ensureCurrentFiscalPeriod(company.id)
 
     if (data.session) {
       const serverSupabase = await createClient()

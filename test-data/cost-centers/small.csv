@@ -1,0 +1,11 @@
+Code,Name,Type,Description,Active
+RYD-001,Riyadh Head Office,LOCATION,Geographic cost tracking,true
+CLS-002,Administration,CLASS,Functional cost tracking,true
+PRJ-003,ERP Implementation,PROJECT,Project cost tracking,true
+RYD-004,Riyadh Warehouse,LOCATION,Geographic cost tracking,true
+CLS-005,Sales & Marketing,CLASS,Functional cost tracking,true
+PRJ-006,ZATCA Phase 2 Rollout,PROJECT,Project cost tracking,true
+RYD-007,Riyadh Showroom,LOCATION,Geographic cost tracking,true
+CLS-008,Finance & Accounting,CLASS,Functional cost tracking,true
+PRJ-009,Warehouse Expansion,PROJECT,Project cost tracking,true
+JED-010,Jeddah Branch,LOCATION,Geographic cost tracking,true

@@ -10,6 +10,7 @@ import { ZatcaConnectionManager } from '@/components/zatca/ZatcaConnectionManage
 import { ZATCA_BUSINESS_CATEGORIES } from '@/lib/zatca/business-categories'
 import { stripLogoCacheBuster } from '@/lib/branding/logo-url'
 import { readApiError } from '@/lib/api-client'
+import { DEFAULT_CURRENCY, SUPPORTED_CURRENCIES, isSaudiArabia } from '@/lib/currency/constants'
 
 interface Settings {
   companyName: string
@@ -64,7 +65,7 @@ export default function SettingsPage() {
     phone: '',
     email: '',
     website: '',
-    currency: 'SAR',
+    currency: DEFAULT_CURRENCY,
     fiscalYearStart: '01-01',
     zatcaEnvironment: 'SANDBOX',
     zatcaBusinessCategory: 'Telecommunications',
@@ -99,7 +100,7 @@ export default function SettingsPage() {
           phone: d.phone ?? '',
           email: d.email ?? '',
           website: d.website ?? '',
-          currency: d.currency ?? 'SAR',
+          currency: d.currency ?? DEFAULT_CURRENCY,
           fiscalYearStart: d.fiscalYearStart ?? '01-01',
           zatcaEnvironment: d.zatcaEnvironment === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX',
           zatcaBusinessCategory: d.zatcaBusinessCategory ?? 'Telecommunications',
@@ -152,12 +153,13 @@ export default function SettingsPage() {
   }
 
   const f = (field: keyof Settings, val: string) => setSettings((s) => ({ ...s, [field]: val }))
+  const isSaudi = isSaudiArabia(settings.country)
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
       <PageHeader
         title="Settings"
-        subtitle="Company information and ZATCA e-invoicing"
+        subtitle={isSaudi ? 'Company information and ZATCA e-invoicing' : 'Company information and regional settings'}
         breadcrumb={[{ label: 'Administration' }, { label: 'Settings' }]}
         action={
           <div className="flex items-center gap-3">
@@ -185,7 +187,7 @@ export default function SettingsPage() {
           </div>
           <div>
             <h2 className="font-semibold text-slate-900">Company Information</h2>
-            <p className="text-xs text-slate-400">Required for ZATCA CSR and compliance</p>
+            <p className="text-xs text-slate-400">Legal identity and address details</p>
           </div>
         </div>
         <Input label="Company Name" required value={settings.companyName} onChange={(e) => f('companyName', e.target.value)} />
@@ -198,12 +200,15 @@ export default function SettingsPage() {
           label="ZATCA Business Category (CSR)"
           value={settings.zatcaBusinessCategory}
           onChange={(e) => f('zatcaBusinessCategory', e.target.value)}
+          disabled={!isSaudi}
         >
           {ZATCA_BUSINESS_CATEGORIES.map((category) => (
             <option key={category} value={category}>{category}</option>
           ))}
         </Select>
-        <p className="text-xs text-slate-400 -mt-3">Used when generating the CSR during onboarding. Save before connecting to ZATCA.</p>
+        {isSaudi && (
+          <p className="text-xs text-slate-400 -mt-3">Used when generating the CSR during onboarding. Save before connecting to ZATCA.</p>
+        )}
         <div className="grid grid-cols-2 gap-4">
           <Input label="Building Number" required value={settings.buildingNumber} onChange={(e) => f('buildingNumber', e.target.value)} />
           <Input label="Street Address" value={settings.streetAddress} onChange={(e) => f('streetAddress', e.target.value)} />
@@ -214,6 +219,31 @@ export default function SettingsPage() {
           <Input label="Postal Code" value={settings.postalCode} onChange={(e) => f('postalCode', e.target.value)} />
         </div>
         <Input label="Country" value={settings.country} onChange={(e) => f('country', e.target.value)} />
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">
+        <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center">
+            <Shield size={18} className="text-emerald-600" />
+          </div>
+          <div>
+            <h2 className="font-semibold text-slate-900">Primary Currency</h2>
+            <p className="text-xs text-slate-400">Used for dashboard totals, new transactions, and financial reports</p>
+          </div>
+        </div>
+        <Select
+          label="Primary Currency"
+          value={settings.currency}
+          onChange={(e) => f('currency', e.target.value)}
+        >
+          {SUPPORTED_CURRENCIES.map((entry) => (
+            <option key={entry.code} value={entry.code}>{entry.code} — {entry.name}</option>
+          ))}
+        </Select>
+        <p className="text-xs text-slate-400 -mt-3">
+          All accounting is kept in this currency. Exchange-rate conversion is not applied in this release.
+          {isSaudi ? ' ZATCA e-invoicing still requires SAR invoices at submission time.' : ''}
+        </p>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">
@@ -247,6 +277,7 @@ export default function SettingsPage() {
         />
       </div>
 
+      {isSaudi && (
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">
         <ZatcaConnectionManager
           onEnvironmentChange={(env) => setSettings((s) => ({ ...s, zatcaEnvironment: env }))}
@@ -289,6 +320,7 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+      )}
     </div>
   )
 }

@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from 'react'
 import { Shield, Plus, RefreshCw } from 'lucide-react'
-import { formatCurrency } from '@/lib/utils'
+import { useFormatCurrency } from '@/hooks/use-company-currency'
 import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { Input, Select } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
+import { ModuleImportExportToolbar } from '@/components/import-export/ModuleImportExportToolbar'
+import { TAX_RATE_FIELDS } from '@/lib/import-export/registry/modules/tax-rates.fields'
 import { readApiError } from '@/lib/api-client'
 
 interface TaxRate { id: string; name: string; rate: number; type: string; isDefault: boolean; isActive: boolean }
@@ -24,6 +26,7 @@ const DEFAULT_VAT_RATES: TaxRate[] = [
 ]
 
 export default function TaxPage() {
+  const formatCurrency = useFormatCurrency()
   const [taxRates, setTaxRates] = useState<TaxRate[]>([])
   const [report, setReport] = useState<TaxReportApi | null>(null)
   const [loading, setLoading] = useState(true)
@@ -72,7 +75,17 @@ export default function TaxPage() {
         title="Tax & ZATCA"
         subtitle="Tax rates, VAT reporting, Saudi tax authority compliance"
         breadcrumb={[{ label: 'Reports & Tax' }, { label: 'Tax & ZATCA' }]}
-        action={<Button onClick={() => setShowModal(true)}><Plus size={15} /> Add Tax Rate</Button>}
+        action={(
+          <div className="flex items-center gap-2">
+            <ModuleImportExportToolbar
+              moduleKey="tax-rates"
+              moduleLabel="Tax Rates"
+              fields={TAX_RATE_FIELDS}
+              onImportSuccess={load}
+            />
+            <Button onClick={() => setShowModal(true)}><Plus size={15} /> Add Tax Rate</Button>
+          </div>
+        )}
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

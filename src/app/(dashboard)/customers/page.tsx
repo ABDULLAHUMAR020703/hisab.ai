@@ -1,8 +1,9 @@
-﻿'use client'
+'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Plus, Mail, Phone, Edit2, Trash2 } from 'lucide-react'
-import { formatCurrency, cn } from '@/lib/utils'
+import { cn } from '@/lib/utils'
+import { useCompanyCurrency, useFormatCurrency } from '@/hooks/use-company-currency'
 import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { Input } from '@/components/ui/input'
@@ -19,6 +20,8 @@ import {
   type CustomerFilterValues,
 } from '@/lib/ui/customer-filters'
 import { readApiError } from '@/lib/api-client'
+import { ModuleImportExportToolbar } from '@/components/import-export/ModuleImportExportToolbar'
+import { CUSTOMER_FIELDS } from '@/lib/import-export/registry/modules/customers.fields'
 
 interface Customer {
   id: string; customerNo: string; name: string; email?: string; phone?: string
@@ -41,6 +44,8 @@ function buildQueryParams(filters: CustomerFilterValues): URLSearchParams {
 }
 
 export default function CustomersPage() {
+  const formatCurrency = useFormatCurrency()
+  const { currency } = useCompanyCurrency()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [facets, setFacets] = useState<CustomerFilterFacets>(EMPTY_FACETS)
   const [filters, setFilters] = useState<CustomerFilterValues>(DEFAULT_CUSTOMER_FILTERS)
@@ -190,7 +195,18 @@ export default function CustomersPage() {
         title="Customers"
         subtitle={subtitle}
         breadcrumb={[{ label: 'Income' }, { label: 'Customers' }]}
-        action={<Button onClick={openCreate}><Plus size={15} /> New Customer</Button>}
+        action={(
+          <div className="flex items-center gap-2">
+            <ModuleImportExportToolbar
+              moduleKey="customers"
+              moduleLabel="Customers"
+              fields={CUSTOMER_FIELDS}
+              filters={Object.fromEntries(buildQueryParams(queryFilters))}
+              onImportSuccess={load}
+            />
+            <Button onClick={openCreate}><Plus size={15} /> New Customer</Button>
+          </div>
+        )}
       />
 
       <CustomerFilterCard
@@ -281,7 +297,7 @@ export default function CustomersPage() {
             <Input label="Tax ID" value={form.taxId} onChange={e => setForm({ ...form, taxId: e.target.value })} />
             <Input label="Payment Terms (days)" type="number" value={form.paymentTerms} onChange={e => setForm({ ...form, paymentTerms: parseInt(e.target.value) || 30 })} />
           </div>
-          <Input label="Credit Limit (SAR)" type="number" value={form.creditLimit} onChange={e => setForm({ ...form, creditLimit: parseFloat(e.target.value) || 0 })} />
+          <Input label={`Credit Limit (${currency})`} type="number" value={form.creditLimit} onChange={e => setForm({ ...form, creditLimit: parseFloat(e.target.value) || 0 })} />
         </div>
       </Modal>
     </div>

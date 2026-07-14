@@ -1,21 +1,18 @@
-import { requireAuth } from '@/lib/auth'
+import { authzErrorResponse, requireRole } from '@/lib/authz'
 import { createAppUser, listAppUsers } from '@/lib/supabase/auth-users'
 
 export async function GET() {
   try {
-    const session = await requireAuth()
+    const session = await requireRole(['OWNER', 'ADMIN'])
     return Response.json(await listAppUsers(session.companyId))
   } catch (error) {
-    if (error instanceof Error && error.message === 'Unauthorized') {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-    return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 })
+    return authzErrorResponse(error)
   }
 }
 
 export async function POST(request: Request) {
   try {
-    const session = await requireAuth()
+    const session = await requireRole(['OWNER', 'ADMIN'])
     const body = await request.json()
 
     if (!body.email || !body.password) {
@@ -32,9 +29,6 @@ export async function POST(request: Request) {
 
     return Response.json(user, { status: 201 })
   } catch (error) {
-    if (error instanceof Error && error.message === 'Unauthorized') {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-    return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 })
+    return authzErrorResponse(error)
   }
 }

@@ -1,6 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { useCompanyCurrency } from '@/hooks/use-company-currency'
 import { Shield, RefreshCw, CheckCircle2, XCircle, Play, Activity } from 'lucide-react'
 import { formatDate, cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -39,6 +41,8 @@ interface ApiLog {
 }
 
 export default function ZatcaDashboardPage() {
+  const router = useRouter()
+  const { isSaudi } = useCompanyCurrency()
   const [data, setData] = useState<DashboardData | null>(null)
   const [apiLogs, setApiLogs] = useState<ApiLog[]>([])
   const [loading, setLoading] = useState(true)
@@ -57,7 +61,11 @@ export default function ZatcaDashboardPage() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    if (!isSaudi) router.replace('/')
+  }, [isSaudi, router])
+
+  useEffect(() => { if (isSaudi) load() }, [isSaudi, load])
 
   async function runSandboxTests() {
     setRunningTests(true)

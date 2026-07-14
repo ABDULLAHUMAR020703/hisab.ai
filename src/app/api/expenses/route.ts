@@ -1,6 +1,9 @@
 ﻿import { requireAuth } from '@/lib/auth'
+import { resolveTransactionCurrency } from '@/lib/currency/company'
 import { prisma } from '@/lib/prisma'
 import { getNextSequence } from '@/lib/sequences'
+import { resolveCompanyId } from '@/lib/tenant'
+import { maybeStartWorkflow } from '@/lib/workflow/integration'
 
 export async function GET(request: Request) {
   try {
@@ -39,7 +42,7 @@ export async function POST(request: Request) {
   try {
     const user = await requireAuth()
     const body = await request.json()
-    const { date, description, category, lines, receiptId } = body
+    const { date, description, category, currency, lines, receiptId } = body
 
     if (!date || !description || !category || !lines?.length) {
       return Response.json({ error: 'date, description, category, lines are required' }, { status: 400 })
@@ -55,6 +58,7 @@ export async function POST(request: Request) {
     })
 
     const expenseNo = await getNextSequence('EXPENSE', 'EXP-')
+    const resolvedCurrency = await resolveTransactionCurrency(currency)
 
     const expense = await prisma.expense.create({
       data: {
@@ -62,6 +66,7 @@ export async function POST(request: Request) {
         date: new Date(date),
         description,
         category,
+        currency: resolvedCurrency,
         total,
         taxAmount,
         receiptId: receiptId || null,
@@ -76,6 +81,16 @@ export async function POST(request: Request) {
         },
       },
       include: { lines: true, createdBy: { select: { name: true } } },
+    })
+
+    const companyId = await resolveCompanyId()
+    await maybeStartWorkflow({
+      entityType: 'EXPENSE',
+      entityId: expense.id,
+      entityLabel: expense.expenseNo,
+      amount: total,
+      submittedById: user.id,
+      companyId,
     })
 
     return Response.json(expense, { status: 201 })
