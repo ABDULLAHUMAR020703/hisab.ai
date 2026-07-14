@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/env'
+import { createCorrelationId, CORRELATION_HEADER } from '@/lib/ops/correlation'
 
 const PUBLIC_PAGE_PREFIXES = [
   '/login',
@@ -11,7 +12,12 @@ const PUBLIC_PAGE_PREFIXES = [
   '/auth/callback',
 ]
 
-const PUBLIC_API_PREFIXES = ['/api/auth']
+const PUBLIC_API_PREFIXES = [
+  '/api/auth',
+  '/api/health',
+  '/api/ready',
+  '/api/live',
+]
 
 function isPublicPath(pathname: string): boolean {
   if (PUBLIC_PAGE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
@@ -32,6 +38,7 @@ function isAuthPage(pathname: string): boolean {
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request })
+  const correlationId = request.headers.get(CORRELATION_HEADER) ?? createCorrelationId()
 
   const supabase = createServerClient(getSupabaseUrl(), getSupabaseAnonKey(), {
     cookies: {
@@ -60,20 +67,29 @@ export async function proxy(request: NextRequest) {
 
   if (!user && !isPublic) {
     if (isApiRoute) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      const res = NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      res.headers.set(CORRELATION_HEADER, correlationId)
+      return res
     }
     const loginUrl = new URL('/login', request.url)
     loginUrl.searchParams.set('next', pathname)
-    return NextResponse.redirect(loginUrl)
+    const res = NextResponse.redirect(loginUrl)
+    res.headers.set(CORRELATION_HEADER, correlationId)
+    return res
   }
 
   if (user && isAuthPage(pathname)) {
-    return NextResponse.redirect(new URL('/', request.url))
+    const res = NextResponse.redirect(new URL('/', request.url))
+    res.headers.set(CORRELATION_HEADER, correlationId)
+    return res
   }
 
+  response.headers.set(CORRELATION_HEADER, correlationId)
   return response
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|public).*)'],
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,7 @@ import { readApiError } from '@/lib/api-client'
 
 import { MODULE_CATALOG } from '@/lib/import-export/registry/module-catalog'
 
-export default function ImportHistoryPage() {
+function ImportHistoryContent() {
   const searchParams = useSearchParams()
   const [items, setItems] = useState<ImportHistoryRecord[]>([])
   const [total, setTotal] = useState(0)
@@ -149,5 +149,13 @@ export default function ImportHistoryPage() {
         onDelete={() => detail && void handleDelete(detail)}
       />
     </div>
+  )
+}
+
+export default function ImportHistoryPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-slate-500">Loading import history…</div>}>
+      <ImportHistoryContent />
+    </Suspense>
   )
 }
