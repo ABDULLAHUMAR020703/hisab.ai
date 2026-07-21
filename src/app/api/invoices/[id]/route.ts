@@ -2,6 +2,7 @@ import { requireAuth } from '@/lib/auth'
 import { postInvoiceToLedger } from '@/lib/accounting/document-posting'
 import { getInvoiceRepository } from '@/lib/db/provider'
 import { resolveCompanyId } from '@/lib/tenant'
+import { validateExpiryDate, validateInvoicePayload } from '@/lib/invoices/validation'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -24,11 +25,35 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const { id } = await params
     const body = await request.json()
     const existing = await getInvoiceRepository().findById(id)
+
+    if (body.date || body.expiryDate !== undefined) {
+      const expiryError = validateExpiryDate(
+        body.date ?? existing?.date ?? new Date(),
+        body.expiryDate,
+      )
+      if (expiryError) return Response.json({ error: expiryError }, { status: 400 })
+    }
+
+    if (body.lines) {
+      const validationError = validateInvoicePayload({
+        customerId: body.customerId ?? existing?.customerId,
+        date: body.date ?? (existing?.date ? String(existing.date) : undefined),
+        dueDate: body.dueDate ?? (existing?.dueDate ? String(existing.dueDate) : undefined),
+        expiryDate: body.expiryDate,
+        taxCalculationMethod: body.taxCalculationMethod,
+        lines: body.lines,
+      })
+      if (validationError) return Response.json({ error: validationError }, { status: 400 })
+    }
+
     const invoice = await getInvoiceRepository().update(id, {
       customerId: body.customerId,
       date: body.date,
       dueDate: body.dueDate,
+      expiryDate: body.expiryDate !== undefined ? body.expiryDate : undefined,
       currency: body.currency,
+      taxCalculationMethod: body.taxCalculationMethod,
+      paymentTermId: body.paymentTermId !== undefined ? body.paymentTermId : undefined,
       lines: body.lines,
       notes: body.notes,
       terms: body.terms,

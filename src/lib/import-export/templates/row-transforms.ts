@@ -31,10 +31,19 @@ export function parseClassFullName(classFullName: string): {
 }
 
 export function slugifyCode(value: string): string {
-  return value
-    .trim()
+  const trimmed = value.trim()
+  const slug = trimmed
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 24)
+  // Fingerprint full value so long shared prefixes (Parent:Child A vs B) stay unique
+  let hash = 2166136261
+  const input = trimmed.toLowerCase()
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  const fingerprint = (hash >>> 0).toString(36).toUpperCase().padStart(6, '0').slice(0, 6)
+  const stem = (slug || 'ITEM').slice(0, 40)
+  return `${stem}-${fingerprint}`
 }

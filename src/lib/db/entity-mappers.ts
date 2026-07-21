@@ -5,6 +5,7 @@ import type {
   CustomerRecord,
   EmployeeRecord,
   InventoryItemRecord,
+  InvoiceAttachmentRecord,
   InvoiceLineRecord,
   InvoiceRecord,
   PaymentRecord,
@@ -97,6 +98,7 @@ export function mapInvoiceRow(row: Record<string, unknown>): InvoiceRecord {
     date: requireDate(String(row.date)),
     issueTime: (row.issue_time as string | null) ?? null,
     dueDate: requireDate(String(row.due_date)),
+    expiryDate: toDate(row.expiry_date as string | null | undefined),
     currency: normalizeCurrency(String(row.currency ?? DEFAULT_CURRENCY)),
     status: String(row.status ?? 'DRAFT'),
     subtotal: toNumber(row.subtotal),
@@ -104,6 +106,8 @@ export function mapInvoiceRow(row: Record<string, unknown>): InvoiceRecord {
     total: toNumber(row.total),
     amountPaid: toNumber(row.amount_paid),
     balance: toNumber(row.balance),
+    taxCalculationMethod: String(row.tax_calculation_method ?? 'TAX_EXCLUSIVE'),
+    paymentTermId: (row.payment_term_id as string | null) ?? null,
     zatcaStatus: String(row.zatca_status ?? 'DRAFT'),
     clearanceStatus: (row.clearance_status as string | null) ?? null,
     zatcaResponseCode: (row.zatca_response_code as string | null) ?? null,
@@ -134,11 +138,32 @@ export function mapInvoiceLineRow(row: Record<string, unknown>): InvoiceLineReco
     invoiceId: String(row.invoice_id),
     accountId: (row.account_id as string | null) ?? null,
     costCenterId: (row.cost_center_id as string | null) ?? null,
-    description: String(row.description),
+    inventoryItemId: (row.inventory_item_id as string | null) ?? null,
+    itemName: (row.item_name as string | null) ?? null,
+    projectService: (row.project_service as string | null) ?? null,
+    className: (row.class_name as string | null) ?? null,
+    projectId: (row.project_id as string | null) ?? null,
+    classId: (row.class_id as string | null) ?? null,
+    description: String(row.description ?? ''),
     quantity: toNumber(row.quantity),
     unitPrice: toNumber(row.unit_price),
     taxRate: toNumber(row.tax_rate),
+    taxRateId: (row.tax_rate_id as string | null) ?? null,
     amount: toNumber(row.amount),
+  }
+}
+
+export function mapInvoiceAttachmentRow(row: Record<string, unknown>): InvoiceAttachmentRecord {
+  return {
+    id: String(row.id),
+    invoiceId: String(row.invoice_id),
+    filename: String(row.filename),
+    originalFilename: String(row.original_filename ?? row.filename),
+    mimeType: String(row.mime_type ?? 'application/octet-stream'),
+    fileSize: Number(row.file_size ?? 0),
+    storagePath: String(row.storage_path),
+    uploadedById: (row.uploaded_by_id as string | null) ?? null,
+    uploadedAt: requireDate(String(row.uploaded_at ?? row.created_at)),
   }
 }
 
@@ -196,6 +221,10 @@ export function mapEmployeeRow(row: Record<string, unknown>): EmployeeRecord {
 }
 
 export function mapCostCenterRow(row: Record<string, unknown>): CostCenterRecord {
+  const metadata =
+    row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+      ? (row.metadata as Record<string, unknown>)
+      : {}
   return {
     id: String(row.id),
     code: String(row.code),
@@ -203,6 +232,7 @@ export function mapCostCenterRow(row: Record<string, unknown>): CostCenterRecord
     type: String(row.type ?? 'PROJECT'),
     description: (row.description as string | null) ?? null,
     isActive: Boolean(row.is_active ?? true),
+    metadata,
     createdAt: requireDate(String(row.created_at)),
     updatedAt: requireDate(String(row.updated_at)),
   }
@@ -214,6 +244,8 @@ export function mapTaxRateRow(row: Record<string, unknown>): TaxRateRecord {
     name: String(row.name),
     rate: toNumber(row.rate),
     type: String(row.type ?? 'VAT'),
+    category: String(row.category ?? row.type ?? 'VAT'),
+    zatcaMapping: String(row.zatca_mapping ?? 'STANDARD_RATED'),
     isDefault: Boolean(row.is_default ?? false),
     isActive: Boolean(row.is_active ?? true),
     createdAt: requireDate(String(row.created_at)),

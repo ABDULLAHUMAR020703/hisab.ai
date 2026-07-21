@@ -7,8 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/ui/modal'
 import { Input, Select } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
-import { ModuleImportExportToolbar } from '@/components/import-export/ModuleImportExportToolbar'
-import { COST_CENTER_FIELDS } from '@/lib/import-export/registry/modules/cost-centers.fields'
+import { CostCenterImportToolbar } from '@/components/cost-centers/cost-center-import-toolbar'
 import { readApiError } from '@/lib/api-client'
 
 interface CostCenter { id: string; code: string; name: string; type: string; description?: string; isActive: boolean }
@@ -80,12 +79,7 @@ export default function CostCentersPage() {
         breadcrumb={[{ label: 'Operations' }, { label: 'Cost Centers' }]}
         action={(
           <div className="flex items-center gap-2">
-            <ModuleImportExportToolbar
-              moduleKey="cost-centers"
-              moduleLabel="Cost Centers"
-              fields={COST_CENTER_FIELDS}
-              onImportSuccess={load}
-            />
+            <CostCenterImportToolbar onImportSuccess={load} />
             <Button onClick={openCreate}><Plus size={15} /> New Cost Center</Button>
           </div>
         )}

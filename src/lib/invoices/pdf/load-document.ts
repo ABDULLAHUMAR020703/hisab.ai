@@ -4,6 +4,11 @@ import type { CompanySettingsRecord } from '@/lib/db/types'
 import { DEFAULT_CURRENCY, normalizeCurrency } from '@/lib/currency/constants'
 import { getInvoiceRepository, getSettingsRepository } from '@/lib/db/provider'
 import { computeDisplayBusinessStatus } from '@/lib/ui/invoice-status'
+import {
+  calculateInvoiceLine,
+  type InvoiceTaxCalculationMethod,
+} from '@/lib/invoices/calculations'
+import { normalizeTaxCalculationMethod } from '@/lib/invoices/validation'
 import { resolveInvoiceQrForPdf } from '../qr-for-pdf'
 import { buildAddressLines, invoicePdfTitle } from './format'
 import { loadCompanyLogoImage } from '@/lib/branding/load-logo-image'
@@ -38,31 +43,44 @@ function buildCustomerInfo(customer: CustomerRecord | Partial<CustomerRecord> | 
   }
 }
 
-function buildLineItems(lines: InvoiceLineRecord[]): PdfLineItem[] {
+function buildLineItems(
+  lines: InvoiceLineRecord[],
+  method: InvoiceTaxCalculationMethod,
+): PdfLineItem[] {
   return lines.map((line, index) => {
-    const taxable = line.amount
-    const taxAmount = taxable * (line.taxRate / 100)
+    const calc = calculateInvoiceLine(
+      { quantity: line.quantity, unitPrice: line.unitPrice, taxRate: line.taxRate },
+      method,
+    )
     return {
       index: index + 1,
+      itemName: line.itemName ?? null,
       description: line.description,
+      projectService: line.projectService ?? null,
+      className: line.className ?? null,
       quantity: line.quantity,
       unitPrice: line.unitPrice,
-      taxRate: line.taxRate,
-      taxAmount,
-      lineTotal: taxable + taxAmount,
+      taxRate: calc.taxRate,
+      taxAmount: calc.taxAmount,
+      lineTotal: calc.lineTotal,
     }
   })
 }
 
-function buildTaxSummary(lines: InvoiceLineRecord[]): PdfTaxSummaryRow[] {
+function buildTaxSummary(
+  lines: InvoiceLineRecord[],
+  method: InvoiceTaxCalculationMethod,
+): PdfTaxSummaryRow[] {
   const map = new Map<number, { taxableAmount: number; taxAmount: number }>()
   for (const line of lines) {
-    const taxable = line.amount
-    const taxAmount = taxable * (line.taxRate / 100)
-    const existing = map.get(line.taxRate) ?? { taxableAmount: 0, taxAmount: 0 }
-    map.set(line.taxRate, {
-      taxableAmount: existing.taxableAmount + taxable,
-      taxAmount: existing.taxAmount + taxAmount,
+    const calc = calculateInvoiceLine(
+      { quantity: line.quantity, unitPrice: line.unitPrice, taxRate: line.taxRate },
+      method,
+    )
+    const existing = map.get(calc.taxRate) ?? { taxableAmount: 0, taxAmount: 0 }
+    map.set(calc.taxRate, {
+      taxableAmount: existing.taxableAmount + calc.amount,
+      taxAmount: existing.taxAmount + calc.taxAmount,
     })
   }
 
@@ -130,6 +148,7 @@ export async function loadInvoicePdfDocument(invoiceId: string): Promise<Invoice
 
   if (!invoice || !settings) return null
 
+  const method = normalizeTaxCalculationMethod(invoice.taxCalculationMethod)
   const lines = invoice.lines ?? []
   const { title, accent } = invoicePdfTitle(invoice.invoiceType)
   const zatcaStatus = (invoice.zatcaStatus ?? 'DRAFT').toUpperCase()
@@ -149,7 +168,9 @@ export async function loadInvoicePdfDocument(invoiceId: string): Promise<Invoice
     invoiceNo: invoice.invoiceNo,
     date: invoice.date,
     dueDate: invoice.dueDate,
+    expiryDate: invoice.expiryDate ?? null,
     terms: invoice.terms,
+    taxCalculationMethod: method,
     currency: normalizeCurrency(invoice.currency || settings.currency || DEFAULT_CURRENCY),
     businessStatus: computeDisplayBusinessStatus({
       status: invoice.status,
@@ -159,13 +180,13 @@ export async function loadInvoicePdfDocument(invoiceId: string): Promise<Invoice
     zatcaStatusLabel: submitted ? zatcaStatus.replaceAll('_', ' ') : null,
     referencedInvoiceNo: invoice.referencedInvoiceNo ?? null,
     customer: buildCustomerInfo(invoice.customer),
-    lines: buildLineItems(lines),
+    lines: buildLineItems(lines, method),
     subtotal: invoice.subtotal,
     taxAmount: invoice.taxAmount,
     total: invoice.total,
     amountPaid: invoice.amountPaid,
     balanceDue: invoice.balance,
-    taxSummary: buildTaxSummary(lines),
+    taxSummary: buildTaxSummary(lines, method),
     notes: invoice.notes,
     zatcaInfo: buildZatcaInfo(invoice, settings),
     qr,

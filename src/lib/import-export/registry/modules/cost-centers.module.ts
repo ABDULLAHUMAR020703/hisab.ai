@@ -8,7 +8,7 @@ import {
 import type { DuplicateMatch, MappedRow, ModuleDefinition } from '../../types'
 import { COST_CENTER_FIELDS } from './cost-centers.fields'
 import { COST_CENTER_OFFICIAL_TEMPLATES } from './cost-centers.official-templates'
-import { parseClassFullName, slugifyCode } from '../../templates/row-transforms'
+import { slugifyCode } from '../../templates/row-transforms'
 
 export { COST_CENTER_FIELDS } from './cost-centers.fields'
 
@@ -31,8 +31,15 @@ export const costCentersModule: ModuleDefinition = {
 
   transformOfficialRow(mapped, templateId) {
     if (templateId === 'classes') {
-      const { name, description } = parseClassFullName(String(mapped.classFullName ?? ''))
-      return { name, description, type: 'CLASS', isActive: true }
+      // Preserve full class text exactly (do not split Parent:Child).
+      const name = String(mapped.classFullName ?? '').trim()
+      return {
+        name,
+        code: slugifyCode(name),
+        description: null,
+        type: 'CLASS',
+        isActive: true,
+      }
     }
     if (templateId === 'locations') {
       const name = String(mapped.locationFullName ?? '').trim()

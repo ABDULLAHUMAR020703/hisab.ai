@@ -187,11 +187,19 @@ export async function renderSaudiProfessionalInvoice(document: InvoicePdfDocumen
     const metaGap = 8
     const metaStartX = headerRightX + 200 - metaColW * 2 - metaGap
 
+    const taxMethodLabel =
+      document.taxCalculationMethod === 'TAX_INCLUSIVE'
+        ? 'Tax Inclusive'
+        : document.taxCalculationMethod === 'OUT_OF_SCOPE'
+          ? 'Out of Scope'
+          : 'Tax Exclusive'
     const metaFields: [string, string][] = [
       ['Invoice Number', document.invoiceNo],
       ['Invoice Date', formatPdfDate(document.date)],
       ['Due Date', formatPdfDate(document.dueDate)],
+      ['Expiry Date', document.expiryDate ? formatPdfDate(document.expiryDate) : '—'],
       ['Terms', document.terms?.trim() || '—'],
+      ['Tax Method', taxMethodLabel],
       ['Currency', document.currency],
       ['Invoice Status', document.businessStatus],
     ]
@@ -276,7 +284,13 @@ export async function renderSaudiProfessionalInvoice(document: InvoicePdfDocumen
       const rowTop = y
       doc.text(String(line.index), colX, y, { width: cols.num - 4 })
       colX += cols.num
-      doc.text(line.description, colX, y, { width: cols.desc - 4 })
+      const descParts = [
+        line.itemName?.trim(),
+        line.description?.trim(),
+        line.projectService ? `Project: ${line.projectService}` : null,
+        line.className ? `Class: ${line.className}` : null,
+      ].filter(Boolean)
+      doc.text(descParts.join('\n') || '—', colX, y, { width: cols.desc - 4 })
       colX += cols.desc
       doc.text(String(line.quantity), colX, y, { width: cols.qty - 2, align: 'right' })
       colX += cols.qty

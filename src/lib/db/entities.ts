@@ -59,15 +59,34 @@ export interface ChartOfAccountRecord {
   updatedAt: Date
 }
 
+export interface InvoiceAttachmentRecord {
+  id: string
+  invoiceId: string
+  filename: string
+  originalFilename: string
+  mimeType: string
+  fileSize: number
+  storagePath: string
+  uploadedById: string | null
+  uploadedAt: Date
+}
+
 export interface InvoiceLineRecord {
   id: string
   invoiceId: string
   accountId: string | null
   costCenterId: string | null
+  inventoryItemId?: string | null
+  itemName: string | null
+  projectService: string | null
+  className: string | null
+  projectId: string | null
+  classId: string | null
   description: string
   quantity: number
   unitPrice: number
   taxRate: number
+  taxRateId: string | null
   amount: number
   account?: ChartOfAccountRecord | null
 }
@@ -101,6 +120,7 @@ export interface InvoiceRecord {
   date: Date
   issueTime: string | null
   dueDate: Date
+  expiryDate: Date | null
   currency: string
   status: string
   subtotal: number
@@ -108,6 +128,8 @@ export interface InvoiceRecord {
   total: number
   amountPaid: number
   balance: number
+  taxCalculationMethod: string
+  paymentTermId: string | null
   zatcaStatus: string
   clearanceStatus: string | null
   zatcaResponseCode: string | null
@@ -132,6 +154,7 @@ export interface InvoiceRecord {
   customer?: Partial<CustomerRecord> | { name: string; email?: string | null }
   lines?: InvoiceLineRecord[]
   payments?: PaymentRecord[]
+  attachments?: InvoiceAttachmentRecord[]
   createdBy?: { name: string | null }
 }
 
@@ -175,6 +198,7 @@ export interface CostCenterRecord {
   type: string
   description: string | null
   isActive: boolean
+  metadata: Record<string, unknown>
   createdAt: Date
   updatedAt: Date
 }
@@ -184,6 +208,8 @@ export interface TaxRateRecord {
   name: string
   rate: number
   type: string
+  category: string
+  zatcaMapping: string
   isDefault: boolean
   isActive: boolean
   createdAt: Date

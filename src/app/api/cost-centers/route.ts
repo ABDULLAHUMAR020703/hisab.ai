@@ -1,23 +1,18 @@
 ﻿import { requireAuth } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
-import { getNextSequence } from '@/lib/sequences'
+import { getCostCenterRepository } from '@/lib/db/provider'
 
 export async function GET(request: Request) {
   try {
     await requireAuth()
     const { searchParams } = new URL(request.url)
     const search = searchParams.get('search') ?? ''
+    const type = searchParams.get('type') ?? undefined
 
-    const centers = await prisma.costCenter.findMany({
-      where: search ? {
-        OR: [
-          { name: { contains: search } },
-          { code: { contains: search } },
-        ],
-      } : {},
-      orderBy: { code: 'asc' },
+    const centers = await getCostCenterRepository().findMany({
+      search: search || undefined,
+      type: type || undefined,
+      activeOnly: searchParams.get('activeOnly') === 'true',
     })
-
     return Response.json(centers)
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {
@@ -37,15 +32,11 @@ export async function POST(request: Request) {
       return Response.json({ error: 'Cost center name is required' }, { status: 400 })
     }
 
-    const autoCode = await getNextSequence('CC', 'CC-')
-
-    const center = await prisma.costCenter.create({
-      data: {
-        code: body.code || autoCode,
-        name,
-        type: body.type || 'PROJECT',
-        description: body.description,
-      },
+    const center = await getCostCenterRepository().create({
+      code: body.code,
+      name,
+      type: body.type || 'PROJECT',
+      description: body.description,
     })
 
     return Response.json(center, { status: 201 })

@@ -34,6 +34,12 @@ export const supabaseCostCenterRepository: CostCenterRepository = {
     if (search) {
       query = query.or(`name.ilike.%${search}%,code.ilike.%${search}%`)
     }
+    if (options.type?.trim()) {
+      query = query.eq('type', options.type.trim())
+    }
+    if (options.activeOnly) {
+      query = query.eq('is_active', true)
+    }
 
     const { data, error } = await query
     if (error) throw error
@@ -50,33 +56,43 @@ export const supabaseCostCenterRepository: CostCenterRepository = {
   async findDuplicate(criteria: CostCenterDuplicateCriteria) {
     const db = supabaseDb()
     const companyId = await resolveCompanyId()
+    const type = criteria.type?.trim()
 
     const code = criteria.code?.trim()
     if (code) {
-      const { data, error } = await db
+      let query = db
         .from('cost_centers')
         .select('*')
         .eq('company_id', companyId)
         .eq('code', code)
         .is('deleted_at', null)
-        .limit(1)
-        .maybeSingle()
+      if (type) query = query.eq('type', type)
+      const { data, error } = await query.limit(1).maybeSingle()
       if (error) throw error
       if (data) return mapCostCenterRow(data)
     }
 
     const name = criteria.name?.trim()
     if (name) {
-      const { data, error } = await db
+      // Exact full-name match only (case-insensitive). Escape ILIKE wildcards so
+      // characters like "_" in names never match a different class.
+      const exactPattern = name.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
+      let query = db
         .from('cost_centers')
         .select('*')
         .eq('company_id', companyId)
-        .ilike('name', name)
+        .ilike('name', exactPattern)
         .is('deleted_at', null)
-        .limit(1)
-        .maybeSingle()
+      if (type) query = query.eq('type', type)
+      const { data, error } = await query.limit(1).maybeSingle()
       if (error) throw error
-      if (data) return mapCostCenterRow(data)
+      if (data) {
+        const mapped = mapCostCenterRow(data)
+        // Guard against any residual wildcard matching
+        if (mapped.name.trim().toLowerCase() === name.toLowerCase()) {
+          return mapped
+        }
+      }
     }
 
     return null
@@ -168,6 +184,7 @@ export const supabaseCostCenterRepository: CostCenterRepository = {
         type: input.type ?? 'PROJECT',
         description: input.description ?? null,
         is_active: input.isActive ?? true,
+        metadata: input.metadata ?? {},
       })
       .select('*')
       .single()
@@ -187,6 +204,7 @@ export const supabaseCostCenterRepository: CostCenterRepository = {
     if (input.type !== undefined) patch.type = input.type
     if (input.description !== undefined) patch.description = input.description
     if (input.isActive !== undefined) patch.is_active = input.isActive
+    if (input.metadata !== undefined) patch.metadata = input.metadata ?? {}
 
     const { data, error } = await db
       .from('cost_centers')

@@ -3,6 +3,7 @@ import { getInvoiceRepository } from '@/lib/db/provider'
 import { resolveCompanyId } from '@/lib/tenant'
 import { maybeStartWorkflow } from '@/lib/workflow/integration'
 import type { InvoiceListOptions } from '@/lib/db/repositories/invoice.repository.interface'
+import { validateInvoicePayload } from '@/lib/invoices/validation'
 
 function pickParam(searchParams: URLSearchParams, key: string) {
   const value = searchParams.get(key)
@@ -42,17 +43,43 @@ export async function POST(request: Request) {
   try {
     const user = await requireAuth()
     const body = await request.json()
-    const { customerId, date, dueDate, currency, lines, notes, terms, isRecurring, recurringDay } = body
+    const {
+      customerId,
+      date,
+      dueDate,
+      expiryDate,
+      currency,
+      lines,
+      notes,
+      terms,
+      isRecurring,
+      recurringDay,
+      taxCalculationMethod,
+      paymentTermId,
+    } = body
 
-    if (!customerId || !date || !dueDate || !lines?.length) {
-      return Response.json({ error: 'customerId, date, dueDate, lines are required' }, { status: 400 })
+    const validationError = validateInvoicePayload({
+      customerId,
+      date,
+      dueDate,
+      expiryDate,
+      taxCalculationMethod,
+      lines,
+      paymentTermId,
+      terms,
+    })
+    if (validationError) {
+      return Response.json({ error: validationError }, { status: 400 })
     }
 
     const invoice = await getInvoiceRepository().create({
       customerId,
       date,
       dueDate,
+      expiryDate: expiryDate ?? null,
       currency,
+      taxCalculationMethod,
+      paymentTermId: paymentTermId ?? null,
       lines,
       notes,
       terms,

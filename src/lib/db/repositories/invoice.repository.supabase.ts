@@ -1,11 +1,17 @@
 import 'server-only'
 import type { InvoiceType } from '@/lib/db/prisma-types'
-import { getCompanyPrimaryCurrency, resolveTransactionCurrency } from '@/lib/currency/company'
-import { classifySalesInvoiceType, isAdjustableTaxInvoice, resolveZatcaInvoiceType } from '@/lib/zatca/classification'
+import { resolveTransactionCurrency } from '@/lib/currency/company'
+import { classifySalesInvoiceType, isAdjustableTaxInvoice } from '@/lib/zatca/classification'
+import {
+  calculateInvoiceTotals,
+  type InvoiceTaxCalculationMethod,
+} from '@/lib/invoices/calculations'
+import { normalizeTaxCalculationMethod } from '@/lib/invoices/validation'
 import { randomUUID } from 'crypto'
 import {
   mapChartOfAccountRow,
   mapCustomerRow,
+  mapInvoiceAttachmentRow,
   mapInvoiceLineRow,
   mapInvoiceRow,
   mapPaymentRow,
@@ -27,28 +33,53 @@ function formatIssueTime(date: Date): string {
   return date.toTimeString().split(' ')[0]
 }
 
-function processLines(lines: InvoiceLineInput[]) {
-  let subtotal = 0
-  let taxAmount = 0
-  const processedLines = lines.map((line) => {
-    const quantity = Number(line.quantity)
-    const unitPrice = Number(line.unitPrice)
-    const taxRate = Number(line.taxRate)
-    const amount = quantity * unitPrice
-    subtotal += amount
-    taxAmount += amount * (taxRate / 100)
+function processLines(
+  lines: InvoiceLineInput[],
+  method: InvoiceTaxCalculationMethod = 'TAX_EXCLUSIVE',
+) {
+  const { lines: calculated, subtotal, taxAmount, total } = calculateInvoiceTotals(
+    lines.map((line) => ({
+      quantity: Number(line.quantity),
+      unitPrice: Number(line.unitPrice),
+      taxRate: Number(line.taxRate),
+    })),
+    method,
+  )
+
+  const processedLines = lines.map((line, index) => {
+    const calc = calculated[index]
     return {
-      description: line.description,
-      quantity,
-      unitPrice: unitPrice,
-      taxRate,
-      amount,
+      description: line.description?.trim() || line.itemName?.trim() || 'Item',
+      quantity: calc.quantity,
+      unitPrice: calc.unitPrice,
+      taxRate: calc.taxRate,
+      taxRateId: line.taxRateId || null,
+      amount: calc.amount,
       accountId: line.accountId || null,
       costCenterId: line.costCenterId || null,
       inventoryItemId: line.inventoryItemId || null,
+      itemName: line.itemName?.trim() || null,
+      projectId: line.projectId || null,
+      classId: line.classId || null,
+      projectService: line.projectService?.trim() || null,
+      className: line.className?.trim() || null,
     }
   })
-  return { processedLines, subtotal, taxAmount, total: subtotal + taxAmount }
+
+  return { processedLines, subtotal, taxAmount, total }
+}
+
+async function resolveTypedCostCenter(
+  id: string | null | undefined,
+  expectedType: 'PROJECT' | 'CLASS',
+  companyId: string,
+): Promise<{ id: string; name: string } | null> {
+  if (!id) return null
+  const row = await queryByIdOrLegacy(supabaseDb(), 'cost_centers', id, companyId)
+  if (!row) return null
+  if (String(row.type).toUpperCase() !== expectedType) return null
+  if (row.deleted_at) return null
+  return { id: String(row.id), name: String(row.name) }
 }
 
 async function resolveInvoiceTypeForCustomer(
@@ -118,18 +149,29 @@ async function buildLineRows(
   companyId: string,
 ) {
   return Promise.all(
-    lines.map(async (line) => ({
-      company_id: companyId,
-      invoice_id: invoiceId,
-      account_id: await resolveScopedUuid('chart_of_accounts', line.accountId, companyId),
-      cost_center_id: await resolveScopedUuid('cost_centers', line.costCenterId, companyId),
-      inventory_item_id: await resolveScopedUuid('inventory_items', line.inventoryItemId, companyId),
-      description: line.description,
-      quantity: line.quantity,
-      unit_price: line.unitPrice,
-      tax_rate: line.taxRate,
-      amount: line.amount,
-    })),
+    lines.map(async (line) => {
+      const project = await resolveTypedCostCenter(line.projectId, 'PROJECT', companyId)
+      const classCenter = await resolveTypedCostCenter(line.classId, 'CLASS', companyId)
+
+      return {
+        company_id: companyId,
+        invoice_id: invoiceId,
+        account_id: await resolveScopedUuid('chart_of_accounts', line.accountId, companyId),
+        cost_center_id: await resolveScopedUuid('cost_centers', line.costCenterId, companyId),
+        inventory_item_id: await resolveScopedUuid('inventory_items', line.inventoryItemId, companyId),
+        tax_rate_id: await resolveScopedUuid('tax_rates', line.taxRateId, companyId),
+        project_id: project?.id ?? null,
+        class_id: classCenter?.id ?? null,
+        description: line.description,
+        item_name: line.itemName,
+        project_service: project?.name ?? line.projectService,
+        class_name: classCenter?.name ?? line.className,
+        quantity: line.quantity,
+        unit_price: line.unitPrice,
+        tax_rate: line.taxRate,
+        amount: line.amount,
+      }
+    }),
   )
 }
 
@@ -224,7 +266,7 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
 
     const invoice = mapInvoiceRow(row)
 
-    const [customerRes, linesRes, paymentsRes, profileRes] = await Promise.all([
+    const [customerRes, linesRes, paymentsRes, profileRes, attachmentsRes] = await Promise.all([
       db.from('customers').select('*').eq('id', invoice.customerId).maybeSingle(),
       db.from('invoice_lines').select('*').eq('invoice_id', invoice.id).eq('company_id', companyId),
       db
@@ -236,12 +278,20 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
       invoice.createdById
         ? db.from('profiles').select('full_name').eq('id', invoice.createdById).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
+      db
+        .from('invoice_attachments')
+        .select('*')
+        .eq('invoice_id', invoice.id)
+        .eq('company_id', companyId)
+        .is('deleted_at', null)
+        .order('uploaded_at', { ascending: false }),
     ])
 
     if (customerRes.error) throw customerRes.error
     if (linesRes.error) throw linesRes.error
     if (paymentsRes.error) throw paymentsRes.error
     if (profileRes.error) throw profileRes.error
+    if (attachmentsRes.error) throw attachmentsRes.error
 
     let referencedInvoiceNo: string | null = null
     let referencedInvoiceType: string | null = null
@@ -276,6 +326,7 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
         account: line.account_id ? accounts.get(String(line.account_id)) ?? null : null,
       })),
       payments: (paymentsRes.data ?? []).map(mapPaymentRow),
+      attachments: (attachmentsRes.data ?? []).map(mapInvoiceAttachmentRow),
       createdBy: profileRes.data
         ? { name: (profileRes.data.full_name as string | null) ?? null }
         : undefined,
@@ -288,12 +339,14 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
     const customerId = await resolveScopedUuid('customers', input.customerId, companyId)
     if (!customerId) throw new Error('Customer not found')
 
-    const { processedLines, subtotal, taxAmount, total } = processLines(input.lines)
+    const method = normalizeTaxCalculationMethod(input.taxCalculationMethod)
+    const { processedLines, subtotal, taxAmount, total } = processLines(input.lines, method)
     const invoiceNo = await resolveSequenceRepository().next('INVOICE', 'INV-')
     const issueDate = new Date(input.date)
     const createdById = await resolveProfileUuid(input.createdById)
     const invoiceType = await resolveInvoiceTypeForCustomer(customerId, companyId)
     const currency = await resolveTransactionCurrency(input.currency)
+    const paymentTermId = await resolveScopedUuid('payment_terms', input.paymentTermId, companyId)
 
     const { data, error } = await db
       .from('invoices')
@@ -306,7 +359,10 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
         date: issueDate.toISOString(),
         issue_time: formatIssueTime(issueDate),
         due_date: new Date(input.dueDate).toISOString(),
+        expiry_date: input.expiryDate ? new Date(input.expiryDate).toISOString() : null,
         currency,
+        tax_calculation_method: method,
+        payment_term_id: paymentTermId,
         subtotal,
         tax_amount: taxAmount,
         total,
@@ -347,7 +403,8 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
     }
     if (!source.customer) throw new Error('Source invoice customer not found')
 
-    const { processedLines, subtotal, taxAmount, total } = processLines(input.lines)
+    const method = normalizeTaxCalculationMethod(source.taxCalculationMethod)
+    const { processedLines, subtotal, taxAmount, total } = processLines(input.lines, method)
     if (total <= 0) throw new Error('Adjustment total must be greater than zero')
 
     const invoiceNo = await resolveSequenceRepository().next('INVOICE', 'INV-')
@@ -368,6 +425,8 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
         issue_time: formatIssueTime(issueDate),
         due_date: new Date(input.dueDate).toISOString(),
         currency: source.currency,
+        tax_calculation_method: method,
+        payment_term_id: source.paymentTermId,
         subtotal,
         tax_amount: taxAmount,
         total,
@@ -412,9 +471,18 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
     }
     if (input.date !== undefined) patch.date = new Date(input.date).toISOString()
     if (input.dueDate !== undefined) patch.due_date = new Date(input.dueDate).toISOString()
+    if (input.expiryDate !== undefined) {
+      patch.expiry_date = input.expiryDate ? new Date(input.expiryDate).toISOString() : null
+    }
     if (input.notes !== undefined) patch.notes = input.notes
     if (input.terms !== undefined) patch.terms = input.terms
     if (input.status !== undefined) patch.status = input.status
+    if (input.taxCalculationMethod !== undefined) {
+      patch.tax_calculation_method = normalizeTaxCalculationMethod(input.taxCalculationMethod)
+    }
+    if (input.paymentTermId !== undefined) {
+      patch.payment_term_id = await resolveScopedUuid('payment_terms', input.paymentTermId, companyId)
+    }
     if (input.currency !== undefined) {
       patch.currency = await resolveTransactionCurrency(input.currency)
     }
@@ -428,11 +496,17 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
     }
 
     if (input.lines !== undefined) {
-      const { processedLines, subtotal, taxAmount, total } = processLines(input.lines)
+      const method = normalizeTaxCalculationMethod(
+        input.taxCalculationMethod ?? existing.taxCalculationMethod,
+      )
+      const { processedLines, subtotal, taxAmount, total } = processLines(input.lines, method)
       patch.subtotal = subtotal
       patch.tax_amount = taxAmount
       patch.total = total
       patch.balance = total - existing.amountPaid
+      if (input.taxCalculationMethod === undefined) {
+        patch.tax_calculation_method = method
+      }
 
       const { error: deleteLineError } = await db
         .from('invoice_lines')

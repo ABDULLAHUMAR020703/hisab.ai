@@ -1,4 +1,5 @@
 import type { InvoiceRecord } from '../entities'
+import type { InvoiceTaxCalculationMethod } from '@/lib/invoices/calculations'
 
 export type InvoiceSortField =
   | 'createdAt'
@@ -36,16 +37,25 @@ export interface InvoiceLineInput {
   quantity: number
   unitPrice: number
   taxRate: number
+  taxRateId?: string | null
   accountId?: string | null
   costCenterId?: string | null
   inventoryItemId?: string | null
+  itemName?: string | null
+  projectService?: string | null
+  className?: string | null
+  projectId?: string | null
+  classId?: string | null
 }
 
 export interface InvoiceCreateInput {
   customerId: string
   date: string | Date
   dueDate: string | Date
+  expiryDate?: string | Date | null
   currency?: string | null
+  taxCalculationMethod?: InvoiceTaxCalculationMethod | string | null
+  paymentTermId?: string | null
   lines: InvoiceLineInput[]
   notes?: string | null
   terms?: string | null
@@ -58,7 +68,10 @@ export interface InvoiceUpdateInput {
   customerId?: string
   date?: string | Date
   dueDate?: string | Date
+  expiryDate?: string | Date | null
   currency?: string | null
+  taxCalculationMethod?: InvoiceTaxCalculationMethod | string | null
+  paymentTermId?: string | null
   lines?: InvoiceLineInput[]
   notes?: string | null
   terms?: string | null

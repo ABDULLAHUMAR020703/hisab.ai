@@ -25,7 +25,10 @@ export interface PdfCustomerInfo {
 
 export interface PdfLineItem {
   index: number
+  itemName: string | null
   description: string
+  projectService: string | null
+  className: string | null
   quantity: number
   unitPrice: number
   taxRate: number
@@ -54,7 +57,9 @@ export interface InvoicePdfDocument {
   invoiceNo: string
   date: Date
   dueDate: Date
+  expiryDate: Date | null
   terms: string | null
+  taxCalculationMethod: string
   currency: string
   businessStatus: string
   zatcaStatusLabel: string | null

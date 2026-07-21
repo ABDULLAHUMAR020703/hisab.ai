@@ -2,6 +2,8 @@ import type { CostCenterRecord } from '../entities'
 
 export interface CostCenterListOptions {
   search?: string
+  type?: string
+  activeOnly?: boolean
 }
 
 export interface CostCenterBatchDuplicateInput {
@@ -19,6 +21,7 @@ export interface CostCenterBatchDuplicateMatch {
 export interface CostCenterDuplicateCriteria {
   code?: string | null
   name?: string | null
+  type?: string | null
 }
 
 export interface CostCenterCreateInput {
@@ -27,6 +30,7 @@ export interface CostCenterCreateInput {
   type?: string
   description?: string | null
   isActive?: boolean
+  metadata?: Record<string, unknown> | null
 }
 
 export interface CostCenterUpdateInput {
@@ -34,6 +38,7 @@ export interface CostCenterUpdateInput {
   type?: string
   description?: string | null
   isActive?: boolean
+  metadata?: Record<string, unknown> | null
 }
 
 export interface CostCenterRepository {
