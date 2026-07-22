@@ -16,6 +16,8 @@ interface InvoiceNumberingState {
   padding: number
   suffix: string
   minNextNumber: number
+  hasInvoices: boolean
+  lastIssuedInvoiceNo: string | null
 }
 
 const DEFAULT_STATE: InvoiceNumberingState = {
@@ -25,6 +27,8 @@ const DEFAULT_STATE: InvoiceNumberingState = {
   padding: 6,
   suffix: '',
   minNextNumber: 1,
+  hasInvoices: false,
+  lastIssuedInvoiceNo: null,
 }
 
 export default function DocumentNumberingSettingsPage() {
@@ -50,6 +54,8 @@ export default function DocumentNumberingSettingsPage() {
           padding: Number(invoice.padding ?? 6),
           suffix: invoice.suffix ?? '',
           minNextNumber: Number(invoice.minNextNumber ?? 1),
+          hasInvoices: Boolean(invoice.hasInvoices),
+          lastIssuedInvoiceNo: invoice.lastIssuedInvoiceNo ?? null,
         })
       }
     } catch (err) {
@@ -86,6 +92,7 @@ export default function DocumentNumberingSettingsPage() {
           documentType: 'INVOICE',
           action: 'save',
           prefix: form.prefix,
+          // Starting number is informational once invoices exist — keep stored value
           startingNumber: form.startingNumber,
           nextNumber: form.nextNumber,
           padding: form.padding,
@@ -93,16 +100,6 @@ export default function DocumentNumberingSettingsPage() {
         }),
       })
       if (!res.ok) throw new Error(await readApiError(res))
-      const data = await res.json()
-      const sequence = data.sequence
-      setForm((f) => ({
-        ...f,
-        prefix: sequence.prefix,
-        startingNumber: Number(sequence.startingNumber),
-        nextNumber: Number(sequence.nextNumber),
-        padding: Number(sequence.padding),
-        suffix: sequence.suffix ?? '',
-      }))
       setSaved(true)
       await load()
     } catch (err) {
@@ -194,38 +191,57 @@ export default function DocumentNumberingSettingsPage() {
               hint="Text before the number, e.g. INV-"
             />
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Input
-                label="Starting Number"
-                type="number"
-                min={1}
-                max={999999999}
-                value={form.startingNumber}
-                onChange={(e) => {
-                  const parsed = parseInt(e.target.value, 10)
-                  setForm((f) => ({
-                    ...f,
-                    startingNumber: Number.isFinite(parsed) && parsed > 0 ? parsed : 1,
-                  }))
-                }}
-                hint="Initial reference for this series (does not auto-change as invoices are created)"
-              />
-              <Input
-                label="Next Invoice Number"
-                type="number"
-                min={1}
-                max={999999999}
-                value={form.nextNumber}
-                onChange={(e) => {
-                  const parsed = parseInt(e.target.value, 10)
-                  setForm((f) => ({
-                    ...f,
-                    nextNumber: Number.isFinite(parsed) && parsed > 0 ? parsed : 1,
-                  }))
-                }}
-                hint="The next invoice you create will receive this number. The system increments it automatically after each invoice. Existing invoices are never renumbered."
-              />
+            <Input
+              label="Starting Number"
+              type="number"
+              min={1}
+              max={999999999}
+              value={form.startingNumber}
+              disabled={form.hasInvoices}
+              onChange={(e) => {
+                if (form.hasInvoices) return
+                const parsed = parseInt(e.target.value, 10)
+                setForm((f) => ({
+                  ...f,
+                  startingNumber: Number.isFinite(parsed) && parsed > 0 ? parsed : 1,
+                }))
+              }}
+              hint={
+                form.hasInvoices
+                  ? 'Starting Number is only used when creating a new numbering sequence. To continue numbering, update the Next Invoice Number.'
+                  : 'Initial reference for this series when no invoices exist yet'
+              }
+            />
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Last Issued Invoice
+              </p>
+              <p className="mt-1 font-mono text-lg font-semibold text-slate-800">
+                {form.lastIssuedInvoiceNo ?? '—'}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                {form.lastIssuedInvoiceNo
+                  ? 'Most recent invoice number for this prefix (read-only).'
+                  : 'No invoices have been issued yet for this prefix.'}
+              </p>
             </div>
+
+            <Input
+              label="Next Invoice Number"
+              type="number"
+              min={1}
+              max={999999999}
+              value={form.nextNumber}
+              onChange={(e) => {
+                const parsed = parseInt(e.target.value, 10)
+                setForm((f) => ({
+                  ...f,
+                  nextNumber: Number.isFinite(parsed) && parsed > 0 ? parsed : 1,
+                }))
+              }}
+              hint="The next invoice you create will receive this number. The system increments it automatically after each invoice. Existing invoices are never renumbered."
+            />
 
             <Select
               label="Padding"

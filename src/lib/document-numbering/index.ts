@@ -20,6 +20,7 @@ export {
   updateDocumentSequence,
   resetDocumentSequenceToDefault,
   getMinAllowedNextNumber,
+  getInvoiceNumberingContext,
   seedDefaultDocumentSequencesForCompany,
   repairInvoiceDocumentSequence,
   isCorruptInvoiceSequence,

@@ -1,7 +1,7 @@
 import { requireAuth } from '@/lib/auth'
 import {
   buildPreview,
-  getMinAllowedNextNumber,
+  getInvoiceNumberingContext,
   listDocumentSequences,
   resetDocumentSequenceToDefault,
   updateDocumentSequence,
@@ -16,9 +16,14 @@ export async function GET() {
       sequences.find((s) => s.documentType === 'INVOICE') ??
       sequences[0]
 
-    const minNext = invoice
-      ? await getMinAllowedNextNumber('INVOICE', invoice.prefix)
-      : 1
+    const context = invoice
+      ? await getInvoiceNumberingContext(invoice.prefix)
+      : {
+          hasInvoices: false,
+          lastIssuedInvoiceNo: null,
+          lastIssuedSequence: null,
+          minNextNumber: 1,
+        }
 
     return Response.json({
       sequences: sequences.map((s) => ({
@@ -42,7 +47,10 @@ export async function GET() {
               padding: invoice.padding,
               suffix: invoice.suffix,
             }),
-            minNextNumber: minNext,
+            minNextNumber: context.minNextNumber,
+            hasInvoices: context.hasInvoices,
+            lastIssuedInvoiceNo: context.lastIssuedInvoiceNo,
+            lastIssuedSequence: context.lastIssuedSequence,
           }
         : null,
     })

@@ -261,13 +261,34 @@ export async function getMinAllowedNextNumber(
   prefix: string,
   companyId?: string,
 ): Promise<number> {
+  if (documentType.toUpperCase() !== 'INVOICE') return 1
+  const info = await getInvoiceNumberingContext(prefix, companyId)
+  return info.minNextNumber
+}
+
+/**
+ * UI context for Document Numbering settings:
+ * last issued invoice (matching prefix), whether any invoices exist, and min next.
+ */
+export async function getInvoiceNumberingContext(
+  prefix: string,
+  companyId?: string,
+): Promise<{
+  hasInvoices: boolean
+  lastIssuedInvoiceNo: string | null
+  lastIssuedSequence: number | null
+  minNextNumber: number
+}> {
   const db = supabaseDb()
   const cid = companyId ?? (await resolveCompanyId())
-  const type = documentType.toUpperCase()
 
-  if (type !== 'INVOICE') {
-    return 1
-  }
+  const { count, error: countError } = await db
+    .from('invoices')
+    .select('id', { count: 'exact', head: true })
+    .eq('company_id', cid)
+    .is('deleted_at', null)
+
+  if (countError) throw countError
 
   const { data, error } = await db
     .from('invoices')
@@ -278,12 +299,22 @@ export async function getMinAllowedNextNumber(
   if (error) throw error
 
   let max = 0
+  let lastIssuedInvoiceNo: string | null = null
   for (const row of data ?? []) {
     const no = String((row as { invoice_no: string }).invoice_no ?? '')
     const n = extractTrailingSequenceNumber(no, prefix)
-    if (n != null && n > max) max = n
+    if (n != null && n >= max) {
+      max = n
+      lastIssuedInvoiceNo = no
+    }
   }
-  return max + 1
+
+  return {
+    hasInvoices: (count ?? 0) > 0,
+    lastIssuedInvoiceNo,
+    lastIssuedSequence: max > 0 ? max : null,
+    minNextNumber: max + 1,
+  }
 }
 
 export async function updateDocumentSequence(
