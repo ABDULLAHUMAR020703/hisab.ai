@@ -16,7 +16,8 @@ import {
   type PaymentTermPresetKey,
 } from '@/lib/invoices/payment-terms'
 import { todayDateString, isFutureInvoiceDate } from '@/lib/ui/invoice-status'
-import { formatCurrency as formatAmount } from '@/lib/utils'
+import { formatCurrency as formatAmount, cn } from '@/lib/utils'
+import { defaultUnitPriceFromProject } from '@/lib/cost-centers/product-catalog'
 
 export interface InvoiceFormLine {
   itemName: string
@@ -128,11 +129,14 @@ export function InvoiceCreateForm({
     percentage: 15,
   })
   const fileInputRef = useRef<HTMLInputElement>(null)
+  /** Guards against out-of-order Project/Service metadata fetches per line. */
+  const projectSelectGenRef = useRef<Record<number, number>>({})
 
   useEffect(() => {
     async function loadLookups() {
       const [taxRes, projectRes, classRes, termsRes] = await Promise.all([
         fetch('/api/tax-configurations'),
+        // Names only — product Cost/metadata loaded on selection
         fetch('/api/cost-centers?type=PROJECT&activeOnly=true'),
         fetch('/api/cost-centers?type=CLASS&activeOnly=true'),
         fetch('/api/master-data/payment_terms'),
@@ -215,6 +219,40 @@ export function InvoiceCreateForm({
       taxRateId,
       taxRate: tax?.percentage ?? 0,
     })
+  }
+
+  async function onProjectSelect(idx: number, projectId: string) {
+    const selected = projects.find((p) => p.id === projectId)
+    if (!projectId) {
+      updateLine(idx, { projectId: '', projectService: '' })
+      return
+    }
+
+    updateLine(idx, {
+      projectId,
+      projectService: selected?.name ?? '',
+    })
+
+    const gen = (projectSelectGenRef.current[idx] ?? 0) + 1
+    projectSelectGenRef.current[idx] = gen
+
+    try {
+      const res = await fetch(`/api/cost-centers/${projectId}`)
+      if (!res.ok) return
+      if (projectSelectGenRef.current[idx] !== gen) return
+
+      const center = (await res.json()) as {
+        name?: string
+        metadata?: Record<string, unknown>
+      }
+      updateLine(idx, {
+        projectId,
+        projectService: center.name?.trim() || selected?.name || '',
+        unitPrice: defaultUnitPriceFromProject(center.metadata),
+      })
+    } catch {
+      // Keep name selection; user can enter unit price manually
+    }
   }
 
   async function createTaxConfig() {
@@ -424,19 +462,41 @@ export function InvoiceCreateForm({
           Line Items
         </label>
         <div className="overflow-x-auto rounded-xl border border-slate-200">
-          <table className="w-full min-w-[960px]">
+          <table className="w-full min-w-[1280px] table-fixed">
+            <colgroup>
+              <col className="w-[14%]" />
+              <col className="w-[24%]" />
+              <col className="w-[16%]" />
+              <col className="w-[16%]" />
+              <col className="w-[7%]" />
+              <col className="w-[9%]" />
+              <col className="w-[10%]" />
+              <col className="w-[8%]" />
+              <col className="w-[40px]" />
+            </colgroup>
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
-                {['Item', 'Description', 'Project / Service', 'Class', 'Qty', 'Unit Price', 'Tax', 'Amount', ''].map(
-                  (h, i) => (
-                    <th
-                      key={i}
-                      className="px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500"
-                    >
-                      {h}
-                    </th>
-                  ),
-                )}
+                {[
+                  { label: 'Item', align: 'text-left' },
+                  { label: 'Description', align: 'text-left' },
+                  { label: 'Project / Service', align: 'text-left' },
+                  { label: 'Class', align: 'text-left' },
+                  { label: 'Qty', align: 'text-right' },
+                  { label: 'Unit Price', align: 'text-right' },
+                  { label: 'Tax', align: 'text-left' },
+                  { label: 'Amount', align: 'text-right' },
+                  { label: '', align: 'text-center' },
+                ].map((h, i) => (
+                  <th
+                    key={i}
+                    className={cn(
+                      'px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500',
+                      h.align,
+                    )}
+                  >
+                    {h.label}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -449,7 +509,7 @@ export function InvoiceCreateForm({
                         value={line.itemName}
                         onChange={(e) => updateLine(idx, { itemName: e.target.value })}
                         placeholder="Item"
-                        className="input-base py-1.5 text-xs"
+                        className="input-base w-full py-1.5 text-xs"
                       />
                     </td>
                     <td className="px-2 py-2">
@@ -457,20 +517,17 @@ export function InvoiceCreateForm({
                         value={line.description}
                         onChange={(e) => updateLine(idx, { description: e.target.value })}
                         placeholder="Description"
-                        className="input-base py-1.5 text-xs"
+                        className="input-base w-full py-1.5 text-xs"
                       />
                     </td>
-                    <td className="px-2 py-2 min-w-[140px]">
+                    <td className="px-2 py-2">
                       <select
                         value={line.projectId}
                         onChange={(e) => {
-                          const project = projects.find((p) => p.id === e.target.value)
-                          updateLine(idx, {
-                            projectId: e.target.value,
-                            projectService: project?.name ?? '',
-                          })
+                          void onProjectSelect(idx, e.target.value)
                         }}
-                        className="input-base bg-white py-1.5 text-xs"
+                        className="input-base w-full bg-white py-1.5 text-xs"
+                        title={line.projectService || undefined}
                       >
                         <option value="">— Select project —</option>
                         {projects.map((p) => (
@@ -478,7 +535,7 @@ export function InvoiceCreateForm({
                         ))}
                       </select>
                     </td>
-                    <td className="px-2 py-2 min-w-[140px]">
+                    <td className="px-2 py-2">
                       <select
                         value={line.classId}
                         onChange={(e) => {
@@ -488,7 +545,8 @@ export function InvoiceCreateForm({
                             className: cls?.name ?? '',
                           })
                         }}
-                        className="input-base bg-white py-1.5 text-xs"
+                        className="input-base w-full bg-white py-1.5 text-xs"
+                        title={line.className || undefined}
                       >
                         <option value="">— Select class —</option>
                         {classes.map((c) => (
@@ -496,31 +554,31 @@ export function InvoiceCreateForm({
                         ))}
                       </select>
                     </td>
-                    <td className="w-20 px-2 py-2">
+                    <td className="px-2 py-2">
                       <input
                         type="number"
                         min="0"
                         step="0.01"
                         value={line.quantity}
                         onChange={(e) => updateLine(idx, { quantity: parseFloat(e.target.value) || 0 })}
-                        className="input-base py-1.5 text-right text-xs"
+                        className="input-base w-full py-1.5 text-right text-xs"
                       />
                     </td>
-                    <td className="w-28 px-2 py-2">
+                    <td className="px-2 py-2">
                       <input
                         type="number"
                         min="0"
                         step="0.01"
                         value={line.unitPrice}
                         onChange={(e) => updateLine(idx, { unitPrice: parseFloat(e.target.value) || 0 })}
-                        className="input-base py-1.5 text-right text-xs"
+                        className="input-base w-full py-1.5 text-right text-xs"
                       />
                     </td>
-                    <td className="min-w-[140px] px-2 py-2">
+                    <td className="px-2 py-2">
                       <select
                         value={line.taxRateId}
                         onChange={(e) => onTaxSelect(idx, e.target.value)}
-                        className="input-base bg-white py-1.5 text-xs"
+                        className="input-base w-full bg-white py-1.5 text-xs"
                         disabled={form.taxCalculationMethod === 'OUT_OF_SCOPE'}
                       >
                         <option value="">—</option>
@@ -531,10 +589,10 @@ export function InvoiceCreateForm({
                         ))}
                       </select>
                     </td>
-                    <td className="whitespace-nowrap px-3 py-2 text-right text-sm font-semibold tabular text-slate-700">
+                    <td className="whitespace-nowrap px-2 py-2 text-right text-sm font-semibold tabular text-slate-700">
                       {formatFormAmount(lineCalc?.lineTotal ?? 0)}
                     </td>
-                    <td className="px-2 py-2 text-center">
+                    <td className="px-1 py-2 text-center">
                       <button
                         type="button"
                         onClick={() =>
@@ -543,7 +601,7 @@ export function InvoiceCreateForm({
                             lines: f.lines.filter((_, i) => i !== idx),
                           }))
                         }
-                        className="flex h-6 w-6 items-center justify-center rounded-lg bg-red-50 text-base leading-none text-red-400 transition-colors hover:bg-red-100 hover:text-red-600"
+                        className="mx-auto flex h-6 w-6 items-center justify-center rounded-lg bg-red-50 text-base leading-none text-red-400 transition-colors hover:bg-red-100 hover:text-red-600"
                       >
                         ×
                       </button>

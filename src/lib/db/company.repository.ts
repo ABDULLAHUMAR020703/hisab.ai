@@ -71,6 +71,26 @@ async function insertTenantShell(
     .from('company_subscriptions')
     .insert({ company_id: companyId, plan: 'FREE', status: 'TRIAL' })
   if (subError) throw subError
+
+  const invoicePrefix = input?.invoicePrefix ?? 'INV-'
+  const { error: seqError } = await supabase.from('document_sequences').upsert(
+    {
+      company_id: companyId,
+      document_type: 'INVOICE',
+      prefix: invoicePrefix,
+      starting_number: 1,
+      next_number: 1,
+      padding: 6,
+      suffix: '',
+    },
+    { onConflict: 'company_id,document_type' },
+  )
+  if (seqError) {
+    // Table may not exist yet in older environments; ignore so company creation still works
+    if (!/document_sequences|does not exist|42P01/i.test(seqError.message)) {
+      throw seqError
+    }
+  }
 }
 
 export async function findCompanyById(

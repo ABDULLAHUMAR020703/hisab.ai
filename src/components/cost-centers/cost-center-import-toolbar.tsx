@@ -17,6 +17,8 @@ interface ImportRowError {
 
 interface ImportSummary {
   kind: ImportKind
+  created?: number
+  updated?: number
   imported: number
   skipped: number
   duplicates: number
@@ -55,7 +57,7 @@ const IMPORT_OPTIONS: Array<{
     label: 'Import Projects',
     description: 'Horizontal Product/Service List spreadsheet.',
     formatHint:
-      'Requires Product/Service Name. All columns are stored for future inventory/sales use. Invoice dropdown uses the name only.',
+      'Requires Product/Service Name. Matches existing projects by SKU (preferred) or name and updates Cost/metadata; creates new rows when missing. Invoice Unit Price uses the latest Cost.',
     templateUrl: '/api/cost-centers/import/project/template',
     importUrl: '/api/cost-centers/import/project',
   },
@@ -215,11 +217,27 @@ export function CostCenterImportToolbar({ onImportSuccess }: Props) {
             {summary && (
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm">
                 <p className="font-semibold text-emerald-800">Import summary</p>
-                <div className="mt-2 grid grid-cols-2 gap-2 text-emerald-900 sm:grid-cols-4">
-                  <div><span className="text-emerald-600">Imported</span><p className="font-bold">{summary.imported}</p></div>
-                  <div><span className="text-emerald-600">Skipped</span><p className="font-bold">{summary.skipped}</p></div>
-                  <div><span className="text-emerald-600">Duplicates</span><p className="font-bold">{summary.duplicates}</p></div>
-                  <div><span className="text-emerald-600">Failed</span><p className="font-bold">{summary.failed}</p></div>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-emerald-900 sm:grid-cols-5">
+                  <div>
+                    <span className="text-emerald-600">Created</span>
+                    <p className="font-bold">{summary.created ?? summary.imported}</p>
+                  </div>
+                  <div>
+                    <span className="text-emerald-600">Updated</span>
+                    <p className="font-bold">{summary.updated ?? 0}</p>
+                  </div>
+                  <div>
+                    <span className="text-emerald-600">Skipped</span>
+                    <p className="font-bold">{summary.skipped}</p>
+                  </div>
+                  <div>
+                    <span className="text-emerald-600">Duplicates</span>
+                    <p className="font-bold">{summary.duplicates}</p>
+                  </div>
+                  <div>
+                    <span className="text-emerald-600">Failed</span>
+                    <p className="font-bold">{summary.failed}</p>
+                  </div>
                 </div>
                 {summary.errors.length > 0 && (
                   <ul className="mt-3 max-h-48 space-y-2 overflow-y-auto text-xs text-red-700">

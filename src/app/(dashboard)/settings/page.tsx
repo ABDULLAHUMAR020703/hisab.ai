@@ -1,6 +1,7 @@
 ﻿'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { Save, Building2, Shield, Palette } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
@@ -179,6 +180,16 @@ export default function SettingsPage() {
           </div>
         }
       />
+
+      <div className="flex flex-wrap gap-3">
+        <Link
+          href="/settings/document-numbering"
+          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+        >
+          Document Numbering
+          <span className="text-xs font-normal text-slate-400">Invoice sequences</span>
+        </Link>
+      </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">
         <div className="flex items-center gap-3 pb-4 border-b border-slate-100">

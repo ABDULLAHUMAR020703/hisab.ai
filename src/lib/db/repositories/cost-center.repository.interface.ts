@@ -4,6 +4,8 @@ export interface CostCenterListOptions {
   search?: string
   type?: string
   activeOnly?: boolean
+  /** When false, metadata is omitted from list rows (default true for backward compatibility). */
+  includeMetadata?: boolean
 }
 
 export interface CostCenterBatchDuplicateInput {

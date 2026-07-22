@@ -18,7 +18,7 @@ import {
 } from '../entity-mappers'
 import type { InvoiceRecord } from '../entities'
 import { isUuid, queryByIdOrLegacy, resolveCompanyId, supabaseDb } from '../repository-utils'
-import { resolveSequenceRepository } from '../sequence-resolver'
+import { allocateDocumentNumber } from '@/lib/document-numbering/service'
 import type {
   InvoiceAdjustmentCreateInput,
   InvoiceCreateInput,
@@ -341,7 +341,7 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
 
     const method = normalizeTaxCalculationMethod(input.taxCalculationMethod)
     const { processedLines, subtotal, taxAmount, total } = processLines(input.lines, method)
-    const invoiceNo = await resolveSequenceRepository().next('INVOICE', 'INV-')
+    const invoiceNo = await allocateDocumentNumber('INVOICE', companyId)
     const issueDate = new Date(input.date)
     const createdById = await resolveProfileUuid(input.createdById)
     const invoiceType = await resolveInvoiceTypeForCustomer(customerId, companyId)
@@ -407,7 +407,7 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
     const { processedLines, subtotal, taxAmount, total } = processLines(input.lines, method)
     if (total <= 0) throw new Error('Adjustment total must be greater than zero')
 
-    const invoiceNo = await resolveSequenceRepository().next('INVOICE', 'INV-')
+    const invoiceNo = await allocateDocumentNumber('INVOICE', companyId)
     const issueDate = new Date(input.date)
     const createdById = await resolveProfileUuid(input.createdById)
     const defaultNote = input.adjustmentType === 'CREDIT_NOTE' ? 'Credit note' : 'Debit note'

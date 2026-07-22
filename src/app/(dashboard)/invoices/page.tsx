@@ -693,7 +693,7 @@ export default function InvoicesPage() {
         subtitle={editingInvoiceId
           ? (isSaudi ? 'Update invoice details before ZATCA submission' : 'Update invoice details')
           : 'Create a new customer invoice'}
-        size="xl"
+        size="3xl"
         footer={
           <>
             <Button variant="outline" onClick={() => { setShowModal(false); resetInvoiceForm() }}>Cancel</Button>

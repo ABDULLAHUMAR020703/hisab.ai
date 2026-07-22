@@ -9,7 +9,7 @@ interface ModalProps {
   title?: string
   subtitle?: string
   children: React.ReactNode
-  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl'
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl'
   footer?: React.ReactNode
 }
 
@@ -19,6 +19,8 @@ const sizes = {
   lg:  'max-w-2xl',
   xl:  'max-w-4xl',
   '2xl': 'max-w-6xl',
+  /** ~1200–1400px on desktop; scales with viewport while keeping edge margins via outer padding */
+  '3xl': 'max-w-[min(1400px,90vw)]',
 }
 
 export function Modal({ open, onClose, title, subtitle, children, size = 'md', footer }: ModalProps) {

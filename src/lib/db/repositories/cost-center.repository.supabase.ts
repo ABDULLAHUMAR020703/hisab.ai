@@ -23,10 +23,15 @@ export const supabaseCostCenterRepository: CostCenterRepository = {
     const db = supabaseDb()
     const companyId = await resolveCompanyId()
     const search = options.search?.trim()
+    const includeMetadata = options.includeMetadata !== false
 
     let query = db
       .from('cost_centers')
-      .select('*')
+      .select(
+        includeMetadata
+          ? '*'
+          : 'id, code, name, type, description, is_active, created_at, updated_at',
+      )
       .eq('company_id', companyId)
       .is('deleted_at', null)
       .order('code', { ascending: true })
@@ -43,7 +48,13 @@ export const supabaseCostCenterRepository: CostCenterRepository = {
 
     const { data, error } = await query
     if (error) throw error
-    return (data ?? []).map(mapCostCenterRow)
+    return (data ?? []).map((row) => {
+      const mapped = mapCostCenterRow(row)
+      if (!includeMetadata) {
+        return { ...mapped, metadata: {} }
+      }
+      return mapped
+    })
   },
 
   async findById(id: string) {

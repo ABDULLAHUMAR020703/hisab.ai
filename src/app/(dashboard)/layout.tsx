@@ -8,7 +8,7 @@ import {
   Building2, DollarSign, UserCheck, Package, MapPin, Camera,
   BarChart3, Shield, UserCog, Settings, LogOut, ChevronLeft,
   Menu, List, Bell, ChevronDown, TrendingUp, History, Database,
-  ClipboardList, ShoppingCart, Banknote, BadgePercent, Landmark, Wallet, Wand2, ArrowRightLeft, GitBranch, Cog
+  ClipboardList, ShoppingCart, Banknote, BadgePercent, Landmark, Wallet, Wand2, ArrowRightLeft, GitBranch, Cog, Hash
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PRODUCT_NAME } from '@/lib/brand'
@@ -87,6 +87,7 @@ const NAV = [
       { label: 'Migration Wizard', href: '/migration-wizard', icon: Wand2 },
       { label: 'Import History', href: '/import-history', icon: History },
       { label: 'Settings', href: '/settings', icon: Settings },
+      { label: 'Document Numbering', href: '/settings/document-numbering', icon: Hash },
     ]
   },
 ]
