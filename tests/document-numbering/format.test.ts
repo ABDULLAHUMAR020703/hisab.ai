@@ -37,12 +37,15 @@ describe('document number formatting', () => {
     assert.equal(extractTrailingSequenceNumber('INV-000170'), 170)
     assert.equal(extractTrailingSequenceNumber('INV-91'), 91)
     assert.equal(extractTrailingSequenceNumber('CN-000012'), 12)
+    assert.equal(extractTrailingSequenceNumber('INV-000170', 'INV-'), 170)
+    assert.equal(extractTrailingSequenceNumber('ZAT-000042', 'INV-'), null)
+    assert.equal(extractTrailingSequenceNumber('ZAT-1782231557879', 'INV-'), null)
+    assert.equal(extractTrailingSequenceNumber('ZAT-1782231557879'), null)
   })
 
-  it('builds a live preview', () => {
-    assert.equal(
-      previewDocumentNumber({ prefix: 'INV-', nextNumber: 500, padding: 6 }),
-      'INV-000500',
+  it('rejects timestamp-sized sequence numbers', () => {
+    assert.throws(() =>
+      formatDocumentNumber({ prefix: 'ZAT-', number: 1782231557879, padding: 0 }),
     )
   })
 })
@@ -67,6 +70,17 @@ describe('document sequence validation', () => {
     )
     assert.equal(result.ok, false)
     assert.ok(result.errors.some((e) => /171/i.test(e)))
+  })
+
+  it('rejects timestamp-like next numbers', () => {
+    const result = validateDocumentSequenceUpdate({
+      prefix: 'ZAT-',
+      nextNumber: 1782231557879,
+      padding: 6,
+      startingNumber: 1,
+    })
+    assert.equal(result.ok, false)
+    assert.ok(result.errors.some((e) => /too large|timestamp/i.test(e)))
   })
 
   it('accepts a valid jump forward', () => {

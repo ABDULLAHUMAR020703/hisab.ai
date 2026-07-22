@@ -191,7 +191,7 @@ export default function DocumentNumberingSettingsPage() {
               value={form.prefix}
               maxLength={20}
               onChange={(e) => setForm((f) => ({ ...f, prefix: e.target.value }))}
-              hint="Example: INV-"
+              hint="Text before the number, e.g. INV-"
             />
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -199,27 +199,31 @@ export default function DocumentNumberingSettingsPage() {
                 label="Starting Number"
                 type="number"
                 min={1}
+                max={999999999}
                 value={form.startingNumber}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const parsed = parseInt(e.target.value, 10)
                   setForm((f) => ({
                     ...f,
-                    startingNumber: Math.max(1, parseInt(e.target.value, 10) || 1),
+                    startingNumber: Number.isFinite(parsed) && parsed > 0 ? parsed : 1,
                   }))
-                }
-                hint="Reference start for this series"
+                }}
+                hint="Initial reference for this series (does not auto-change as invoices are created)"
               />
               <Input
-                label="Current Next Number"
+                label="Next Invoice Number"
                 type="number"
-                min={form.minNextNumber}
+                min={1}
+                max={999999999}
                 value={form.nextNumber}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const parsed = parseInt(e.target.value, 10)
                   setForm((f) => ({
                     ...f,
-                    nextNumber: Math.max(1, parseInt(e.target.value, 10) || 1),
+                    nextNumber: Number.isFinite(parsed) && parsed > 0 ? parsed : 1,
                   }))
-                }
-                hint={`Cannot be lower than ${form.minNextNumber}`}
+                }}
+                hint="The next invoice you create will receive this number. The system increments it automatically after each invoice. Existing invoices are never renumbered."
               />
             </div>
 

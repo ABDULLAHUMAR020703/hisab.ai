@@ -1,6 +1,11 @@
 import 'server-only'
 import { resolveCompanyId, supabaseDb } from '@/lib/db/repository-utils'
-import { extractTrailingSequenceNumber, formatDocumentNumber, previewDocumentNumber } from './format'
+import {
+  extractTrailingSequenceNumber,
+  formatDocumentNumber,
+  isPlausibleSequenceNumber,
+  previewDocumentNumber,
+} from './format'
 import {
   DOCUMENT_TYPE_DEFAULTS,
   DOCUMENT_TYPES,
@@ -29,6 +34,29 @@ function isDocumentType(value: string): value is DocumentType {
   return (DOCUMENT_TYPES as readonly string[]).includes(value)
 }
 
+async function resolvePreferredInvoicePrefix(companyId: string): Promise<string> {
+  const db = supabaseDb()
+  const { data } = await db
+    .from('company_settings')
+    .select('invoice_prefix')
+    .eq('company_id', companyId)
+    .maybeSingle()
+  const prefix = String(data?.invoice_prefix ?? '').trim()
+  return prefix || 'INV-'
+}
+
+/**
+ * True when next_number looks corrupted (timestamp / ID) or prefix was polluted
+ * by ZATCA compliance test numbering (ZAT-).
+ */
+export function isCorruptInvoiceSequence(sequence: DocumentSequenceRecord): boolean {
+  if (!isPlausibleSequenceNumber(sequence.nextNumber)) return true
+  if (!isPlausibleSequenceNumber(sequence.startingNumber)) return true
+  const prefix = sequence.prefix.trim().toUpperCase()
+  if (prefix === 'ZAT-' || prefix.startsWith('ZAT')) return true
+  return false
+}
+
 export async function ensureDocumentSequence(
   documentType: string,
   companyId?: string,
@@ -40,6 +68,9 @@ export async function ensureDocumentSequence(
     ? DOCUMENT_TYPE_DEFAULTS[type]
     : { prefix: `${type.slice(0, 3)}-`, padding: 6, startingNumber: 1, label: type }
 
+  const preferredPrefix =
+    type === 'INVOICE' ? await resolvePreferredInvoicePrefix(cid) : defaults.prefix
+
   const { data: existing } = await db
     .from('document_sequences')
     .select('*')
@@ -47,7 +78,13 @@ export async function ensureDocumentSequence(
     .eq('document_type', type)
     .maybeSingle()
 
-  if (existing) return mapRow(existing as Record<string, unknown>)
+  if (existing) {
+    const mapped = mapRow(existing as Record<string, unknown>)
+    if (type === 'INVOICE' && isCorruptInvoiceSequence(mapped)) {
+      return repairInvoiceDocumentSequence(cid, mapped)
+    }
+    return mapped
+  }
 
   const { data: inserted, error: insertError } = await db
     .from('document_sequences')
@@ -55,7 +92,7 @@ export async function ensureDocumentSequence(
       {
         company_id: cid,
         document_type: type,
-        prefix: defaults.prefix,
+        prefix: preferredPrefix,
         starting_number: defaults.startingNumber,
         next_number: defaults.startingNumber,
         padding: defaults.padding,
@@ -70,11 +107,10 @@ export async function ensureDocumentSequence(
     return mapRow(inserted as Record<string, unknown>)
   }
 
-  // Fallback RPC (e.g. race on concurrent insert)
   const { data, error } = await db.rpc('ensure_document_sequence', {
     p_company_id: cid,
     p_document_type: type,
-    p_prefix: defaults.prefix,
+    p_prefix: preferredPrefix,
     p_padding: defaults.padding,
     p_starting_number: defaults.startingNumber,
   })
@@ -93,13 +129,84 @@ export async function ensureDocumentSequence(
   return mapRow(fetched as Record<string, unknown>)
 }
 
+/**
+ * Recompute next invoice number from issued invoices that match the company prefix.
+ * Never uses timestamps, UUIDs, or non-matching prefixes (e.g. ZAT- compliance tests).
+ */
+export async function repairInvoiceDocumentSequence(
+  companyId?: string,
+  existing?: DocumentSequenceRecord,
+): Promise<DocumentSequenceRecord> {
+  const db = supabaseDb()
+  const cid = companyId ?? (await resolveCompanyId())
+  const current = existing ?? (await ensureDocumentSequenceRaw(cid))
+  const prefix = await resolvePreferredInvoicePrefix(cid)
+  const minNext = await getMinAllowedNextNumber('INVOICE', prefix, cid)
+  const nextNumber = Math.max(1, minNext)
+  const startingNumber = isPlausibleSequenceNumber(current.startingNumber)
+    ? current.startingNumber
+    : 1
+  const padding =
+    Number.isInteger(current.padding) && current.padding >= 0 && current.padding <= 10
+      ? current.padding
+      : 6
+
+  const { data, error } = await db
+    .from('document_sequences')
+    .update({
+      prefix,
+      starting_number: startingNumber,
+      next_number: nextNumber,
+      padding,
+      suffix: '',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('company_id', cid)
+    .eq('document_type', 'INVOICE')
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return mapRow(data as Record<string, unknown>)
+}
+
+async function ensureDocumentSequenceRaw(companyId: string): Promise<DocumentSequenceRecord> {
+  const db = supabaseDb()
+  const { data } = await db
+    .from('document_sequences')
+    .select('*')
+    .eq('company_id', companyId)
+    .eq('document_type', 'INVOICE')
+    .maybeSingle()
+  if (data) return mapRow(data as Record<string, unknown>)
+
+  const prefix = await resolvePreferredInvoicePrefix(companyId)
+  const { data: inserted, error } = await db
+    .from('document_sequences')
+    .upsert(
+      {
+        company_id: companyId,
+        document_type: 'INVOICE',
+        prefix,
+        starting_number: 1,
+        next_number: 1,
+        padding: 6,
+        suffix: '',
+      },
+      { onConflict: 'company_id,document_type' },
+    )
+    .select('*')
+    .single()
+  if (error) throw error
+  return mapRow(inserted as Record<string, unknown>)
+}
+
 export async function listDocumentSequences(
   companyId?: string,
 ): Promise<DocumentSequenceRecord[]> {
   const db = supabaseDb()
   const cid = companyId ?? (await resolveCompanyId())
 
-  // Always ensure invoice sequence exists for settings UI
   await ensureDocumentSequence('INVOICE', cid)
 
   const { data, error } = await db
@@ -131,6 +238,11 @@ export async function allocateDocumentNumber(
   const cid = companyId ?? (await resolveCompanyId())
   const type = documentType.toUpperCase()
 
+  // Heal corrupt invoice sequences before allocating
+  if (type === 'INVOICE') {
+    await ensureDocumentSequence('INVOICE', cid)
+  }
+
   const { data, error } = await db.rpc('allocate_document_number', {
     p_company_id: cid,
     p_document_type: type,
@@ -154,7 +266,6 @@ export async function getMinAllowedNextNumber(
   const type = documentType.toUpperCase()
 
   if (type !== 'INVOICE') {
-    // Future: scan the relevant document table. For now only invoices are enforced.
     return 1
   }
 
@@ -186,6 +297,7 @@ export async function updateDocumentSequence(
 
   const prefix = input.prefix !== undefined ? input.prefix : existing.prefix
   const minNext = await getMinAllowedNextNumber(documentType, prefix, cid)
+  const safeMin = isPlausibleSequenceNumber(minNext) ? minNext : 1
 
   const validation = validateDocumentSequenceUpdate(
     {
@@ -195,7 +307,7 @@ export async function updateDocumentSequence(
       padding: input.padding ?? existing.padding,
       suffix: input.suffix ?? existing.suffix,
     },
-    { minNextNumber: minNext },
+    { minNextNumber: safeMin },
   )
 
   if (!validation.ok || !validation.normalized) {
@@ -221,22 +333,33 @@ export async function updateDocumentSequence(
   return mapRow(data as Record<string, unknown>)
 }
 
+/**
+ * Reset numbering to INV- defaults, then set next number from existing
+ * invoices that match the restored prefix (never renumbers history).
+ */
 export async function resetDocumentSequenceToDefault(
   documentType: string,
   companyId?: string,
 ): Promise<DocumentSequenceRecord> {
   const type = documentType.toUpperCase()
+  const cid = companyId ?? (await resolveCompanyId())
+
+  if (type === 'INVOICE') {
+    return repairInvoiceDocumentSequence(cid)
+  }
+
   const defaults = isDocumentType(type)
     ? DOCUMENT_TYPE_DEFAULTS[type]
     : { prefix: 'INV-', padding: 6, startingNumber: 1, label: type }
 
-  const minNext = await getMinAllowedNextNumber(documentType, defaults.prefix, companyId)
+  const minNext = await getMinAllowedNextNumber(documentType, defaults.prefix, cid)
+  const safeMin = isPlausibleSequenceNumber(minNext) ? minNext : 1
   return updateDocumentSequence(
     documentType,
     {
       prefix: defaults.prefix,
       startingNumber: defaults.startingNumber,
-      nextNumber: Math.max(defaults.startingNumber, minNext),
+      nextNumber: Math.max(defaults.startingNumber, safeMin),
       padding: defaults.padding,
       suffix: '',
     },
@@ -250,29 +373,20 @@ export async function seedDefaultDocumentSequencesForCompany(
   invoicePrefix = 'INV-',
 ): Promise<void> {
   const db = supabaseDb()
-  const { error } = await db.rpc('ensure_document_sequence', {
-    p_company_id: companyId,
-    p_document_type: 'INVOICE',
-    p_prefix: invoicePrefix || 'INV-',
-    p_padding: 6,
-    p_starting_number: 1,
-  })
-  if (error) {
-    // Fallback insert if RPC unavailable in some environments
-    const { error: insertError } = await db.from('document_sequences').upsert(
-      {
-        company_id: companyId,
-        document_type: 'INVOICE',
-        prefix: invoicePrefix || 'INV-',
-        starting_number: 1,
-        next_number: 1,
-        padding: 6,
-        suffix: '',
-      },
-      { onConflict: 'company_id,document_type' },
-    )
-    if (insertError) throw insertError
-  }
+  const prefix = invoicePrefix.trim() || 'INV-'
+  const { error: insertError } = await db.from('document_sequences').upsert(
+    {
+      company_id: companyId,
+      document_type: 'INVOICE',
+      prefix,
+      starting_number: 1,
+      next_number: 1,
+      padding: 6,
+      suffix: '',
+    },
+    { onConflict: 'company_id,document_type' },
+  )
+  if (insertError) throw insertError
 }
 
 export function buildPreview(input: {
@@ -284,4 +398,4 @@ export function buildPreview(input: {
   return previewDocumentNumber(input)
 }
 
-export { formatDocumentNumber, previewDocumentNumber }
+export { formatDocumentNumber, previewDocumentNumber, isPlausibleSequenceNumber }

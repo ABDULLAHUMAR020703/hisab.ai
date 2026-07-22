@@ -198,13 +198,13 @@ FROM public.companies c
 LEFT JOIN public.company_settings cs ON cs.company_id = c.id
 ON CONFLICT (company_id, document_type) DO NOTHING;
 
--- Prefer legacy sequences.next_no when present.
+-- Prefer legacy sequences.next_no when present (never copy ZAT- compliance prefix onto INVOICE).
 UPDATE public.document_sequences ds
 SET
-  next_number = greatest(ds.next_number, s.next_no),
-  prefix = CASE
-    WHEN nullif(trim(s.prefix), '') IS NOT NULL THEN s.prefix
-    ELSE ds.prefix
+  next_number = CASE
+    WHEN s.next_no IS NOT NULL AND s.next_no >= 1 AND s.next_no <= 999999999
+      THEN greatest(ds.next_number, s.next_no)
+    ELSE ds.next_number
   END,
   updated_at = now()
 FROM public.sequences s
@@ -212,26 +212,41 @@ WHERE s.company_id = ds.company_id
   AND s.type = 'INVOICE'
   AND ds.document_type = 'INVOICE';
 
--- Bump next_number past the highest trailing numeric invoice number already issued.
+-- Bump next_number past the highest plausible invoice sequence for the company prefix only.
+-- Ignores ZATCA test numbers (ZAT-…) and timestamp-sized digit runs.
 WITH invoice_max AS (
   SELECT
-    i.company_id,
+    ds.company_id,
     max(
       CASE
-        WHEN i.invoice_no ~ '[0-9]+$'
-          THEN nullif(regexp_replace(i.invoice_no, '^.*?([0-9]+)$', '\1'), '')::bigint
+        WHEN i.invoice_no IS NULL THEN NULL
+        WHEN left(upper(i.invoice_no), length(ds.prefix)) <> upper(ds.prefix) THEN NULL
+        WHEN substr(i.invoice_no, length(ds.prefix) + 1) ~ '^\d{1,9}(\D.*)?$'
+          THEN nullif(
+            (regexp_match(substr(i.invoice_no, length(ds.prefix) + 1), '^(\d{1,9})'))[1],
+            ''
+          )::bigint
         ELSE NULL
       END
     ) AS max_num
-  FROM public.invoices i
-  WHERE i.deleted_at IS NULL
-  GROUP BY i.company_id
+  FROM public.document_sequences ds
+  LEFT JOIN public.invoices i
+    ON i.company_id = ds.company_id
+   AND i.deleted_at IS NULL
+  WHERE ds.document_type = 'INVOICE'
+  GROUP BY ds.company_id
 )
 UPDATE public.document_sequences ds
 SET
-  next_number = greatest(ds.next_number, invoice_max.max_num + 1),
+  next_number = greatest(
+    ds.next_number,
+    CASE
+      WHEN invoice_max.max_num IS NOT NULL AND invoice_max.max_num <= 999999999
+        THEN invoice_max.max_num + 1
+      ELSE ds.next_number
+    END
+  ),
   updated_at = now()
 FROM invoice_max
 WHERE invoice_max.company_id = ds.company_id
-  AND ds.document_type = 'INVOICE'
-  AND invoice_max.max_num IS NOT NULL;
+  AND ds.document_type = 'INVOICE';

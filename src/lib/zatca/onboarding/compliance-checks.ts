@@ -179,7 +179,7 @@ async function createComplianceTestInvoice(
   customerId: string,
 ) {
   const now = new Date()
-  const invoiceNo = await getSequenceRepository().next('INVOICE', 'ZAT-')
+  const invoiceNo = await getSequenceRepository().next('ZATCA_COMPLIANCE', 'ZAT-')
 
   return prisma.invoice.create({
     data: {

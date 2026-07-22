@@ -25,13 +25,11 @@ export const supabaseCostCenterRepository: CostCenterRepository = {
     const search = options.search?.trim()
     const includeMetadata = options.includeMetadata !== false
 
+    // Always select '*' — conditional column lists break Supabase generated select typings.
+    // Metadata is stripped below when callers do not need the product catalog payload.
     let query = db
       .from('cost_centers')
-      .select(
-        includeMetadata
-          ? '*'
-          : 'id, code, name, type, description, is_active, created_at, updated_at',
-      )
+      .select('*')
       .eq('company_id', companyId)
       .is('deleted_at', null)
       .order('code', { ascending: true })
@@ -49,7 +47,7 @@ export const supabaseCostCenterRepository: CostCenterRepository = {
     const { data, error } = await query
     if (error) throw error
     return (data ?? []).map((row) => {
-      const mapped = mapCostCenterRow(row)
+      const mapped = mapCostCenterRow(row as Record<string, unknown>)
       if (!includeMetadata) {
         return { ...mapped, metadata: {} }
       }
