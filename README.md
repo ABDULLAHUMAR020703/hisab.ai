@@ -1,97 +1,103 @@
-# hisab.ai Current State
+# hisab.ai
 
-hisab.ai is a Supabase-only accounting and ZATCA e-invoicing web app for NETKOM COMPANY FOR COMMUNICATION.
+Supabase-only accounting and ZATCA e-invoicing web app for Saudi businesses.
 
-## Runtime
+## Stack
 
-- Framework: Next.js 16 App Router
-- UI: React 19, Tailwind CSS 4, Radix UI, Recharts
-- Backend: Next.js API routes
-- Database and auth: Supabase only
-- Runtime database access: Supabase client with service-role server access where needed
-- Authentication: Supabase Auth with SSR session cookies (`@supabase/ssr`)
-- Deployment target: Vercel
+| Layer | Technology |
+| --- | --- |
+| App | Next.js App Router, React, Tailwind CSS |
+| API | Next.js route handlers |
+| Data & Auth | Supabase (Postgres, Auth, RLS, Storage) |
+| Deploy | Vercel |
 
-There is no Prisma runtime, SQLite database, Postgres direct connection string, or local database fallback.
+No Prisma, SQLite, or direct Postgres connection strings.
 
-## Environment
+## Setup
 
-Use only these variables in Vercel and local `.env`:
+```bash
+npm install
+cp .env.example .env
+npm run dev
+```
+
+Required environment variables (see `.env.example`):
 
 ```env
-NEXT_PUBLIC_SUPABASE_URL="https://your-project-ref.supabase.co"
-NEXT_PUBLIC_SUPABASE_ANON_KEY="your-supabase-anon-key"
-SUPABASE_SERVICE_ROLE_KEY="your-supabase-service-role-key"
-
-APP_SECRET="replace-with-a-long-random-secret"
-
-ZATCA_CREDENTIAL_ENCRYPTION_KEY="replace-with-a-long-random-secret"
-ZATCA_MOCK_ONBOARDING=false
-ZATCA_MOCK_SUBMISSION=false
-
-# Optional
-# ZATCA_API_BASE_URL="https://gw-fatoora.zatca.gov.sa"
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+APP_SECRET=
+ZATCA_CREDENTIAL_ENCRYPTION_KEY=
 ```
 
-Do not set these old variables:
-
-```txt
-DATABASE_URL
-DIRECT_URL
-SUPABASE_DATABASE_URL
-USE_SUPABASE
-DB_PARITY_CHECK
-DUAL_WRITE
-RUN_PRISMA_MIGRATE
-NEXTAUTH_URL
-NEXTAUTH_SECRET
-```
+Apply SQL migrations from `supabase/migrations/` in order against your Supabase project.
 
 ## Commands
 
 ```bash
-npm install
-npm run dev
-npm run build
-npm start
-```
+npm run dev                 # local development
+npm run build               # production build
+npm start                   # run production server
+npm run lint
 
-Available checks:
-
-```bash
-npx tsc --noEmit
-npm run build
+npm run test:invoices
+npm run test:cost-centers
+npm run test:document-numbering
 npm run test:zatca
+npm run test:import-export
+npm run test:accounting
+npm run test:production
 ```
 
-## App Areas
+## Product areas
 
-- Dashboard and financial overview
-- Chart of accounts
-- Customers and vendors
-- Invoices, bills, payments, expenses, receipts
-- Employees, payroll, inventory
-- Reports: profit/loss, balance sheet, cash flow, general ledger
-- Users and company settings
-- Tax and ZATCA monitoring
-- ZATCA onboarding, CSID handling, sandbox simulation, invoice submission helpers
+- **Accounting** — chart of accounts, journals, ledgers, reports
+- **Sales** — customers, invoices, estimates, sales orders, receipts
+- **Purchasing** — vendors, bills, purchase orders, vendor credits
+- **Cost centers** — Locations, Classes, Projects/Product-Service catalog
+- **Inventory, payroll, banking, budgets**
+- **Tax & ZATCA** — onboarding, CSID, clearance/reporting, monitoring
+- **Settings** — company profile, branding, **Document Numbering**
 
-## Supabase Notes
+## Recent capabilities
 
-- Supabase Auth users are mirrored into `profiles` and `company_users`.
-- Server routes use Supabase service role for backend operations.
-- RLS policies remain in Supabase migrations and protect authenticated tenant access.
-- Register at `/register` to create a company workspace; sign in at `/login`.
-- Configure Supabase redirect URLs: `{APP_URL}/auth/callback` and `{APP_URL}/reset-password`.
+### Invoices
+- Tax calculation methods, payment terms, expiry date, attachments
+- Line items with Project/Service and Class (FK to cost centers)
+- Unit Price auto-filled from Project **Cost** on selection
+- Wider create/edit modal for line-item editing
 
-## Removed Legacy Stack
+### Cost centers
+- Separate imports: Locations, Classes, Projects (Product/Service sheet)
+- Excel footer/header metadata ignored
+- Project import **upserts** by SKU (preferred) or name and updates Cost
+- Cost visible in Cost Centers table and editable for Projects
 
-The previous Prisma/SQLite stack has been removed from active code and deployment:
+### Document numbering
+- Company-level `document_sequences` (migration `042`)
+- Configurable prefix, next number, padding (e.g. `INV-000091`)
+- Atomic allocation for concurrent invoice creation
+- Settings → Document Numbering
 
-- No `prisma/` schema or SQLite `dev.db`
-- No Prisma client generation during install/build
-- No direct Postgres connection strings in Vercel
-- No dual-write or parity feature flags
-- No SQLite seed flow
+## Project layout
 
-The app should be operated as Supabase-first and Supabase-only.
+```text
+src/app                 # App Router pages + API routes
+src/components          # UI
+src/lib                 # Domain logic (invoices, cost-centers, ZATCA, numbering, …)
+supabase/migrations     # Source of truth for schema
+tests/                  # Unit/integration tests (tsx --test)
+scripts/                # QA seed, ZATCA helpers, import-export fixtures
+test-data/              # Generated import/export sample files
+```
+
+## Auth notes
+
+- Supabase Auth users map to `profiles` / `company_users`
+- Register at `/register`, sign in at `/login`
+- Configure redirect URLs: `{APP_URL}/auth/callback` and `{APP_URL}/reset-password`
+
+## Agent notes
+
+Cursor/Claude agent guidance lives in `AGENTS.md` (and `CLAUDE.md`). This README is the only product documentation in the repo.
