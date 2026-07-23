@@ -225,7 +225,7 @@ export async function runSandboxScenario(scenario: SandboxScenario): Promise<San
 
     const enrichedInput = await enrichZatcaInvoiceInput(loaded.input, invoice.id)
     const xmlResult = generateZatcaInvoiceXml(enrichedInput)
-    const validation = validateFullSubmissionPipeline(loaded.input, xmlResult.validation)
+    const validation = validateFullSubmissionPipeline(loaded.input, xmlResult.validation, xmlResult.document)
     steps.push({
       step: 'Validate',
       passed: validation.valid,

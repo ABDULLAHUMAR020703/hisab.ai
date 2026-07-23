@@ -4,15 +4,26 @@ import type { ZatcaDocumentProfile, ZatcaInvoiceTypeCode } from './types'
 /** UBL 2.1 root namespace */
 export const UBL_INVOICE_NS = 'urn:oasis:names:specification:ubl:schema:xsd:Invoice-2'
 
-/** ZATCA document profile by invoice classification */
+/**
+ * BT-23 / cbc:ProfileID value required by ZATCA for all UBL invoices.
+ * @see ZATCA Electronic Invoice XML Implementation Standard (19 May 2023)
+ *      §13.3.4 KSA – EN16931 — BR-KSA-EN16931-01:
+ *      Business process (BT-23) / ubl:Invoice/cbc:ProfileID must be "reporting:1.0".
+ *
+ * Clearance vs reporting submission is NOT encoded in ProfileID; it is determined by
+ * InvoiceTypeCode @name (01… → clearance API, 02… → reporting API).
+ */
+export const ZATCA_DOCUMENT_PROFILE: ZatcaDocumentProfile = 'reporting:1.0'
+
+/** @deprecated Use ZATCA_DOCUMENT_PROFILE — ProfileID is always reporting:1.0 (BR-KSA-EN16931-01). */
 export const ZATCA_PROFILE_BY_TYPE: Record<
   'STANDARD' | 'SIMPLIFIED' | 'CREDIT_NOTE' | 'DEBIT_NOTE',
   ZatcaDocumentProfile
 > = {
-  STANDARD: 'clearance:1.0',
-  SIMPLIFIED: 'reporting:1.0',
-  CREDIT_NOTE: 'reporting:1.0',
-  DEBIT_NOTE: 'reporting:1.0',
+  STANDARD: ZATCA_DOCUMENT_PROFILE,
+  SIMPLIFIED: ZATCA_DOCUMENT_PROFILE,
+  CREDIT_NOTE: ZATCA_DOCUMENT_PROFILE,
+  DEBIT_NOTE: ZATCA_DOCUMENT_PROFILE,
 }
 
 /** Base64 PIH seed for the first invoice in a device sequence (ZATCA spec). */
@@ -88,17 +99,19 @@ export function isSimplifiedTaxInvoice(input: {
 }
 
 /**
- * ZATCA simulation validates BT-23 as reporting:1.0 for all invoice types (including 0100000 standard).
- * Production uses clearance:1.0 for standard tax invoices only.
+ * Resolves cbc:ProfileID (BT-23).
+ *
+ * Per BR-KSA-EN16931-01 this is always `reporting:1.0` for Standard, Simplified,
+ * credit/debit notes, in both Sandbox and Production. Optional override is retained
+ * only for explicit test/compliance fixtures.
  */
 export function resolveZatcaProfileId(
-  invoiceType: InvoiceTypeKey,
-  environment: ZatcaEnvironment = 'SANDBOX',
+  _invoiceType?: InvoiceTypeKey,
+  _environment: ZatcaEnvironment = 'SANDBOX',
   profileIdOverride?: ZatcaDocumentProfile,
 ): ZatcaDocumentProfile {
   if (profileIdOverride) return profileIdOverride
-  if (environment === 'SANDBOX') return 'reporting:1.0'
-  return ZATCA_PROFILE_BY_TYPE[invoiceType]
+  return ZATCA_DOCUMENT_PROFILE
 }
 
 /** Production routes standard invoices to clearance; simplified/credit/debit use reporting. */

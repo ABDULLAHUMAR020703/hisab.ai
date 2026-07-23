@@ -107,25 +107,9 @@ export function validateZatcaInvoiceInput(input: ZatcaInvoiceInput): ZatcaValida
     ))
   }
 
-  const lineSubtotal = input.lines.reduce((sum, l) => sum + l.amount, 0)
-  const lineTax = input.lines.reduce((sum, l) => sum + l.amount * (l.taxRate / 100), 0)
-  const expectedTotal = lineSubtotal + lineTax
-
-  if (!amountsClose(lineSubtotal, input.subtotal)) {
-    warnings.push(warning(
-      'SUBTOTAL_MISMATCH',
-      'invoice.subtotal',
-      'Invoice subtotal does not match sum of line amounts',
-    ))
-  }
-
-  if (!amountsClose(expectedTotal, input.total)) {
-    warnings.push(warning(
-      'TOTAL_MISMATCH',
-      'invoice.total',
-      'Invoice total does not match subtotal plus tax',
-    ))
-  }
+  // Header subtotal/tax/total may lag the XML mapper (line-derived roundMoney totals).
+  // Monetary integrity is enforced on the mapped document via validateProcessedMonetaryTotals /
+  // validateZatcaDocument — do not recalculate VAT from amount × rate here.
 
   return { valid: errors.length === 0, errors, warnings }
 }

@@ -11,6 +11,9 @@ import {
 } from '@/lib/invoices/calculations'
 import { roundMoney } from '@/lib/tax/calculator'
 import { normalizeTaxCalculationMethod } from '@/lib/invoices/validation'
+import { resolveZatcaInvoiceTypeCodeName } from '@/lib/zatca/classification'
+import { resolveInvoiceTypeCodeName } from '@/lib/zatca/constants'
+import { getSubmissionRoute } from '@/lib/zatca/submission/router'
 import { resolveInvoiceQrForPdf } from '../qr-for-pdf'
 import { buildAddressLines, invoicePdfTitle } from './format'
 import { loadCompanyLogoImage } from '@/lib/branding/load-logo-image'
@@ -104,8 +107,21 @@ function buildZatcaInfo(
     return null
   }
 
+  const codeName = resolveZatcaInvoiceTypeCodeName({
+    invoiceType: invoice.invoiceType,
+    customer: invoice.customer ? { taxId: invoice.customer.taxId } : undefined,
+    referencedSourceInvoiceType: invoice.referencedInvoiceType,
+  })
+  const submissionRoute = getSubmissionRoute(
+    invoice.invoiceType,
+    settings.zatcaEnvironment,
+    resolveInvoiceTypeCodeName({
+      invoiceType: invoice.invoiceType,
+      invoiceTypeCodeNameOverride: codeName,
+    }),
+  )
   const route: PdfZatcaInfo['route'] =
-    status === 'CLEARED' ? 'Clearance' : 'Reporting'
+    submissionRoute === 'clearance' ? 'Clearance' : 'Reporting'
 
   return {
     requestId: invoice.zatcaRequestId ?? invoice.zatcaGlobalTransactionId ?? null,

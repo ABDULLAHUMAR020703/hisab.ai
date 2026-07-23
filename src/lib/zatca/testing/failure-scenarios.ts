@@ -80,8 +80,14 @@ export function runFailureScenarios(): FailureScenarioResult[] {
       mutate: (i) => { i.invoiceUUID = 'not-a-uuid' },
     },
     {
-      name: 'Invalid totals',
-      mutate: (i) => { i.total = 1 },
+      name: 'Zero taxable amount',
+      mutate: (i) => {
+        i.lines[0].amount = 0
+        i.lines[0].unitPrice = 0
+        i.subtotal = 0
+        i.taxAmount = 0
+        i.total = 0
+      },
     },
     {
       name: 'Non-SAR currency',
@@ -93,7 +99,7 @@ export function runFailureScenarios(): FailureScenarioResult[] {
     const input = baseInput()
     mutate(input)
     const xmlResult = generateZatcaInvoiceXml(input)
-    const validation = validateFullSubmissionPipeline(input, xmlResult.validation)
+    const validation = validateFullSubmissionPipeline(input, xmlResult.validation, xmlResult.document)
     const xmlCompliance = validateXmlCompliance({ xml: xmlResult.xml, invoiceType: input.invoiceType })
     const failed = !validation.valid || !xmlCompliance.valid
     const messages = [

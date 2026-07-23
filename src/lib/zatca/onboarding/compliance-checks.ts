@@ -239,7 +239,7 @@ async function runSingleComplianceCheck(
       invoiceTypeCodeNameOverride: config.invoiceTypeCodeName,
     }, invoice.id)
     const xmlResult = generateZatcaInvoiceXml(enrichedInput)
-    const validation = validateFullSubmissionPipeline(enrichedInput, xmlResult.validation)
+    const validation = validateFullSubmissionPipeline(enrichedInput, xmlResult.validation, xmlResult.document)
     if (!validation.valid) {
       throw new Error(validation.errors.map((e) => e.message).join('; '))
     }

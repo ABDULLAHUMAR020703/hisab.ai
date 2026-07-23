@@ -8,11 +8,16 @@ import {
 import type {
   ZatcaCompanySettingsInput,
   ZatcaCustomerInput,
+  ZatcaInvoiceDocument,
   ZatcaInvoiceInput,
   ZatcaValidationIssue,
   ZatcaValidationResult,
 } from '../types'
 import { SAUDI_VAT_TRN_LENGTH } from '../constants'
+import {
+  validateInvoiceIdentityFields,
+  validateProcessedMonetaryTotals,
+} from './monetary'
 
 function error(code: string, field: string, message: string): ZatcaValidationIssue {
   return { code, field, message, severity: 'error' }
@@ -77,43 +82,26 @@ export function validateCustomerForZatca(
   return { valid: errors.length === 0, errors, warnings: [] }
 }
 
-/** Strict invoice field validation before submission */
-export function validateInvoiceFieldsForSubmission(input: ZatcaInvoiceInput): ZatcaValidationResult {
+/**
+ * Strict invoice field validation before submission.
+ * Monetary checks use the processed UBL document (XML pipeline) — never recalculate VAT from rates.
+ */
+export function validateInvoiceFieldsForSubmission(
+  input: ZatcaInvoiceInput,
+  document: ZatcaInvoiceDocument,
+): ZatcaValidationResult {
   const errors: ZatcaValidationIssue[] = []
 
-  if (!input.invoiceUUID?.trim()) {
+  const uuid = document.uuid?.trim() || input.invoiceUUID?.trim()
+  if (!uuid) {
     errors.push(error('INV_UUID_REQUIRED', 'invoice.invoiceUUID', 'Invoice UUID is required for submission'))
   }
 
-  if (!input.currency?.trim()) {
-    errors.push(error('INV_CURRENCY_REQUIRED', 'invoice.currency', 'Invoice currency is required'))
-  } else if (input.currency !== 'SAR') {
-    errors.push(error('INV_CURRENCY_SAR', 'invoice.currency', 'Invoice currency must be SAR for ZATCA submission'))
-  }
-
-  if (!input.issueTime?.trim()) {
-    errors.push(error('INV_ISSUE_TIME_REQUIRED', 'invoice.issueTime', 'Invoice issue time is required'))
-  }
-
-  if (input.subtotal <= 0) {
-    errors.push(error('INV_SUBTOTAL_REQUIRED', 'invoice.subtotal', 'Invoice subtotal must be greater than zero'))
-  }
-
-  if (input.taxAmount < 0) {
-    errors.push(error('INV_VAT_INVALID', 'invoice.taxAmount', 'Invoice VAT amount is invalid'))
-  }
-
-  if (input.total <= 0) {
-    errors.push(error('INV_TOTAL_REQUIRED', 'invoice.total', 'Invoice total must be greater than zero'))
-  }
-
-  const lineSubtotal = input.lines.reduce((s, l) => s + l.amount, 0)
-  const lineTax = input.lines.reduce((s, l) => s + l.amount * (l.taxRate / 100), 0)
-  if (Math.abs(lineSubtotal + lineTax - input.total) > 0.02) {
-    errors.push(error('INV_TOTAL_MISMATCH', 'invoice.total', 'Invoice total does not match line amounts plus VAT'))
-  }
-
-  return { valid: errors.length === 0, errors, warnings: [] }
+  return mergeValidationResults(
+    { valid: errors.length === 0, errors, warnings: [] },
+    validateInvoiceIdentityFields(input),
+    validateProcessedMonetaryTotals(document),
+  )
 }
 
 /** Validates submission prerequisites (credentials + environment) */
@@ -141,16 +129,18 @@ export function validateSubmissionReadiness(input: {
 
 /**
  * Full pre-submission validation across company, customer, invoice, and XML stages.
+ * Pass the mapped UBL `document` from `processZatcaInvoice` / `generateZatcaInvoiceXml`.
  */
 export function validateFullSubmissionPipeline(
   input: ZatcaInvoiceInput,
   documentValidation: ReturnType<typeof validateZatcaDocument>,
+  document: ZatcaInvoiceDocument,
 ): ZatcaValidationResult {
   return mergeValidationResults(
     validateZatcaInvoiceInput(input),
     validateCompanyForZatca(input.companySettings),
     validateCustomerForZatca(input.customer, input.invoiceType, input.invoiceTypeCodeNameOverride),
-    validateInvoiceFieldsForSubmission(input),
+    validateInvoiceFieldsForSubmission(input, document),
     documentValidation,
   )
 }

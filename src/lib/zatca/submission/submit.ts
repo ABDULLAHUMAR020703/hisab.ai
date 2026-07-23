@@ -5,6 +5,7 @@ import { logZatcaAudit } from '../audit/logger'
 import { submitClearanceInvoice } from '../api/clearance'
 import { submitReportingInvoice } from '../api/reporting'
 import { ZatcaError, mapToZatcaError } from '../errors'
+import { syncInputTotalsFromDocument } from '../generate'
 import { signAndEmbedPhase2Qr } from '../invoice-signing'
 import { loadZatcaInvoiceById, processZatcaInvoice } from '../invoice-service'
 import { loadInvoiceForZatca, updateInvoiceZatcaFields } from '../persistence'
@@ -15,6 +16,10 @@ import {
   validateFullSubmissionPipeline,
   validateSubmissionReadiness,
 } from '../validation/hardening'
+import {
+  extractDocumentMonetarySnapshot,
+  extractXmlMonetarySnapshot,
+} from '../validation/monetary'
 import { verifyPihForInvoice } from '../pih-chain'
 import { resolveInvoiceTypeCodeName } from '../constants'
 import { getSubmissionRoute } from './router'
@@ -25,12 +30,45 @@ export interface SubmitAuditContext {
   userName?: string | null
 }
 
+function assertMonetaryPipelineIntegrity(args: {
+  document: ReturnType<typeof extractDocumentMonetarySnapshot>
+  xml: ReturnType<typeof extractXmlMonetarySnapshot>
+  signedXml: ReturnType<typeof extractXmlMonetarySnapshot>
+}) {
+  const keys = [
+    'lineExtensionAmount',
+    'taxExclusiveAmount',
+    'taxAmount',
+    'taxInclusiveAmount',
+    'payableAmount',
+  ] as const
+
+  for (const key of keys) {
+    const docVal = args.document[key]
+    const xmlVal = args.xml[key]
+    const signedVal = args.signedXml[key]
+    if (xmlVal == null || signedVal == null) {
+      throw new ZatcaError(
+        'VALIDATION_FAILED',
+        `Missing monetary field ${key} in generated/signed XML`,
+      )
+    }
+    if (Math.abs(docVal - xmlVal) > 0.001 || Math.abs(xmlVal - signedVal) > 0.001) {
+      throw new ZatcaError(
+        'VALIDATION_FAILED',
+        `Monetary field ${key} diverged across document/XML/signed XML (${docVal} / ${xmlVal} / ${signedVal})`,
+      )
+    }
+  }
+}
+
 async function recordFailure(
   invoiceId: string,
   zatcaError: ZatcaError,
   auditContext?: SubmitAuditContext,
   companyName?: string,
 ) {
+  // Do not clear signedXml / pre-submission artifacts — failures must remain inspectable.
   await updateInvoiceZatcaFields(invoiceId, {
     zatcaStatus: 'FAILED',
     zatcaFailureCode: zatcaError.code,
@@ -135,9 +173,14 @@ export async function submitInvoice(
     const loaded = await loadZatcaInvoiceById(invoiceId)
     if (!loaded) throw new ZatcaError('INVOICE_NOT_FOUND', 'Invoice not found')
 
-    const input = loaded.input
+    // Align header totals with XML pipeline (single monetary source of truth)
+    const input = syncInputTotalsFromDocument(loaded.input, processed.document)
 
-    const fullValidation = validateFullSubmissionPipeline(input, processed.validation)
+    const fullValidation = validateFullSubmissionPipeline(
+      input,
+      processed.validation,
+      processed.document,
+    )
     if (!fullValidation.valid) {
       throw new ZatcaError(
         'VALIDATION_FAILED',
@@ -173,6 +216,68 @@ export async function submitInvoice(
     const route = getSubmissionRoute(loaded.input.invoiceType as InvoiceType, environment, typeCodeName)
     const submittedAt = new Date()
     const submissionHash = invoiceHashHex
+    const invoiceBase64 = Buffer.from(signedXml, 'utf8').toString('base64')
+
+    const documentMonetary = extractDocumentMonetarySnapshot(processed.document)
+    const xmlMonetary = extractXmlMonetarySnapshot(processed.xml)
+    const signedMonetary = extractXmlMonetarySnapshot(signedXml)
+    assertMonetaryPipelineIntegrity({
+      document: documentMonetary,
+      xml: xmlMonetary,
+      signedXml: signedMonetary,
+    })
+
+    const submissionRequest = {
+      invoiceHash: submissionHash,
+      uuid,
+      invoice: invoiceBase64,
+    }
+
+    // Persist generated/signed XML + payload BEFORE ZATCA HTTP so failures remain inspectable
+    await updateInvoiceZatcaFields(invoiceId, {
+      signedXml,
+      zatcaResponsePayload: JSON.stringify({
+        preSubmission: {
+          invoiceId,
+          profileId: processed.document.profileId,
+          invoiceTypeCode: processed.document.invoiceTypeCode,
+          invoiceTypeCodeName: processed.document.invoiceTypeCodeName,
+          submissionRoute: route,
+          monetary: {
+            document: documentMonetary,
+            generatedXml: xmlMonetary,
+            signedXml: signedMonetary,
+            httpPayload: {
+              taxExclusiveAmount: documentMonetary.taxExclusiveAmount,
+              taxAmount: documentMonetary.taxAmount,
+              taxInclusiveAmount: documentMonetary.taxInclusiveAmount,
+              payableAmount: documentMonetary.payableAmount,
+              lineExtensionAmount: documentMonetary.lineExtensionAmount,
+            },
+          },
+          generatedXml: processed.xml,
+          request: submissionRequest,
+        },
+      }),
+    })
+
+    console.info(
+      '[zatca-submit]',
+      JSON.stringify({
+        invoiceId,
+        profileId: processed.document.profileId,
+        invoiceTypeCode: processed.document.invoiceTypeCode,
+        submissionRoute: route,
+        xmlTotals: xmlMonetary,
+        signedXmlTotals: signedMonetary,
+        httpPayloadTotals: documentMonetary,
+        request: {
+          invoiceHash: submissionHash,
+          uuid,
+          invoiceBase64Length: invoiceBase64.length,
+        },
+      }),
+    )
 
     let zatcaStatus: ZatcaInvoiceStatus = 'SUBMITTED'
     let requestId: string | null = null
@@ -222,23 +327,59 @@ export async function submitInvoice(
         errorCount = result.errorCount
       }
     } catch (apiError) {
+      console.info(
+        '[zatca-submit-response]',
+        JSON.stringify({
+          invoiceId,
+          submissionRoute: route,
+          error: apiError instanceof Error ? apiError.message : String(apiError),
+        }),
+      )
       throw mapToZatcaError(apiError)
     }
 
-    await updateInvoiceZatcaFields(invoiceId, {
+    console.info(
+      '[zatca-submit-response]',
+      JSON.stringify({
+        invoiceId,
+        submissionRoute: route,
+        requestId,
+        responseCode,
         zatcaStatus,
-        zatcaRequestId: requestId,
-        zatcaGlobalTransactionId: globalTransactionId,
-        zatcaResponseCode: responseCode,
-        zatcaResponseMessage: responseMessage,
-        zatcaWarningCount: warningCount,
-        zatcaErrorCount: errorCount,
-        zatcaFailureCode: null,
-        clearanceStatus,
-        clearedInvoicePayload,
-        signedXml,
-        zatcaResponsePayload: JSON.stringify(rawResponse),
-        zatcaSubmissionDate: submittedAt,
+        rawResponse,
+      }),
+    )
+
+    await updateInvoiceZatcaFields(invoiceId, {
+      zatcaStatus,
+      zatcaRequestId: requestId,
+      zatcaGlobalTransactionId: globalTransactionId,
+      zatcaResponseCode: responseCode,
+      zatcaResponseMessage: responseMessage,
+      zatcaWarningCount: warningCount,
+      zatcaErrorCount: errorCount,
+      zatcaFailureCode: null,
+      clearanceStatus,
+      clearedInvoicePayload,
+      signedXml,
+      zatcaResponsePayload: JSON.stringify({
+        preSubmission: {
+          invoiceId,
+          profileId: processed.document.profileId,
+          invoiceTypeCode: processed.document.invoiceTypeCode,
+          invoiceTypeCodeName: processed.document.invoiceTypeCodeName,
+          submissionRoute: route,
+          monetary: {
+            document: documentMonetary,
+            generatedXml: xmlMonetary,
+            signedXml: signedMonetary,
+          },
+          generatedXml: processed.xml,
+          request: submissionRequest,
+        },
+        response: rawResponse,
+      }),
+      zatcaSubmissionDate: submittedAt,
     })
 
     await logZatcaAudit({
