@@ -4,6 +4,7 @@ import { resolveCompanyId } from '@/lib/tenant'
 import {
   computeLegacyLineTax,
   computeLineTaxFromRates,
+  roundMoney,
   sumDocumentTaxes,
   type LineTaxResult,
   type TaxCompoundMethod,
@@ -236,8 +237,8 @@ export async function computeDocumentLineTaxes(
 }
 
 export function validateTaxTotals(subtotal: number, taxAmount: number, total: number): void {
-  const expected = Math.round((subtotal + taxAmount) * 10000) / 10000
-  if (Math.abs(expected - total) > 0.02) {
+  const expected = roundMoney(subtotal + taxAmount)
+  if (Math.abs(expected - roundMoney(total)) > 0.02) {
     throw new TaxValidationError('Tax totals do not balance', 'TAX_TOTAL_MISMATCH')
   }
 }

@@ -134,7 +134,10 @@ export interface ZatcaInvoiceLineInput {
   quantity: number
   unitPrice: number
   taxRate: number
+  /** Net / taxable line amount. */
   amount: number
+  /** Persisted line VAT (preferred over recalculating when mapping to XML). */
+  taxAmount?: number
 }
 
 export interface ZatcaCustomerInput {

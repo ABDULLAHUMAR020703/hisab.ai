@@ -1,6 +1,6 @@
 import 'server-only'
 import QRCode from 'qrcode'
-import { generateZatcaInvoiceXml } from '@/lib/zatca/generate'
+import { generateZatcaInvoiceXml, syncInputTotalsFromDocument } from '@/lib/zatca/generate'
 import { enrichZatcaInvoiceInput, loadZatcaInvoiceById } from '@/lib/zatca/invoice-service'
 import { signAndEmbedPhase2Qr } from '@/lib/zatca/invoice-signing'
 import { generatePhase2QrDataUrl, generateQrDataUrl } from '@/lib/zatca/qr/generator'
@@ -88,9 +88,10 @@ export async function resolveInvoiceQrForPdf(invoiceId: string): Promise<Invoice
       const enriched = await enrichZatcaInvoiceInput(input, invoiceId)
       const xmlResult = generateZatcaInvoiceXml(enriched)
       if (xmlResult.validation.valid) {
+        const aligned = syncInputTotalsFromDocument(enriched, xmlResult.document)
         const signed = signAndEmbedPhase2Qr(
           xmlResult.xml,
-          enriched,
+          aligned,
           creds.certificatePem,
           creds.privateKeyPem,
         )
@@ -107,7 +108,11 @@ export async function resolveInvoiceQrForPdf(invoiceId: string): Promise<Invoice
     }
   }
 
-  const phase1 = await generateQrDataUrl(input)
+  const phase1Input = syncInputTotalsFromDocument(
+    input,
+    generateZatcaInvoiceXml(input).document,
+  )
+  const phase1 = await generateQrDataUrl(phase1Input)
   if (!phase1.validation.valid || !phase1.qrDataUrl) {
     return null
   }

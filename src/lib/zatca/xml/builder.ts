@@ -1,3 +1,4 @@
+import { roundMoney } from '@/lib/tax/calculator'
 import type {
   ZatcaAdditionalDocumentReference,
   ZatcaInvoiceDocument,
@@ -10,7 +11,7 @@ import { escapeXml } from './escape'
 import { invoiceRootAttributes } from './namespaces'
 
 function formatAmount(value: number): string {
-  return value.toFixed(2)
+  return roundMoney(value).toFixed(2)
 }
 
 function el(tag: string, content: string | number, attrs?: Record<string, string>): string {
@@ -167,7 +168,7 @@ function buildPaymentMeans(document: ZatcaInvoiceDocument): string {
 }
 
 function buildInvoiceLine(line: ZatcaInvoiceLine, currency: string): string {
-  const lineInclusiveAmount = line.lineExtensionAmount + line.taxAmount
+  const lineInclusiveAmount = roundMoney(line.lineExtensionAmount + line.taxAmount)
 
   return [
     '<cac:InvoiceLine>',

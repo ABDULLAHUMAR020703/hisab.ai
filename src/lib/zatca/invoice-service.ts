@@ -60,6 +60,7 @@ export async function loadZatcaInvoiceById(invoiceId: string) {
       unitPrice: line.unitPrice,
       taxRate: line.taxRate,
       amount: line.amount,
+      taxAmount: line.taxAmount,
     })),
     customer,
     companySettings,

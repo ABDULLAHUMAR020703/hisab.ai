@@ -60,13 +60,126 @@ function drawCustomerSection(
   return y + 8
 }
 
+const ROW_PAD_Y = 6
+const ROW_GAP = 2
+const TABLE_HEADER_HEIGHT = 20
+
+function pageContentBottom(doc: PDFKit.PDFDocument): number {
+  return doc.page.height - MARGIN - FOOTER_RESERVE
+}
+
 function ensureSpace(doc: PDFKit.PDFDocument, y: number, needed: number): number {
-  const bottom = doc.page.height - MARGIN - FOOTER_RESERVE
-  if (y + needed > bottom) {
+  if (y + needed > pageContentBottom(doc)) {
     doc.addPage()
     return MARGIN
   }
   return y
+}
+
+function buildLineDescriptionText(line: {
+  itemName: string | null
+  description: string
+  projectService: string | null
+  className: string | null
+}): string {
+  const parts = [
+    line.itemName?.trim() || null,
+    line.description?.trim() || null,
+    line.projectService?.trim() ? `Project: ${line.projectService.trim()}` : null,
+    line.className?.trim() ? `Class: ${line.className.trim()}` : null,
+  ].filter(Boolean) as string[]
+  return parts.join('\n') || '—'
+}
+
+function measureLineRowHeight(
+  doc: PDFKit.PDFDocument,
+  line: InvoicePdfDocument['lines'][number],
+  cols: Record<string, number>,
+): number {
+  doc.font('Helvetica').fontSize(8.5)
+  const descHeight = doc.heightOfString(buildLineDescriptionText(line), {
+    width: Math.max(8, cols.desc - 8),
+    lineGap: 1,
+  })
+  const singleLineHeight = doc.heightOfString('0', { width: Math.max(8, cols.qty - 2) })
+  return Math.ceil(Math.max(descHeight, singleLineHeight) + ROW_PAD_Y * 2)
+}
+
+type TableCols = {
+  num: number
+  desc: number
+  qty: number
+  unit: number
+  taxPct: number
+  taxAmt: number
+  total: number
+}
+
+function drawTableHeader(
+  doc: PDFKit.PDFDocument,
+  left: number,
+  y: number,
+  pageWidth: number,
+  cols: TableCols,
+): number {
+  doc.rect(left, y, pageWidth, TABLE_HEADER_HEIGHT).fill('#f1f5f9')
+  doc.fillColor('#475569').font('Helvetica-Bold').fontSize(8)
+  let colX = left + 4
+  const textY = y + 6
+  doc.text('#', colX, textY, { width: cols.num - 4 })
+  colX += cols.num
+  doc.text('Description', colX, textY, { width: cols.desc - 4 })
+  colX += cols.desc
+  doc.text('Qty', colX, textY, { width: cols.qty - 2, align: 'right' })
+  colX += cols.qty
+  doc.text('Unit Price', colX, textY, { width: cols.unit - 2, align: 'right' })
+  colX += cols.unit
+  doc.text('Tax %', colX, textY, { width: cols.taxPct - 2, align: 'right' })
+  colX += cols.taxPct
+  doc.text('Tax Amount', colX, textY, { width: cols.taxAmt - 2, align: 'right' })
+  colX += cols.taxAmt
+  doc.text('Line Total', colX, textY, { width: cols.total - 4, align: 'right' })
+  return y + TABLE_HEADER_HEIGHT + 4
+}
+
+function drawContinuationPageChrome(
+  doc: PDFKit.PDFDocument,
+  document: InvoicePdfDocument,
+  left: number,
+  pageWidth: number,
+): number {
+  let y = MARGIN
+  const displayName = document.company.legalName || document.company.companyName
+  doc.font('Helvetica-Bold').fontSize(11).fillColor('#0f172a')
+  doc.text(displayName, left, y, { width: pageWidth * 0.55 })
+  doc.font('Helvetica-Bold').fontSize(12).fillColor(document.titleAccent)
+  doc.text(document.title, left + pageWidth * 0.55, y, { width: pageWidth * 0.45, align: 'right' })
+  y = Math.max(doc.y, y + 14) + 2
+  doc.font('Helvetica').fontSize(8).fillColor('#64748b')
+  doc.text(
+    `${document.invoiceNo}  ·  ${formatPdfDate(document.date)}  ·  continued`,
+    left,
+    y,
+    { width: pageWidth },
+  )
+  y = doc.y + 8
+  doc.moveTo(left, y).lineTo(left + pageWidth, y).strokeColor('#cbd5e1').lineWidth(1).stroke()
+  return y + 10
+}
+
+/**
+ * Ensures the full row fits on the current page. Never starts drawing a row
+ * that would be split by PDFKit's automatic page break.
+ */
+function ensureRowSpace(
+  doc: PDFKit.PDFDocument,
+  y: number,
+  rowHeight: number,
+  onNewPage: () => number,
+): number {
+  if (y + rowHeight <= pageContentBottom(doc)) return y
+  doc.addPage()
+  return onNewPage()
 }
 
 export async function renderSaudiProfessionalInvoice(document: InvoicePdfDocument): Promise<Buffer> {
@@ -243,7 +356,7 @@ export async function renderSaudiProfessionalInvoice(document: InvoicePdfDocumen
     y = drawCustomerSection(doc, document.customer, left, y, pageWidth * 0.55)
     y += 8
 
-    const cols = {
+    const cols: TableCols = {
       num: 22,
       desc: pageWidth * 0.34,
       qty: 36,
@@ -254,55 +367,89 @@ export async function renderSaudiProfessionalInvoice(document: InvoicePdfDocumen
     }
     const tableWidth = Object.values(cols).reduce((a, b) => a + b, 0)
     const scale = pageWidth / tableWidth
-    for (const key of Object.keys(cols) as (keyof typeof cols)[]) {
+    for (const key of Object.keys(cols) as (keyof TableCols)[]) {
       cols[key] = Math.floor(cols[key] * scale)
     }
 
-    y = ensureSpace(doc, y, 40)
-    doc.rect(left, y, pageWidth, 20).fill('#f1f5f9')
-    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(8)
-    let colX = left + 4
-    doc.text('#', colX, y + 6, { width: cols.num - 4 })
-    colX += cols.num
-    doc.text('Description', colX, y + 6, { width: cols.desc - 4 })
-    colX += cols.desc
-    doc.text('Qty', colX, y + 6, { width: cols.qty - 2, align: 'right' })
-    colX += cols.qty
-    doc.text('Unit Price', colX, y + 6, { width: cols.unit - 2, align: 'right' })
-    colX += cols.unit
-    doc.text('Tax %', colX, y + 6, { width: cols.taxPct - 2, align: 'right' })
-    colX += cols.taxPct
-    doc.text('Tax Amount', colX, y + 6, { width: cols.taxAmt - 2, align: 'right' })
-    colX += cols.taxAmt
-    doc.text('Line Total', colX, y + 6, { width: cols.total - 4, align: 'right' })
-    y += 24
+    const startTableOnPage = (): number => {
+      const nextY = ensureSpace(doc, y, TABLE_HEADER_HEIGHT + 30)
+      return drawTableHeader(doc, left, nextY, pageWidth, cols)
+    }
 
-    doc.font('Helvetica').fontSize(8.5).fillColor('#334155')
+    y = startTableOnPage()
+
+    const beginContinuationPage = (): number => {
+      let nextY = drawContinuationPageChrome(doc, document, left, pageWidth)
+      nextY = drawTableHeader(doc, left, nextY, pageWidth, cols)
+      return nextY
+    }
+
     for (const line of document.lines) {
-      y = ensureSpace(doc, y, 22)
-      colX = left + 4
+      const rowHeight = measureLineRowHeight(doc, line, cols)
+      y = ensureRowSpace(doc, y, rowHeight, beginContinuationPage)
+
       const rowTop = y
-      doc.text(String(line.index), colX, y, { width: cols.num - 4 })
+      const textTop = rowTop + ROW_PAD_Y
+
+      // Row border around the full measured height
+      doc
+        .rect(left, rowTop, pageWidth, rowHeight)
+        .strokeColor('#e2e8f0')
+        .lineWidth(0.5)
+        .stroke()
+
+      let colX = left + 4
+      doc.font('Helvetica').fontSize(8.5).fillColor('#334155')
+
+      // All cells share the same top Y — never advance Y per column.
+      doc.text(String(line.index), colX, textTop, {
+        width: cols.num - 4,
+        lineBreak: false,
+      })
       colX += cols.num
-      const descParts = [
-        line.itemName?.trim(),
-        line.description?.trim(),
-        line.projectService ? `Project: ${line.projectService}` : null,
-        line.className ? `Class: ${line.className}` : null,
-      ].filter(Boolean)
-      doc.text(descParts.join('\n') || '—', colX, y, { width: cols.desc - 4 })
+
+      doc.text(buildLineDescriptionText(line), colX, textTop, {
+        width: cols.desc - 8,
+        lineGap: 1,
+      })
       colX += cols.desc
-      doc.text(String(line.quantity), colX, y, { width: cols.qty - 2, align: 'right' })
+
+      doc.text(String(line.quantity), colX, textTop, {
+        width: cols.qty - 2,
+        align: 'right',
+        lineBreak: false,
+      })
       colX += cols.qty
-      doc.text(formatMoney(line.unitPrice, document.currency), colX, y, { width: cols.unit - 2, align: 'right' })
+
+      doc.text(formatMoney(line.unitPrice, document.currency), colX, textTop, {
+        width: cols.unit - 2,
+        align: 'right',
+        lineBreak: false,
+      })
       colX += cols.unit
-      doc.text(`${line.taxRate}%`, colX, y, { width: cols.taxPct - 2, align: 'right' })
+
+      doc.text(`${line.taxRate}%`, colX, textTop, {
+        width: cols.taxPct - 2,
+        align: 'right',
+        lineBreak: false,
+      })
       colX += cols.taxPct
-      doc.text(formatMoney(line.taxAmount, document.currency), colX, y, { width: cols.taxAmt - 2, align: 'right' })
+
+      doc.text(formatMoney(line.taxAmount, document.currency), colX, textTop, {
+        width: cols.taxAmt - 2,
+        align: 'right',
+        lineBreak: false,
+      })
       colX += cols.taxAmt
-      doc.text(formatMoney(line.lineTotal, document.currency), colX, y, { width: cols.total - 4, align: 'right' })
-      y = Math.max(doc.y, rowTop + 16) + 6
-      doc.moveTo(left, y - 4).lineTo(left + pageWidth, y - 4).strokeColor('#f1f5f9').stroke()
+
+      doc.text(formatMoney(line.lineTotal, document.currency), colX, textTop, {
+        width: cols.total - 4,
+        align: 'right',
+        lineBreak: false,
+      })
+
+      // Advance exactly once by measured row height (ignore doc.y from wrapped text).
+      y = rowTop + rowHeight + ROW_GAP
     }
 
     y += 10

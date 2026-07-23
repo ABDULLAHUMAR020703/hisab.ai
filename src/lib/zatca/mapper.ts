@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto'
+import { roundMoney } from '@/lib/tax/calculator'
 import {
   ZATCA_FIRST_PIH_BASE64,
   ZATCA_INVOICE_TYPE_CODE,
@@ -20,10 +21,6 @@ import type {
   ZatcaPostalAddress,
   ZatcaTaxCategory,
 } from './types'
-
-function round2(value: number): number {
-  return Math.round(value * 100) / 100
-}
 
 function formatDate(date: Date): string {
   return date.toISOString().slice(0, 10)
@@ -118,8 +115,10 @@ function buildCustomerParty(
 
 function mapInvoiceLines(lines: ZatcaInvoiceInput['lines']): ZatcaInvoiceLine[] {
   return lines.map((line, index) => {
-    const lineExtensionAmount = round2(line.amount)
-    const taxAmount = round2(lineExtensionAmount * (line.taxRate / 100))
+    const lineExtensionAmount = roundMoney(line.amount)
+    // Always use commercial half-up from taxable × rate (same as invoice calculator / PDF).
+    // Do not trust a separately stored taxAmount that may have used a different rounding path.
+    const taxAmount = roundMoney(lineExtensionAmount * (line.taxRate / 100))
 
     return {
       id: String(index + 1),
@@ -128,7 +127,7 @@ function mapInvoiceLines(lines: ZatcaInvoiceInput['lines']): ZatcaInvoiceLine[] 
       lineExtensionAmount,
       taxAmount,
       itemName: line.description.trim(),
-      unitPrice: round2(line.unitPrice),
+      unitPrice: roundMoney(line.unitPrice),
       taxCategory: taxCategoryFromRate(line.taxRate),
     }
   })
@@ -141,8 +140,8 @@ function aggregateTaxSubtotals(lines: ZatcaInvoiceLine[]) {
     const key = line.taxCategory.percent
     const existing = buckets.get(key)
     if (existing) {
-      existing.taxableAmount = round2(existing.taxableAmount + line.lineExtensionAmount)
-      existing.taxAmount = round2(existing.taxAmount + line.taxAmount)
+      existing.taxableAmount = roundMoney(existing.taxableAmount + line.lineExtensionAmount)
+      existing.taxAmount = roundMoney(existing.taxAmount + line.taxAmount)
     } else {
       buckets.set(key, {
         taxableAmount: line.lineExtensionAmount,
@@ -157,19 +156,36 @@ function aggregateTaxSubtotals(lines: ZatcaInvoiceLine[]) {
 
 /**
  * Maps hisab.ai invoice entities to a ZATCA-oriented UBL 2.1 document model.
+ *
+ * Document TaxTotal / TaxSubtotal / LegalMonetaryTotal are always derived from
+ * the same rounded line amounts so BT-112 cannot diverge from line VAT sums.
  */
 export function mapInvoiceToZatcaDocument(input: ZatcaInvoiceInput): ZatcaInvoiceDocument {
   const invoiceType = input.invoiceType
   const invoiceLines = mapInvoiceLines(input.lines)
   const taxSubtotals = aggregateTaxSubtotals(invoiceLines)
 
-  const computedSubtotal = round2(invoiceLines.reduce((sum, l) => sum + l.lineExtensionAmount, 0))
-  const computedTax = round2(invoiceLines.reduce((sum, l) => sum + l.taxAmount, 0))
-  const computedTotal = round2(computedSubtotal + computedTax)
+  const subtotal = roundMoney(
+    invoiceLines.reduce((sum, l) => sum + l.lineExtensionAmount, 0),
+  )
+  const taxAmount = roundMoney(invoiceLines.reduce((sum, l) => sum + l.taxAmount, 0))
+  // Enforce TaxInclusiveAmount = TaxExclusiveAmount + TaxAmount (same rounded values).
+  const total = roundMoney(subtotal + taxAmount)
 
-  const subtotal = round2(input.subtotal) || computedSubtotal
-  const taxAmount = round2(input.taxAmount) || computedTax
-  const total = round2(input.total) || computedTotal
+  // Keep subtotals' TaxAmount identical to document TaxTotal (single rate or sum of buckets).
+  const subtotalTaxSum = roundMoney(taxSubtotals.reduce((s, t) => s + t.taxAmount, 0))
+  if (taxSubtotals.length === 1 && taxSubtotals[0]) {
+    taxSubtotals[0].taxAmount = taxAmount
+    taxSubtotals[0].taxableAmount = subtotal
+  } else if (Math.abs(subtotalTaxSum - taxAmount) > 0.001 && taxSubtotals.length > 0) {
+    // Allocate residual to the largest bucket so TaxTotal === sum(TaxSubtotal).
+    const residual = roundMoney(taxAmount - subtotalTaxSum)
+    let largest = taxSubtotals[0]
+    for (const bucket of taxSubtotals) {
+      if (bucket.taxAmount > largest.taxAmount) largest = bucket
+    }
+    largest.taxAmount = roundMoney(largest.taxAmount + residual)
+  }
 
   const uuid = input.invoiceUUID?.trim() || randomUUID()
   const currency = input.currency?.trim() || 'SAR'

@@ -1,4 +1,4 @@
-export { generateZatcaInvoiceXml } from './generate'
+export { generateZatcaInvoiceXml, syncInputTotalsFromDocument } from './generate'
 export { loadZatcaInvoiceById, processZatcaInvoice } from './invoice-service'
 export { mapInvoiceToZatcaDocument } from './mapper'
 export * from './constants'

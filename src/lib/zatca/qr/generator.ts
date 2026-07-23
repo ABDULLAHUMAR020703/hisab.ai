@@ -1,3 +1,4 @@
+import { roundMoney } from '@/lib/tax/calculator'
 import QRCode from 'qrcode'
 import type { InvoiceType } from '@/lib/db/prisma-types'
 import type { ZatcaCompanySettingsInput, ZatcaInvoiceInput } from '../types'
@@ -13,7 +14,7 @@ export interface QrGenerationResult {
 }
 
 function formatAmount(value: number): string {
-  return value.toFixed(2)
+  return roundMoney(value).toFixed(2)
 }
 
 /** Builds ZATCA ISO 8601 timestamp from invoice date and issue time. */

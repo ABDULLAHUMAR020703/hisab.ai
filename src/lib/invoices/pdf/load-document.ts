@@ -6,8 +6,10 @@ import { getInvoiceRepository, getSettingsRepository } from '@/lib/db/provider'
 import { computeDisplayBusinessStatus } from '@/lib/ui/invoice-status'
 import {
   calculateInvoiceLine,
+  calculateInvoiceTotals,
   type InvoiceTaxCalculationMethod,
 } from '@/lib/invoices/calculations'
+import { roundMoney } from '@/lib/tax/calculator'
 import { normalizeTaxCalculationMethod } from '@/lib/invoices/validation'
 import { resolveInvoiceQrForPdf } from '../qr-for-pdf'
 import { buildAddressLines, invoicePdfTitle } from './format'
@@ -79,8 +81,8 @@ function buildTaxSummary(
     )
     const existing = map.get(calc.taxRate) ?? { taxableAmount: 0, taxAmount: 0 }
     map.set(calc.taxRate, {
-      taxableAmount: existing.taxableAmount + calc.amount,
-      taxAmount: existing.taxAmount + calc.taxAmount,
+      taxableAmount: roundMoney(existing.taxableAmount + calc.amount),
+      taxAmount: roundMoney(existing.taxAmount + calc.taxAmount),
     })
   }
 
@@ -150,6 +152,14 @@ export async function loadInvoicePdfDocument(invoiceId: string): Promise<Invoice
 
   const method = normalizeTaxCalculationMethod(invoice.taxCalculationMethod)
   const lines = invoice.lines ?? []
+  const totals = calculateInvoiceTotals(
+    lines.map((line) => ({
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      taxRate: line.taxRate,
+    })),
+    method,
+  )
   const { title, accent } = invoicePdfTitle(invoice.invoiceType)
   const zatcaStatus = (invoice.zatcaStatus ?? 'DRAFT').toUpperCase()
   const submitted = zatcaStatus !== 'DRAFT' && zatcaStatus !== 'NOT_SUBMITTED'
@@ -181,9 +191,10 @@ export async function loadInvoicePdfDocument(invoiceId: string): Promise<Invoice
     referencedInvoiceNo: invoice.referencedInvoiceNo ?? null,
     customer: buildCustomerInfo(invoice.customer),
     lines: buildLineItems(lines, method),
-    subtotal: invoice.subtotal,
-    taxAmount: invoice.taxAmount,
-    total: invoice.total,
+    // Use the same commercial rounding path as ZATCA XML (not a stale header total).
+    subtotal: totals.subtotal,
+    taxAmount: totals.taxAmount,
+    total: totals.total,
     amountPaid: invoice.amountPaid,
     balanceDue: invoice.balance,
     taxSummary: buildTaxSummary(lines, method),

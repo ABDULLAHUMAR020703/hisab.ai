@@ -33,8 +33,22 @@ export interface LineTaxResult {
   isExempt: boolean
 }
 
+/**
+ * Commercial rounding (Round Half Up / Away From Zero).
+ * Scales via toFixed so midpoints like 7998.90×15% (= 1199.835) become 1199.84
+ * instead of IEEE-754 producing Math.round(1199.835*100) → 1199.83.
+ */
+export function roundHalfUp(value: number, decimals = 2): number {
+  if (!Number.isFinite(value)) return 0
+  if (value === 0) return 0
+  const factor = 10 ** decimals
+  const scaled = Number((Math.abs(value) * factor).toFixed(8))
+  return Math.sign(value) * (Math.round(scaled) / factor)
+}
+
+/** Monetary amounts for invoices / VAT — always 2dp commercial rounding. */
 export function roundMoney(value: number): number {
-  return Math.round(value * 10000) / 10000
+  return roundHalfUp(value, 2)
 }
 
 /** Exclusive tax: tax is added on top of net amount. */
