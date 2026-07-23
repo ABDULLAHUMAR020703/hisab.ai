@@ -1,5 +1,6 @@
 import 'server-only'
 import type { CustomerRecord, InvoiceLineRecord, InvoiceRecord } from '@/lib/db/entities'
+import type { InvoiceType } from '@/lib/db/prisma-types'
 import type { CompanySettingsRecord } from '@/lib/db/types'
 import { DEFAULT_CURRENCY, normalizeCurrency } from '@/lib/currency/constants'
 import { getInvoiceRepository, getSettingsRepository } from '@/lib/db/provider'
@@ -107,16 +108,20 @@ function buildZatcaInfo(
     return null
   }
 
+  const invoiceType = invoice.invoiceType as InvoiceType
+  const customerTaxId = invoice.customer
+    ? { taxId: (invoice.customer as { taxId?: string | null }).taxId }
+    : undefined
   const codeName = resolveZatcaInvoiceTypeCodeName({
-    invoiceType: invoice.invoiceType,
-    customer: invoice.customer ? { taxId: invoice.customer.taxId } : undefined,
+    invoiceType,
+    customer: customerTaxId,
     referencedSourceInvoiceType: invoice.referencedInvoiceType,
   })
   const submissionRoute = getSubmissionRoute(
-    invoice.invoiceType,
+    invoiceType,
     settings.zatcaEnvironment,
     resolveInvoiceTypeCodeName({
-      invoiceType: invoice.invoiceType,
+      invoiceType,
       invoiceTypeCodeNameOverride: codeName,
     }),
   )
