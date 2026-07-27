@@ -1,5 +1,6 @@
 ﻿import { requireAuth } from '@/lib/auth'
 import { getVendorRepository } from '@/lib/db/provider'
+import { requireRole } from '@/lib/authz'
 
 export async function GET(request: Request) {
   try {
@@ -18,12 +19,12 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    await requireAuth()
+    await requireRole(['OWNER', 'ADMIN', 'ACCOUNTANT', 'MANAGER'])
     const body = await request.json()
     const name = typeof body.name === 'string' ? body.name.trim() : ''
 
     if (!name) {
-      return Response.json({ error: 'Vendor name is required' }, { status: 400 })
+      return Response.json({ error: 'Supplier name is required' }, { status: 400 })
     }
 
     const vendor = await getVendorRepository().create({

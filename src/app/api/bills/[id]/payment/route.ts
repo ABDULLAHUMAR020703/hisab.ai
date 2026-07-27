@@ -1,13 +1,14 @@
-import { requireAuth } from '@/lib/auth'
 import { postPaymentToLedger } from '@/lib/accounting/document-posting'
 import { getCompanyPrimaryCurrency } from '@/lib/currency/company'
 import { prisma } from '@/lib/prisma'
 import { resolveCompanyId } from '@/lib/tenant'
 import { getNextSequence } from '@/lib/sequences'
+import { logAudit } from '@/lib/audit/log'
+import { requireRole } from '@/lib/authz'
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireAuth()
+    const user = await requireRole(['OWNER', 'ADMIN', 'ACCOUNTANT', 'MANAGER'])
     const companyId = await resolveCompanyId()
     const { id } = await params
     const body = await request.json()
@@ -49,6 +50,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     })
 
     await postPaymentToLedger(payment.id, companyId)
+    await logAudit({
+      companyId,
+      userId: user.id,
+      action: 'PAYMENT',
+      entityType: 'bill',
+      entityId: id,
+      details: { paymentId: payment.id, amount, paymentNo },
+    })
 
     return Response.json(updated)
   } catch (error) {

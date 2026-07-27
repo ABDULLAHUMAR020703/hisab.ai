@@ -1,6 +1,6 @@
-import { requireAuth } from '@/lib/auth'
+import { authzErrorResponse, requireRole } from '@/lib/authz'
+import { logAudit } from '@/lib/audit/log'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveCompanyId } from '@/lib/tenant'
 import { mapTaxRateRow } from '@/lib/db/entity-mappers'
 import { validateTaxConfigurationInput } from '@/lib/invoices/validation'
 
@@ -16,36 +16,37 @@ function toApiTaxConfig(row: Record<string, unknown>) {
     isDefault: mapped.isDefault,
     isActive: mapped.isActive,
     createdAt: mapped.createdAt,
+    updatedAt: row.updated_at ?? row.created_at,
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    await requireAuth()
-    const companyId = await resolveCompanyId()
+    const user = await requireRole(['OWNER', 'ADMIN', 'ACCOUNTANT', 'MANAGER', 'AUDITOR'])
+    const companyId = user.companyId
+    const includeInactive = new URL(request.url).searchParams.get('includeInactive') === 'true'
     const client = createAdminClient()
-    const { data, error } = await client
+    let query = client
       .from('tax_rates')
       .select('*')
       .eq('company_id', companyId)
       .is('deleted_at', null)
-      .eq('is_active', true)
       .order('name')
+    if (!includeInactive) query = query.eq('is_active', true)
+
+    const { data, error } = await query
 
     if (error) throw error
     return Response.json((data ?? []).map((row) => toApiTaxConfig(row)))
   } catch (error) {
-    if (error instanceof Error && error.message === 'Unauthorized') {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-    return Response.json({ error: String(error) }, { status: 500 })
+    return authzErrorResponse(error)
   }
 }
 
 export async function POST(request: Request) {
   try {
-    await requireAuth()
-    const companyId = await resolveCompanyId()
+    const user = await requireRole(['OWNER', 'ADMIN', 'ACCOUNTANT', 'MANAGER'])
+    const companyId = user.companyId
     const body = await request.json()
     const name = String(body.name ?? '').trim()
     const category = String(body.category ?? body.type ?? 'VAT').trim() || 'VAT'
@@ -63,6 +64,14 @@ export async function POST(request: Request) {
     }
 
     const client = createAdminClient()
+    if (body.isDefault) {
+      const { error: defaultError } = await client
+        .from('tax_rates')
+        .update({ is_default: false })
+        .eq('company_id', companyId)
+        .is('deleted_at', null)
+      if (defaultError) throw defaultError
+    }
     const { data, error } = await client
       .from('tax_rates')
       .insert({
@@ -79,11 +88,16 @@ export async function POST(request: Request) {
       .single()
 
     if (error) throw error
+    await logAudit({
+      companyId,
+      userId: user.id,
+      action: body.duplicateOf ? 'TAX_DUPLICATED' : 'TAX_CREATED',
+      entityType: 'tax_rate',
+      entityId: data.id,
+      details: { name, percentage, type: category, sourceTaxId: body.duplicateOf ?? null },
+    })
     return Response.json(toApiTaxConfig(data), { status: 201 })
   } catch (error) {
-    if (error instanceof Error && error.message === 'Unauthorized') {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-    return Response.json({ error: String(error) }, { status: 500 })
+    return authzErrorResponse(error)
   }
 }

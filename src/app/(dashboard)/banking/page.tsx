@@ -82,6 +82,18 @@ export default function BankingPage() {
     issueDate: new Date().toISOString().split('T')[0],
   })
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const supplierName = params.get('supplierName')
+    if (params.get('new') !== '1' || params.get('tab') !== 'cheques' || !supplierName) return
+    const timer = window.setTimeout(() => {
+      setTab('cheques')
+      setChequeForm({ bankAccountId: selectedAccountId || accounts[0]?.id || '', chequeNo: '', payee: supplierName, amount: 0, issueDate: new Date().toISOString().split('T')[0] })
+      setShowChequeModal(true)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [accounts, selectedAccountId])
+
   async function load() {
     setLoading(true)
     const accountParams = new URLSearchParams({ active: 'false' })

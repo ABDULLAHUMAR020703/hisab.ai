@@ -20,6 +20,7 @@ export default function ReceiptsPage() {
   const [receipts, setReceipts] = useState<Receipt[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
+  const [supplierName, setSupplierName] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
   async function load() {
@@ -30,6 +31,10 @@ export default function ReceiptsPage() {
   }
 
   useEffect(() => { load() }, [])
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSupplierName(new URLSearchParams(window.location.search).get('supplierName') ?? ''), 0)
+    return () => window.clearTimeout(timer)
+  }, [])
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -37,6 +42,10 @@ export default function ReceiptsPage() {
     setUploading(true)
     const fd = new FormData()
     fd.append('file', file)
+    if (supplierName) {
+      fd.append('vendor', supplierName)
+      fd.append('description', `Item receipt for ${supplierName}`)
+    }
     const res = await fetch('/api/receipts', { method: 'POST', body: fd })
     if (!res.ok) {
       alert(await readApiError(res))
@@ -59,8 +68,8 @@ export default function ReceiptsPage() {
   return (
     <div className="p-6 max-w-[1600px] mx-auto space-y-5">
       <PageHeader
-        title="Receipt Scanner"
-        subtitle={`${stats.total} receipts · ${stats.unprocessed} unprocessed`}
+        title={supplierName ? 'Item Receipt' : 'Receipt Scanner'}
+        subtitle={supplierName ? `Upload an item receipt for ${supplierName}` : `${stats.total} receipts · ${stats.unprocessed} unprocessed`}
         breadcrumb={[{ label: 'Operations' }, { label: 'Receipts' }]}
         action={
           <div className="flex items-center gap-2">

@@ -38,7 +38,7 @@ export default function PurchaseOrdersPage() {
 
   const [form, setForm] = useState({
     vendorId: '', date: new Date().toISOString().split('T')[0],
-    expectedDate: '', notes: '', currency: 'SAR',
+    expectedDate: '', notes: '', currency: 'SAR', status: 'OPEN', email: '', mailingAddress: '', shipVia: '', supplierMessage: '',
     lines: [{ ...EMPTY_LINE }],
   })
 
@@ -57,6 +57,17 @@ export default function PurchaseOrdersPage() {
   }
 
   useEffect(() => { load() }, [search, statusFilter])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const supplierId = params.get('supplierId')
+    if (params.get('new') !== '1' || !supplierId || !vendors.some((vendor) => vendor.id === supplierId)) return
+    const timer = window.setTimeout(() => {
+      setForm({ vendorId: supplierId, date: new Date().toISOString().split('T')[0], expectedDate: '', notes: '', currency: params.get('currency') || primaryCurrency, status: 'OPEN', email: '', mailingAddress: '', shipVia: '', supplierMessage: '', lines: [{ ...EMPTY_LINE }] })
+      setShowModal(true)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [vendors, primaryCurrency])
 
   function updateLine(idx: number, field: string, value: string | number) {
     setForm((f) => ({ ...f, lines: f.lines.map((l, i) => (i === idx ? { ...l, [field]: value } : l)) }))
@@ -93,7 +104,7 @@ export default function PurchaseOrdersPage() {
         title="Purchase Orders"
         subtitle={`${orders.length} orders · ${formatPrimary(orders.reduce((s, o) => s + o.total, 0))} total`}
         breadcrumb={[{ label: 'Expenses' }, { label: 'Purchase Orders' }]}
-        action={<Button onClick={() => { setForm({ vendorId: '', date: new Date().toISOString().split('T')[0], expectedDate: '', notes: '', currency: primaryCurrency, lines: [{ ...EMPTY_LINE }] }); setShowModal(true) }}><Plus size={15} /> New PO</Button>}
+        action={<Button onClick={() => { setForm({ vendorId: '', date: new Date().toISOString().split('T')[0], expectedDate: '', notes: '', currency: primaryCurrency, status: 'OPEN', email: '', mailingAddress: '', shipVia: '', supplierMessage: '', lines: [{ ...EMPTY_LINE }] }); setShowModal(true) }}><Plus size={15} /> New PO</Button>}
       />
 
       <FilterBar>
@@ -112,7 +123,7 @@ export default function PurchaseOrdersPage() {
           <table className="w-full data-table">
             <thead>
               <tr className="border-b border-slate-100">
-                {['PO #', 'Vendor', 'Date', 'Expected', 'Total', 'Status', ''].map((h, i) => (
+                {['PO #', 'Supplier', 'Date', 'Expected', 'Total', 'Status', ''].map((h, i) => (
                   <th key={i} className={cn('px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wider text-left', h === 'Total' && 'text-right', h === 'Status' && 'text-center', h === '' && 'w-28')}>{h}</th>
                 ))}
               </tr>
@@ -145,13 +156,14 @@ export default function PurchaseOrdersPage() {
         </div>
       </div>
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="New Purchase Order" subtitle="Create a purchase order for a vendor" size="xl"
-        footer={<><Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button><Button onClick={handleSave} loading={saving}>Save PO</Button></>}
+      <Modal open={showModal} onClose={() => setShowModal(false)} title="Purchase Order" subtitle="Create a purchase order for a supplier" size="xl"
+        footer={<><Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button><Button variant="outline" onClick={() => window.print()}>Print</Button><Button variant="outline" onClick={() => window.location.assign(`/recurring-transactions?new=1&transactionType=PURCHASE_ORDER&supplierId=${form.vendorId}`)}>Make Recurring</Button><Button onClick={handleSave} loading={saving}>Save & Close</Button></>}
       >
         <div className="space-y-5">
+          <div className="flex items-start justify-between rounded-xl bg-slate-50 px-4 py-3"><div><p className="text-xs font-semibold uppercase text-slate-500">Purchase order total</p><p className="text-xl font-bold text-indigo-600">{formatFormAmount(total)}</p></div><Select label="Status" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="w-44"><option value="OPEN">Open</option><option value="PENDING_APPROVAL">Pending Approval</option><option value="APPROVED">Approved</option><option value="CLOSED">Closed</option><option value="CANCELLED">Cancelled</option></Select></div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Select label="Vendor" required value={form.vendorId} onChange={(e) => setForm({ ...form, vendorId: e.target.value })}>
-              <option value="">Select vendor...</option>
+            <Select label="Supplier" required value={form.vendorId} onChange={(e) => setForm({ ...form, vendorId: e.target.value })}>
+              <option value="">Select supplier...</option>
               {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
             </Select>
             <Input label="PO Date" type="date" required value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
@@ -160,6 +172,7 @@ export default function PurchaseOrdersPage() {
               {ALLOWED_CURRENCIES.map((entry) => <option key={entry.code} value={entry.code}>{entry.code} — {entry.name}</option>)}
             </Select>
           </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4"><Input label="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="supplier@example.com, accounts@example.com" /><Input label="Ship Via" value={form.shipVia} onChange={(e) => setForm({ ...form, shipVia: e.target.value })} placeholder="Courier, air, sea..." /><Input label="Mailing Address" value={form.mailingAddress} onChange={(e) => setForm({ ...form, mailingAddress: e.target.value })} placeholder="Supplier address" /></div>
           <div>
             <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">Line Items</label>
             <div className="border border-slate-200 rounded-xl overflow-hidden">
@@ -198,7 +211,7 @@ export default function PurchaseOrdersPage() {
               <Plus size={14} /> Add Line
             </button>
           </div>
-          <Textarea label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><Textarea label="Your Message to Supplier" value={form.supplierMessage} onChange={(e) => setForm({ ...form, supplierMessage: e.target.value })} rows={3} /><Textarea label="Memo" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3} /></div>
         </div>
       </Modal>
     </div>
