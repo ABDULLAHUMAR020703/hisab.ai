@@ -1,5 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import type { AccountingProvider, ProviderCredentialContext } from '../../src/integrations/accounting/contracts/accounting-provider'
 import type {
   CreateConnectionInput,
@@ -18,6 +20,7 @@ import {
   type ProviderTokenSet,
 } from '../../src/integrations/accounting/contracts/types'
 import { QuickBooksIntegrationService } from '../../src/integrations/accounting/providers/quickbooks/quickbooks-integration.service'
+import { ACCOUNTING_INTEGRATION_TABLES } from '../../src/integrations/accounting/repositories/accounting-integration-tables'
 import { AccountingIntegrationService } from '../../src/integrations/accounting/services/accounting-integration.service'
 import { AuditLogService } from '../../src/integrations/accounting/services/audit-log.service'
 import { ConnectionService } from '../../src/integrations/accounting/services/connection.service'
@@ -39,9 +42,72 @@ import {
   hasIntegrationPermission,
   IntegrationPermission,
 } from '../../src/integrations/accounting/middlewares/permissions'
+import { integrationErrorLogContext } from '../../src/integrations/accounting/middlewares/error-logging'
 
 const NOW = new Date('2026-07-29T00:00:00.000Z')
 const HOUR = 60 * 60 * 1000
+
+describe('Accounting integration persistence isolation', () => {
+  it('uses only accounting-prefixed tables', () => {
+    assert.deepEqual(ACCOUNTING_INTEGRATION_TABLES, {
+      providers: 'accounting_integration_providers',
+      connections: 'accounting_integration_connections',
+      logs: 'accounting_integration_logs',
+      oauthStates: 'accounting_integration_oauth_states',
+    })
+    const platformConnectionTable: string = 'integration_connections'
+    assert.equal(Object.values(ACCOUNTING_INTEGRATION_TABLES).some((table) => table === platformConnectionTable), false)
+  })
+
+  it('creates only namespaced accounting tables without platform table DDL', () => {
+    const migration = readFileSync(
+      resolve(process.cwd(), 'supabase/migrations/048_accounting_integrations_namespaced.sql'),
+      'utf8',
+    )
+
+    for (const table of Object.values(ACCOUNTING_INTEGRATION_TABLES)) {
+      assert.match(migration, new RegExp(`CREATE TABLE public\\.${table}\\s*\\(`))
+    }
+    assert.doesNotMatch(
+      migration,
+      /(?:CREATE|ALTER|DROP) TABLE public\.integration_(?:connectors|connections)\b/,
+    )
+  })
+})
+
+describe('Accounting integration error logging', () => {
+  it('preserves Supabase/PostgREST diagnostics without exposing secrets', () => {
+    const diagnostic = integrationErrorLogContext({
+      message: "Could not find the table 'public.integration_providers' in the schema cache",
+      details: null,
+      hint: "Perhaps you meant the table 'public.accounting_integration_providers'",
+      code: 'PGRST205',
+      body: {
+        message: 'PostgREST failure',
+        access_token: 'must-not-be-logged',
+        clientSecret: 'must-not-be-logged',
+        details: 'Authorization: Bearer must-not-be-logged',
+      },
+    })
+
+    assert.equal(diagnostic.errorMessage, "Could not find the table 'public.integration_providers' in the schema cache")
+    assert.equal(diagnostic.databaseErrorCode, 'PGRST205')
+    assert.equal(diagnostic.supabaseErrorCode, 'PGRST205')
+    assert.equal(diagnostic.supabaseErrorHint, "Perhaps you meant the table 'public.accounting_integration_providers'")
+    assert.deepEqual(diagnostic.postgrestErrorBody, {
+      message: 'PostgREST failure',
+      access_token: '[REDACTED]',
+      clientSecret: '[REDACTED]',
+      details: 'Authorization: Bearer [REDACTED]',
+    })
+  })
+
+  it('includes Error stacks in the structured context', () => {
+    const diagnostic = integrationErrorLogContext(new Error('database unavailable'))
+    assert.equal(diagnostic.error, 'database unavailable')
+    assert.match(diagnostic.errorStack ?? '', /database unavailable/)
+  })
+})
 
 function provider(slug = Provider.QUICKBOOKS, active = true): IntegrationProviderRecord {
   return { id: `provider-${slug}`, name: 'QuickBooks Online', slug, logo: null, isActive: active, createdAt: NOW, updatedAt: NOW }

@@ -9,6 +9,7 @@ import {
   assertIntegrationPermission,
   type IntegrationPermission,
 } from './permissions'
+import { integrationErrorLogContext } from './error-logging'
 
 const COMPANY_ROLES: CompanyRole[] = ['OWNER', 'ADMIN', 'ACCOUNTANT', 'MANAGER', 'EMPLOYEE', 'AUDITOR']
 
@@ -55,7 +56,7 @@ export function integrationApiHandler(
         method: route.split(' ')[0],
         statusCode: response.status,
         errorCode: error instanceof AccountingIntegrationException ? error.code : undefined,
-        error: error instanceof Error ? error.message : String(error),
+        ...integrationErrorLogContext(error),
         durationMs: Date.now() - startedAt,
       })
       return response
