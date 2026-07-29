@@ -1,5 +1,6 @@
 import 'server-only'
 import { randomUUID } from 'node:crypto'
+import { NextResponse } from 'next/server'
 import { ForbiddenError, requireRole } from '@/lib/authz'
 import type { AppUser } from '@/lib/auth'
 import type { CompanyRole } from '@/lib/db/types'
@@ -33,7 +34,12 @@ export function integrationApiHandler(
       const user = await requireRole(COMPANY_ROLES)
       context = { correlationId, request, user, tenantId: user.companyId }
       assertIntegrationPermission(user.role, permission)
-      const response = await handler(context as IntegrationRequestContext)
+      const handlerResponse = await handler(context as IntegrationRequestContext)
+      const response = new NextResponse(handlerResponse.body, {
+        status: handlerResponse.status,
+        statusText: handlerResponse.statusText,
+        headers: handlerResponse.headers,
+      })
       response.headers.set('x-correlation-id', correlationId)
       logger.info('accounting.integration.api', {
         correlationId,

@@ -1,3 +1,4 @@
+import { NextResponse } from 'next/server'
 import type { AccountingIntegrationService } from '../services/accounting-integration.service'
 import { Provider } from '../contracts/types'
 import { AccountingIntegrationException } from '../utils/exceptions'
@@ -38,7 +39,7 @@ export class AccountingIntegrationController {
           : 'QuickBooks authorization could not be completed.',
       )
     }
-    const response = Response.redirect(destination, 303)
+    const response = NextResponse.redirect(destination, 303)
     response.headers.set('x-integration-result', destination.searchParams.get('quickbooks') ?? 'unknown')
     return response
   }

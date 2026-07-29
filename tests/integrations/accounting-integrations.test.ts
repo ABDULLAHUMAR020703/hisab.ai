@@ -20,6 +20,7 @@ import {
   type ProviderTokenSet,
 } from '../../src/integrations/accounting/contracts/types'
 import { QuickBooksIntegrationService } from '../../src/integrations/accounting/providers/quickbooks/quickbooks-integration.service'
+import { AccountingIntegrationController } from '../../src/integrations/accounting/controllers/accounting-integration.controller'
 import { ACCOUNTING_INTEGRATION_TABLES } from '../../src/integrations/accounting/repositories/accounting-integration-tables'
 import { AccountingIntegrationService } from '../../src/integrations/accounting/services/accounting-integration.service'
 import { AuditLogService } from '../../src/integrations/accounting/services/audit-log.service'
@@ -356,6 +357,25 @@ describe('ConnectionService OAuth lifecycle', () => {
     assert.equal(repository.connections[0].realmId, null)
     assert.equal(adapter.disconnectContext?.refreshToken, 'plain-refresh')
     assert.equal(repository.logs.some((item) => item.action === 'CONNECTION_REMOVED'), true)
+  })
+})
+
+describe('QuickBooks callback response', () => {
+  it('returns a mutable NextResponse after a successful OAuth callback', async () => {
+    const { service, connection } = fixture()
+    const state = await startOAuth(connection)
+    const controller = new AccountingIntegrationController(service)
+    const response = await controller.quickBooksCallback(
+      new Request(`https://hisab.test/api/integrations/quickbooks/callback?state=${state}&code=code&realmId=123456`),
+      'tenant-1',
+      'user-1',
+    )
+
+    assert.equal(response.status, 303)
+    assert.equal(response.headers.get('x-integration-result'), 'connected')
+    assert.equal(response.headers.get('location'), 'https://hisab.test/settings/integrations?quickbooks=connected')
+    assert.doesNotThrow(() => response.headers.set('x-correlation-id', 'test-correlation-id'))
+    assert.equal(response.headers.get('x-correlation-id'), 'test-correlation-id')
   })
 })
 
