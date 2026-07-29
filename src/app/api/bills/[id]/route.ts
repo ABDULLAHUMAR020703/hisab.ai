@@ -3,6 +3,8 @@ import { postBillToLedger } from '@/lib/accounting/document-posting'
 import { resolveTransactionCurrency } from '@/lib/currency/company'
 import { prisma } from '@/lib/prisma'
 import { resolveCompanyId } from '@/lib/tenant'
+import { logAudit } from '@/lib/audit/log'
+import { requireRole } from '@/lib/authz'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -21,7 +23,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireAuth()
+    const user = await requireRole(['OWNER', 'ADMIN', 'ACCOUNTANT', 'MANAGER'])
+    const companyId = await resolveCompanyId()
     const { id } = await params
     const body = await request.json()
     const existing = await prisma.bill.findUnique({ where: { id } })
@@ -86,9 +89,10 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     })
 
     if (nextStatus === 'RECEIVED' && existing.status !== 'RECEIVED') {
-      const companyId = await resolveCompanyId()
       await postBillToLedger(id, companyId)
     }
+
+    await logAudit({ companyId, userId: user.id, action: 'BILL_UPDATED', entityType: 'bill', entityId: id, details: { billNo: bill.billNo } })
 
     return Response.json(bill)
   } catch (error) {
@@ -98,9 +102,11 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireAuth()
+    const user = await requireRole(['OWNER', 'ADMIN', 'ACCOUNTANT', 'MANAGER'])
+    const companyId = await resolveCompanyId()
     const { id } = await params
     await prisma.bill.delete({ where: { id } })
+    await logAudit({ companyId, userId: user.id, action: 'BILL_DELETED', entityType: 'bill', entityId: id })
     return Response.json({ success: true })
   } catch (error) {
     return Response.json({ error: String(error) }, { status: 500 })

@@ -1,5 +1,7 @@
 import { requireAuth } from '@/lib/auth'
 import { getVendorRepository } from '@/lib/db/provider'
+import { logAudit } from '@/lib/audit/log'
+import { requireRole } from '@/lib/authz'
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -15,10 +17,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    await requireAuth()
+    await requireRole(['OWNER', 'ADMIN', 'ACCOUNTANT', 'MANAGER'])
     const { id } = await params
     const body = await request.json()
-    const vendor = await getVendorRepository().update(id, {
+    const supplier = await getVendorRepository().update(id, {
       name: body.name,
       email: body.email,
       phone: body.phone,
@@ -29,7 +31,11 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       paymentTerms: body.paymentTerms,
       isActive: body.isActive,
     })
-    return Response.json(vendor)
+    await logAudit({
+      action: body.isActive === false ? 'SUPPLIER_INACTIVATED' : body.isActive === true ? 'SUPPLIER_ACTIVATED' : 'SUPPLIER_UPDATED',
+      entityType: 'supplier', entityId: id,
+    })
+    return Response.json(supplier)
   } catch (error) {
     if (error instanceof Error && error.message === 'Vendor not found') {
       return Response.json({ error: 'Not found' }, { status: 404 })

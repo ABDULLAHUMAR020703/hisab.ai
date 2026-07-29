@@ -5,10 +5,10 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard, BookOpen, FileText, Users, Receipt, CreditCard,
-  Building2, DollarSign, UserCheck, Package, MapPin, Camera,
+  Building2, DollarSign, UserCheck, Package, MapPin, Camera, Briefcase,
   BarChart3, Shield, UserCog, Settings, LogOut, ChevronLeft,
   Menu, List, Bell, ChevronDown, TrendingUp, History, Database,
-  ClipboardList, ShoppingCart, Banknote, BadgePercent, Landmark, Wallet, Wand2, ArrowRightLeft, GitBranch, Cog, Hash
+  ClipboardList, ShoppingCart, Banknote, BadgePercent, Landmark, Wallet, Wand2, ArrowRightLeft, GitBranch, Cog, Hash, Repeat2
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PRODUCT_NAME } from '@/lib/brand'
@@ -26,6 +26,7 @@ const NAV = [
     section: 'Accounting',
     items: [
       { label: 'Chart of Accounts', href: '/accounts', icon: List },
+      { label: 'Recurring Transactions', href: '/recurring-transactions', icon: Repeat2 },
       { label: 'Journal Entry', href: '/journal', icon: BookOpen },
       { label: 'Currency Revaluation', href: '/currency/revaluation', icon: ArrowRightLeft },
       { label: 'Master Data', href: '/master-data', icon: Database },
@@ -34,9 +35,11 @@ const NAV = [
   {
     section: 'Income',
     items: [
+      { label: 'Sales Transactions', href: '/sales-transactions', icon: FileText },
       { label: 'Invoices', href: '/invoices', icon: FileText },
       { label: 'Estimates', href: '/estimates', icon: ClipboardList },
       { label: 'Sales Orders', href: '/sales-orders', icon: ShoppingCart },
+      { label: 'Products & Services', href: '/products-services', icon: Package },
       { label: 'Sales Receipts', href: '/sales-receipts', icon: Banknote },
       { label: 'Customers', href: '/customers', icon: Users },
     ]
@@ -44,18 +47,32 @@ const NAV = [
   {
     section: 'Expenses',
     items: [
+      { label: 'Expense Transactions', href: '/expense-transactions', icon: ClipboardList },
       { label: 'Bills', href: '/bills', icon: Receipt },
       { label: 'Purchase Orders', href: '/purchase-orders', icon: ShoppingCart },
-      { label: 'Vendor Credits', href: '/vendor-credits', icon: BadgePercent },
+      { label: 'Supplier Credits', href: '/vendor-credits', icon: BadgePercent },
       { label: 'Expenses', href: '/expenses', icon: CreditCard },
       { label: 'Expense Claims', href: '/expense-claims', icon: ClipboardList },
-      { label: 'Vendors', href: '/vendors', icon: Building2 },
+      { label: 'Suppliers', href: '/suppliers', icon: Building2 },
     ]
   },
   {
     section: 'Banking',
     items: [
       { label: 'Banking', href: '/banking', icon: Landmark },
+    ]
+  },
+  {
+    section: 'Inventory',
+    items: [
+      { label: 'Overview', href: '/inventory-overview', icon: Package },
+      { label: 'Inventory', href: '/inventory', icon: Package },
+    ]
+  },
+  {
+    section: 'Projects',
+    items: [
+      { label: 'Projects', href: '/projects', icon: Briefcase },
     ]
   },
   {

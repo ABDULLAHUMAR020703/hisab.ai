@@ -1,264 +1,80 @@
-﻿'use client'
+'use client'
 
-import { useEffect, useState } from 'react'
-import { Plus, RefreshCw, DollarSign, Upload, FileUp } from 'lucide-react'
-import { formatDate, formatCurrency as formatAmount, cn } from '@/lib/utils'
-import { useCompanyCurrency, useFormatCurrency } from '@/hooks/use-company-currency'
-import { ALLOWED_CURRENCIES } from '@/lib/currency/constants'
-import { Badge } from '@/components/ui/badge'
+import { useEffect, useMemo, useState } from 'react'
+import { ChevronDown, DollarSign, FileUp, MoreHorizontal, Plus, RefreshCw, Repeat2 } from 'lucide-react'
+import { formatCurrency as formatAmount, cn } from '@/lib/utils'
+import { useCompanyCurrency } from '@/hooks/use-company-currency'
 import { Button } from '@/components/ui/button'
-import { Modal } from '@/components/ui/modal'
 import { Input, Select, Textarea } from '@/components/ui/input'
+import { Modal } from '@/components/ui/modal'
 import { PageHeader, SearchBar, FilterBar } from '@/components/ui/page-header'
-import { CsvImportModal } from '@/components/ui/csv-import-modal'
 import { UploadDocumentModal } from '@/components/ui/upload-document-modal'
+import { ActionDropdown } from '@/components/ui/action-dropdown'
 import { readApiError } from '@/lib/api-client'
 
-interface Vendor { id: string; name: string }
+interface Supplier { id: string; name: string }
 interface Account { id: string; accountNo: string; name: string }
 interface BillLine { description: string; quantity: number; unitPrice: number; taxRate: number; accountId?: string }
-interface Bill {
-  id: string; billNo: string; vendor: { name: string }; date: string; dueDate: string
-  total: number; balance: number; amountPaid: number; status: string; currency?: string
-}
+interface Bill { id: string; billNo: string; vendorId: string; vendor: { name: string }; date: string; dueDate: string; reference?: string | null; notes?: string | null; total: number; balance: number; amountPaid: number; status: string; approvalStatus?: string; currency?: string; lines?: BillLine[] }
 
 const EMPTY_LINE: BillLine = { description: '', quantity: 1, unitPrice: 0, taxRate: 15, accountId: '' }
-const STATUSES = ['DRAFT', 'APPROVED', 'PAID', 'PARTIAL', 'OVERDUE']
+type Tab = 'review' | 'unpaid' | 'paid'
+const today = () => new Date().toISOString().slice(0, 10)
+const initialForm = (currency: string) => ({ vendorId: '', date: today(), dueDate: '', notes: '', reference: '', currency, lines: [{ ...EMPTY_LINE }] })
+
+function dueStatus(bill: Bill) {
+  if (bill.balance <= 0 || bill.status === 'PAID') return { label: 'Paid', tone: 'bg-emerald-50 text-emerald-700 border-emerald-200' }
+  const days = Math.ceil((new Date(`${bill.dueDate}T00:00:00`).getTime() - new Date(`${today()}T00:00:00`).getTime()) / 86400000)
+  if (days < 0) return { label: `Overdue — ${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'} ago`, tone: 'bg-rose-50 text-rose-700 border-rose-200' }
+  if (days === 0) return { label: 'Due today', tone: 'bg-amber-50 text-amber-700 border-amber-200' }
+  return { label: `Due in ${days} day${days === 1 ? '' : 's'}`, tone: 'bg-sky-50 text-sky-700 border-sky-200' }
+}
+function dateLabel(date: string) { return new Intl.DateTimeFormat('en-GB').format(new Date(date)) }
 
 export default function BillsPage() {
-  const formatPrimary = useFormatCurrency()
-  const { currency: primaryCurrency } = useCompanyCurrency()
-  const [bills, setBills] = useState<Bill[]>([])
-  const [vendors, setVendors] = useState<Vendor[]>([])
-  const [accounts, setAccounts] = useState<Account[]>([])
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [showModal, setShowModal] = useState(false)
-  const [showImport, setShowImport] = useState(false)
-  const [showUpload, setShowUpload] = useState(false)
-  const [showPayModal, setShowPayModal] = useState(false)
-  const [selectedBill, setSelectedBill] = useState<Bill | null>(null)
-  const [saving, setSaving] = useState(false)
+  const { currency: companyCurrency } = useCompanyCurrency()
+  const [bills, setBills] = useState<Bill[]>([]); const [suppliers, setSuppliers] = useState<Supplier[]>([]); const [accounts, setAccounts] = useState<Account[]>([])
+  const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false); const [search, setSearch] = useState(''); const [tab, setTab] = useState<Tab>('review')
+  const [supplierId, setSupplierId] = useState(''); const [dateRange, setDateRange] = useState('year'); const [selected, setSelected] = useState<string[]>([]); const [page, setPage] = useState(1)
+  const [formOpen, setFormOpen] = useState(false); const [editing, setEditing] = useState<Bill | null>(null); const [detail, setDetail] = useState<Bill | null>(null); const [uploadOpen, setUploadOpen] = useState(false); const [addOpen, setAddOpen] = useState(false)
+  const [selectedBill, setSelectedBill] = useState<Bill | null>(null); const [payOpen, setPayOpen] = useState(false)
+  const [form, setForm] = useState(initialForm(companyCurrency)); const [payForm, setPayForm] = useState({ amount: 0, method: 'BANK_TRANSFER', reference: '', date: today() })
 
-  const [form, setForm] = useState({
-    vendorId: '', date: new Date().toISOString().split('T')[0],
-    dueDate: '', notes: '', reference: '', currency: 'SAR',
-    lines: [{ ...EMPTY_LINE }]
-  })
-  const [payForm, setPayForm] = useState({ amount: 0, method: 'BANK_TRANSFER', reference: '', date: new Date().toISOString().split('T')[0] })
+  async function load() { setLoading(true); const [billRes, supplierRes, accountRes] = await Promise.all([fetch('/api/bills'), fetch('/api/vendors'), fetch('/api/accounts')]); if (billRes.ok) setBills(await billRes.json()); if (supplierRes.ok) setSuppliers(await supplierRes.json()); if (accountRes.ok) setAccounts(await accountRes.json()); setLoading(false) }
+  useEffect(() => { const timer = window.setTimeout(() => { void load() }, 0); return () => window.clearTimeout(timer) }, [])
+  useEffect(() => { const id = new URLSearchParams(window.location.search).get('payBill'); const bill = bills.find((item) => item.id === id); if (bill && bill.balance > 0) openPay(bill) }, [bills])
+  useEffect(() => { const params = new URLSearchParams(window.location.search); const id = params.get('supplierId'); if (params.get('new') === '1' && id && suppliers.some((s) => s.id === id)) openCreate(id) }, [suppliers])
 
-  async function load() {
-    setLoading(true)
-    const params = new URLSearchParams()
-    if (search) params.set('search', search)
-    if (statusFilter) params.set('status', statusFilter)
-    const [bRes, vRes, aRes] = await Promise.all([
-      fetch(`/api/bills?${params}`), fetch('/api/vendors'), fetch('/api/accounts')
-    ])
-    if (bRes.ok) setBills(await bRes.json())
-    if (vRes.ok) setVendors(await vRes.json())
-    if (aRes.ok) setAccounts(await aRes.json())
-    setLoading(false)
-  }
+  const filtered = useMemo(() => bills.filter((bill) => {
+    const query = [bill.vendor?.name, bill.billNo, bill.reference].filter(Boolean).join(' ').toLowerCase(); const searchOk = !search || query.includes(search.toLowerCase())
+    const supplierOk = !supplierId || bill.vendorId === supplierId
+    const paid = bill.balance <= 0 || bill.status === 'PAID'; const review = bill.status === 'DRAFT' || bill.approvalStatus === 'PENDING'
+    const tabOk = tab === 'paid' ? paid : tab === 'review' ? review : !paid && !review
+    const created = new Date(bill.date); const now = new Date(); const start = dateRange === 'year' ? new Date(now.getFullYear(), 0, 1) : dateRange === 'month' ? new Date(now.getFullYear(), now.getMonth(), 1) : null
+    return searchOk && supplierOk && tabOk && (!start || created >= start)
+  }), [bills, dateRange, search, supplierId, tab])
+  const rows = filtered.slice((page - 1) * 25, page * 25)
+  const counts = { review: bills.filter((b) => b.status === 'DRAFT' || b.approvalStatus === 'PENDING').length, unpaid: bills.filter((b) => b.balance > 0 && b.status !== 'DRAFT' && b.approvalStatus !== 'PENDING').length, paid: bills.filter((b) => b.balance <= 0 || b.status === 'PAID').length }
+  const changeLine = (index: number, field: keyof BillLine, value: string | number) => setForm((state) => ({ ...state, lines: state.lines.map((line, i) => i === index ? { ...line, [field]: value } : line) }))
+  const subtotal = form.lines.reduce((total, line) => total + line.quantity * line.unitPrice, 0); const tax = form.lines.reduce((total, line) => total + line.quantity * line.unitPrice * line.taxRate / 100, 0)
+  function openCreate(vendorId = '') { setEditing(null); setForm({ ...initialForm(companyCurrency), vendorId }); setFormOpen(true); setAddOpen(false) }
+  function openEdit(bill: Bill) { setEditing(bill); setForm({ vendorId: bill.vendorId, date: bill.date.slice(0, 10), dueDate: bill.dueDate.slice(0, 10), notes: bill.notes ?? '', reference: bill.reference ?? '', currency: bill.currency ?? companyCurrency, lines: bill.lines?.length ? bill.lines.map((line) => ({ ...line, accountId: line.accountId ?? '' })) : [{ ...EMPTY_LINE }] }); setFormOpen(true) }
+  function openPay(bill: Bill) { setSelectedBill(bill); setPayForm({ amount: bill.balance, method: 'BANK_TRANSFER', reference: '', date: today() }); setPayOpen(true) }
+  async function saveBill() { setSaving(true); const response = await fetch(editing ? `/api/bills/${editing.id}` : '/api/bills', { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) }); if (!response.ok) alert(await readApiError(response)); else { setFormOpen(false); await load() }; setSaving(false) }
+  async function payBill() { if (!selectedBill) return; setSaving(true); const response = await fetch(`/api/bills/${selectedBill.id}/payment`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payForm) }); if (!response.ok) alert(await readApiError(response)); else { setPayOpen(false); await load() }; setSaving(false) }
+  async function deleteBill(bill: Bill) { if (!confirm(`Delete ${bill.billNo}?`)) return; const response = await fetch(`/api/bills/${bill.id}`, { method: 'DELETE' }); if (!response.ok) alert(await readApiError(response)); else await load() }
+  function copyBill(bill: Bill) { setEditing(null); setForm({ vendorId: bill.vendorId, date: today(), dueDate: bill.dueDate.slice(0, 10), notes: bill.notes ?? '', reference: bill.reference ?? '', currency: bill.currency ?? companyCurrency, lines: bill.lines?.length ? bill.lines : [{ ...EMPTY_LINE }] }); setFormOpen(true) }
+  const toggle = (id: string) => setSelected((items) => items.includes(id) ? items.filter((item) => item !== id) : [...items, id])
 
-  useEffect(() => { load() }, [search, statusFilter])
-
-  function updateLine(idx: number, field: string, value: string | number) {
-    setForm(f => ({ ...f, lines: f.lines.map((l, i) => i === idx ? { ...l, [field]: value } : l) }))
-  }
-
-  const subtotal = form.lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0)
-  const taxAmount = form.lines.reduce((s, l) => s + l.quantity * l.unitPrice * (l.taxRate / 100), 0)
-  const total = subtotal + taxAmount
-  const formatFormAmount = (amount: number) => formatAmount(amount, form.currency)
-  const formatBillAmount = (bill: Bill, amount: number) => formatAmount(amount, bill.currency ?? primaryCurrency)
-
-  function openCreateBill() {
-    setForm({
-      vendorId: '', date: new Date().toISOString().split('T')[0],
-      dueDate: '', notes: '', reference: '', currency: primaryCurrency,
-      lines: [{ ...EMPTY_LINE }],
-    })
-    setShowModal(true)
-  }
-
-  async function handleSave() {
-    setSaving(true)
-    const res = await fetch('/api/bills', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
-    if (!res.ok) {
-      alert(await readApiError(res))
-      setSaving(false)
-      return
-    }
-    if (res.ok) { setShowModal(false); load() }
-    setSaving(false)
-  }
-
-  async function handlePayment() {
-    if (!selectedBill) return
-    const res = await fetch(`/api/bills/${selectedBill.id}/payment`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payForm) })
-    if (!res.ok) {
-      alert(await readApiError(res))
-      return
-    }
-    if (res.ok) { setShowPayModal(false); load() }
-  }
-
-  return (
-    <div className="p-6 max-w-[1600px] mx-auto space-y-5">
-      <PageHeader
-        title="Bills"
-        subtitle={`${bills.length} bills · ${formatPrimary(bills.reduce((s, b) => s + b.total, 0))} total`}
-        breadcrumb={[{ label: 'Expenses' }, { label: 'Bills' }]}
-        action={
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => setShowUpload(true)}><FileUp size={14} /> Upload Bill</Button>
-            <Button variant="outline" onClick={() => setShowImport(true)}><Upload size={14} /> Import CSV</Button>
-            <Button onClick={openCreateBill}><Plus size={15} /> New Bill</Button>
-          </div>
-        }
-      />
-
-      <FilterBar>
-        <SearchBar value={search} onChange={setSearch} placeholder="Search bills..." className="flex-1 max-w-sm" />
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="input-base w-auto min-w-[140px]">
-          <option value="">All Statuses</option>
-          {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <button onClick={load} className="p-2 border border-slate-200 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-50 bg-white transition-colors">
-          <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-        </button>
-      </FilterBar>
-
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full data-table">
-            <thead>
-              <tr className="border-b border-slate-100">
-                {['Bill #', 'Vendor', 'Date', 'Due Date', 'Total', 'Paid', 'Balance', 'Status', ''].map((h, i) => (
-                  <th key={i} className={cn('px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wider text-left', ['Total', 'Paid', 'Balance'].includes(h) && 'text-right', h === 'Status' && 'text-center', h === '' && 'w-20')}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {loading ? Array.from({ length: 5 }).map((_, i) => (
-                <tr key={i}>{Array.from({ length: 9 }).map((_, j) => <td key={j} className="px-4 py-3"><div className="skeleton h-4 rounded" /></td>)}</tr>
-              )) : bills.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-16 text-center text-slate-400 text-sm">No bills found.</td></tr>
-              ) : bills.map(b => (
-                <tr key={b.id} className="hover:bg-slate-50/60 transition-colors">
-                  <td className="px-4 py-3 font-mono text-xs font-semibold text-indigo-600">{b.billNo}</td>
-                  <td className="px-4 py-3 font-semibold text-slate-800 text-sm">{b.vendor.name}</td>
-                  <td className="px-4 py-3 text-xs text-slate-500">{formatDate(b.date)}</td>
-                  <td className="px-4 py-3 text-xs text-slate-500">{formatDate(b.dueDate)}</td>
-                  <td className="px-4 py-3 text-right font-semibold text-slate-900 tabular text-sm">{formatBillAmount(b, b.total)}</td>
-                  <td className="px-4 py-3 text-right text-xs text-emerald-600 font-medium tabular">{formatBillAmount(b, b.amountPaid)}</td>
-                  <td className="px-4 py-3 text-right">
-                    <span className={cn('text-xs font-semibold tabular', b.balance > 0 ? 'text-rose-600' : 'text-slate-300')}>
-                      {b.balance > 0 ? formatBillAmount(b, b.balance) : '—'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-center"><Badge status={b.status} /></td>
-                  <td className="px-4 py-3">
-                    {b.balance > 0 && b.status !== 'DRAFT' && (
-                      <button onClick={() => { setSelectedBill(b); setPayForm(f => ({ ...f, amount: b.balance })); setShowPayModal(true) }}
-                        className="flex items-center gap-1 text-xs font-semibold text-emerald-600 hover:bg-emerald-50 px-2 py-1 rounded-lg transition-colors">
-                        <DollarSign size={10} /> Pay
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <CsvImportModal type="bills" open={showImport} onClose={() => setShowImport(false)} onSuccess={load} />
-      <UploadDocumentModal open={showUpload} onClose={() => setShowUpload(false)} title="Upload Bill Document" />
-
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="New Bill" subtitle="Record a vendor bill" size="xl"
-        footer={<><Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button><Button onClick={handleSave} loading={saving}>Save Bill</Button></>}
-      >
-        <div className="space-y-5">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Select label="Vendor" required value={form.vendorId} onChange={e => setForm({ ...form, vendorId: e.target.value })}>
-              <option value="">Select vendor...</option>
-              {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-            </Select>
-            <Input label="Bill Date" type="date" required value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
-            <Input label="Due Date" type="date" required value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })} />
-            <Select label="Currency" required value={form.currency} onChange={e => setForm({ ...form, currency: e.target.value })}>
-              {ALLOWED_CURRENCIES.map((entry) => (
-                <option key={entry.code} value={entry.code}>{entry.code} — {entry.name}</option>
-              ))}
-            </Select>
-          </div>
-          <p className="text-xs text-slate-400 -mt-3">
-            Defaults to your company primary currency ({primaryCurrency}). Changing this affects only this bill.
-          </p>
-          <Input label="Vendor Reference #" value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} placeholder="Vendor invoice number" />
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2">Line Items</label>
-            <div className="border border-slate-200 rounded-xl overflow-hidden">
-              <table className="w-full">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200">
-                    {['Description', 'Account', 'Qty', 'Unit Price', 'Tax %', 'Amount', ''].map((h, i) => (
-                      <th key={i} className="px-3 py-2.5 text-[10px] font-semibold text-slate-500 uppercase text-left">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {form.lines.map((line, idx) => (
-                    <tr key={idx}>
-                      <td className="px-2 py-2"><input value={line.description} onChange={e => updateLine(idx, 'description', e.target.value)} placeholder="Description" className="input-base text-xs py-1.5" /></td>
-                      <td className="px-2 py-2 min-w-[120px]">
-                        <select value={line.accountId} onChange={e => updateLine(idx, 'accountId', e.target.value)} className="input-base text-xs py-1.5 bg-white">
-                          <option value="">—</option>
-                          {accounts.filter(a => ['5', '6'].some(p => a.accountNo.startsWith(p))).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                        </select>
-                      </td>
-                      <td className="px-2 py-2 w-20"><input type="number" min="0" value={line.quantity} onChange={e => updateLine(idx, 'quantity', parseFloat(e.target.value) || 0)} className="input-base text-xs py-1.5 text-right" /></td>
-                      <td className="px-2 py-2 w-28"><input type="number" min="0" value={line.unitPrice} onChange={e => updateLine(idx, 'unitPrice', parseFloat(e.target.value) || 0)} className="input-base text-xs py-1.5 text-right" /></td>
-                      <td className="px-2 py-2 w-20"><input type="number" min="0" max="100" value={line.taxRate} onChange={e => updateLine(idx, 'taxRate', parseFloat(e.target.value) || 0)} className="input-base text-xs py-1.5 text-right" /></td>
-                      <td className="px-3 py-2 text-right text-sm font-semibold text-slate-700 tabular whitespace-nowrap">{formatFormAmount(line.quantity * line.unitPrice * (1 + line.taxRate / 100))}</td>
-                      <td className="px-2 py-2 text-center"><button onClick={() => setForm(f => ({ ...f, lines: f.lines.filter((_, i) => i !== idx) }))} className="w-6 h-6 rounded-lg bg-red-50 text-red-400 hover:bg-red-100 hover:text-red-600 flex items-center justify-center text-base">×</button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="bg-slate-50 border-t border-slate-200 px-4 py-3 flex flex-col items-end gap-1">
-                <div className="flex gap-8 text-sm"><span className="text-slate-500">Subtotal:</span><span className="font-medium tabular w-28 text-right">{formatFormAmount(subtotal)}</span></div>
-                <div className="flex gap-8 text-sm"><span className="text-slate-500">VAT:</span><span className="font-medium tabular w-28 text-right">{formatFormAmount(taxAmount)}</span></div>
-                <div className="flex gap-8 text-base font-bold border-t border-slate-200 pt-1 mt-1"><span className="text-slate-800">Total:</span><span className="text-rose-600 tabular w-28 text-right">{formatFormAmount(total)}</span></div>
-              </div>
-            </div>
-            <button onClick={() => setForm(f => ({ ...f, lines: [...f.lines, { ...EMPTY_LINE }] }))} className="mt-2 flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 font-medium">
-              <Plus size={14} /> Add Line
-            </button>
-          </div>
-          <Textarea label="Notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={2} />
-        </div>
-      </Modal>
-
-      <Modal open={showPayModal} onClose={() => setShowPayModal(false)} title="Record Payment"
-        subtitle={selectedBill ? `${selectedBill.billNo} · Balance: ${formatBillAmount(selectedBill, selectedBill.balance)}` : ''} size="sm"
-        footer={<><Button variant="outline" onClick={() => setShowPayModal(false)}>Cancel</Button><Button variant="success" onClick={handlePayment}><DollarSign size={14} /> Record</Button></>}
-      >
-        <div className="space-y-4">
-          <Input label="Amount" type="number" required value={payForm.amount} onChange={e => setPayForm({ ...payForm, amount: parseFloat(e.target.value) })} />
-          <Input label="Date" type="date" required value={payForm.date} onChange={e => setPayForm({ ...payForm, date: e.target.value })} />
-          <Select label="Method" value={payForm.method} onChange={e => setPayForm({ ...payForm, method: e.target.value })}>
-            <option value="BANK_TRANSFER">Bank Transfer</option>
-            <option value="CASH">Cash</option>
-            <option value="CHEQUE">Cheque</option>
-            <option value="CARD">Card</option>
-          </Select>
-          <Input label="Reference" value={payForm.reference} onChange={e => setPayForm({ ...payForm, reference: e.target.value })} />
-        </div>
-      </Modal>
-    </div>
-  )
+  return <div className="mx-auto max-w-[1700px] space-y-4 p-4 md:p-6"><PageHeader title="Bills" subtitle="Manage supplier bills, balances, and due dates" breadcrumb={[{ label: 'Expenses' }, { label: 'Bills' }]} action={<div className="flex gap-2"><Button variant="outline" onClick={() => { const next = bills.find((bill) => bill.balance > 0 && bill.status !== 'DRAFT'); if (next) openPay(next); else alert('There are no payable bills.') }}><DollarSign size={14} /> Pay Bills</Button><div className="relative"><Button onClick={() => setAddOpen((open) => !open)}><Plus size={14} /> Add Bill <ChevronDown size={14} /></Button>{addOpen && <div className="absolute right-0 z-30 mt-1 w-52 rounded-xl border border-slate-200 bg-white p-1 shadow-lg"><button className="menu-item" onClick={() => setUploadOpen(true)}><FileUp size={14} /> Upload from Computer</button><button className="menu-item" onClick={() => openCreate()}><Plus size={14} /> Create Bill</button><button className="menu-item" onClick={() => window.location.assign('/recurring-transactions?new=1&transactionType=BILL')}><Repeat2 size={14} /> Create Recurring Bill</button></div>}</div></div>} />
+    <div className="flex gap-1 border-b border-slate-200">{([['review', 'For Review'], ['unpaid', 'Unpaid'], ['paid', 'Paid']] as [Tab, string][]).map(([value, label]) => <button key={value} onClick={() => { setTab(value); setPage(1) }} className={cn('border-b-2 px-4 py-2.5 text-sm font-semibold', tab === value ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700')}>{label}<span className="ml-2 text-xs text-slate-400">{counts[value]}</span></button>)}</div>
+    <FilterBar><SearchBar value={search} onChange={(value) => { setSearch(value); setPage(1) }} placeholder="Search supplier, bill number, or reference..." className="min-w-[260px] flex-1 max-w-lg" /><Select value={supplierId} onChange={(event) => { setSupplierId(event.target.value); setPage(1) }} className="w-auto min-w-[180px]"><option value="">All suppliers</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</Select><Select value={dateRange} onChange={(event) => { setDateRange(event.target.value); setPage(1) }} className="w-auto"><option value="year">This Year</option><option value="month">This Month</option><option value="all">All dates</option></Select><button onClick={load} className="rounded-xl border border-slate-200 bg-white p-2 text-slate-400"><RefreshCw size={15} className={loading ? 'animate-spin' : ''} /></button></FilterBar>
+    {(supplierId || dateRange !== 'year') && <div className="flex gap-2 text-xs">{supplierId && <button onClick={() => setSupplierId('')} className="rounded-full bg-indigo-50 px-3 py-1 text-indigo-700">Supplier: {suppliers.find((supplier) => supplier.id === supplierId)?.name} ×</button>}{dateRange !== 'year' && <button onClick={() => setDateRange('year')} className="rounded-full bg-indigo-50 px-3 py-1 text-indigo-700">Bill Date: {dateRange === 'month' ? 'This month' : 'All dates'} ×</button>}</div>}
+    <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm"><table className="w-full min-w-[900px] data-table"><thead className="sticky top-0 z-10 bg-white"><tr className="border-b border-slate-100"><th className="px-3 py-3"><input aria-label="Select page" type="checkbox" checked={rows.length > 0 && rows.every((bill) => selected.includes(bill.id))} onChange={() => setSelected(rows.every((bill) => selected.includes(bill.id)) ? [] : rows.map((bill) => bill.id))} /></th>{['Supplier', 'Due Date', 'Bill Amount', 'Open Balance', 'Status', 'Action'].map((label) => <th key={label} className={cn('px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400', ['Bill Amount', 'Open Balance'].includes(label) && 'text-right')}>{label}</th>)}</tr></thead><tbody className="divide-y divide-slate-50">{loading ? Array.from({ length: 6 }).map((_, index) => <tr key={index}>{Array.from({ length: 7 }).map((__, cell) => <td key={cell} className="px-4 py-3"><div className="skeleton h-4 rounded" /></td>)}</tr>) : rows.length === 0 ? <tr><td colSpan={7} className="px-4 py-16 text-center text-sm text-slate-400">No bills match this view.</td></tr> : rows.map((bill) => { const status = dueStatus(bill); return <tr key={bill.id} onClick={() => setDetail(bill)} className="cursor-pointer hover:bg-slate-50/60"><td className="px-3 py-2.5" onClick={(event) => event.stopPropagation()}><input aria-label={`Select ${bill.billNo}`} type="checkbox" checked={selected.includes(bill.id)} onChange={() => toggle(bill.id)} /></td><td className="px-4 py-2.5"><p className="font-semibold text-slate-800">{bill.vendor?.name ?? '—'}</p><p className="font-mono text-[11px] text-indigo-600">{bill.billNo}{bill.reference ? ` · ${bill.reference}` : ''}</p></td><td className="px-4 py-2.5 text-sm text-slate-600">{dateLabel(bill.dueDate)}</td><td className="px-4 py-2.5 text-right font-semibold tabular">{formatAmount(bill.total, bill.currency ?? companyCurrency)}</td><td className="px-4 py-2.5 text-right font-semibold tabular">{formatAmount(bill.balance, bill.currency ?? companyCurrency)}</td><td className="px-4 py-2.5"><span className={`badge border ${status.tone}`}>{status.label}</span></td><td className="px-4 py-2.5" onClick={(event) => event.stopPropagation()}><div className="flex items-center justify-end gap-1">{bill.balance > 0 && bill.status !== 'DRAFT' && <button onClick={() => openPay(bill)} className="rounded-lg px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">Mark as Paid</button>}<ActionDropdown label={<MoreHorizontal size={15} /> as unknown as string} items={[{ label: 'View Bill', onSelect: () => setDetail(bill) }, { label: 'Edit Bill', onSelect: () => openEdit(bill) }, { label: 'Copy Bill', onSelect: () => copyBill(bill) }, { label: 'Delete Bill', onSelect: () => deleteBill(bill), danger: true }]} /></div></td></tr>})}</tbody></table></div>
+    <div className="flex items-center justify-between text-sm text-slate-500"><span>{filtered.length ? `${(page - 1) * 25 + 1}–${Math.min(page * 25, filtered.length)} of ${filtered.length}` : '0 bills'}</span><div className="flex gap-2"><Button variant="outline" disabled={page === 1} onClick={() => setPage((value) => value - 1)}>Previous</Button><Button variant="outline" disabled={page * 25 >= filtered.length} onClick={() => setPage((value) => value + 1)}>Next</Button></div></div>
+    <UploadDocumentModal open={uploadOpen} onClose={() => setUploadOpen(false)} title="Upload Bill from Computer" />
+    <Modal open={formOpen} onClose={() => setFormOpen(false)} title={editing ? `Edit ${editing.billNo}` : 'Create Bill'} subtitle="Record a supplier bill" size="xl" footer={<><Button variant="outline" onClick={() => setFormOpen(false)}>Cancel</Button><Button onClick={saveBill} loading={saving}>Save Bill</Button></>}><div className="space-y-4"><div className="grid grid-cols-1 gap-4 sm:grid-cols-4"><Select label="Supplier" required value={form.vendorId} onChange={(event) => setForm({ ...form, vendorId: event.target.value })}><option value="">Select supplier...</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</Select><Input label="Bill Date" type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /><Input label="Due Date" type="date" value={form.dueDate} onChange={(event) => setForm({ ...form, dueDate: event.target.value })} /><Input label="Supplier reference" value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></div><div className="overflow-x-auto rounded-xl border border-slate-200"><table className="w-full"><thead><tr className="bg-slate-50">{['Description', 'Account', 'Qty', 'Unit price', 'Tax %', ''].map((label) => <th key={label} className="px-2 py-2 text-left text-[10px] uppercase text-slate-500">{label}</th>)}</tr></thead><tbody>{form.lines.map((line, index) => <tr key={index}><td className="p-2"><input className="input-base text-xs" value={line.description} onChange={(event) => changeLine(index, 'description', event.target.value)} /></td><td className="p-2"><select className="input-base text-xs" value={line.accountId} onChange={(event) => changeLine(index, 'accountId', event.target.value)}><option value="">—</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></td><td className="p-2"><input className="input-base text-xs" type="number" value={line.quantity} onChange={(event) => changeLine(index, 'quantity', Number(event.target.value))} /></td><td className="p-2"><input className="input-base text-xs" type="number" value={line.unitPrice} onChange={(event) => changeLine(index, 'unitPrice', Number(event.target.value))} /></td><td className="p-2"><input className="input-base text-xs" type="number" value={line.taxRate} onChange={(event) => changeLine(index, 'taxRate', Number(event.target.value))} /></td><td className="p-2"><button className="text-rose-500" onClick={() => setForm((state) => ({ ...state, lines: state.lines.filter((_, i) => i !== index) }))}>×</button></td></tr>)}</tbody></table></div><div className="flex justify-between"><button className="text-sm font-semibold text-indigo-600" onClick={() => setForm((state) => ({ ...state, lines: [...state.lines, { ...EMPTY_LINE }] }))}>+ Add line</button><p className="font-semibold">Total: {formatAmount(subtotal + tax, form.currency)}</p></div><Textarea label="Notes" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></div></Modal>
+    <Modal open={payOpen} onClose={() => setPayOpen(false)} title="Record Bill Payment" subtitle={selectedBill ? `${selectedBill.billNo} · ${formatAmount(selectedBill.balance, selectedBill.currency ?? companyCurrency)} open` : ''} size="sm" footer={<><Button variant="outline" onClick={() => setPayOpen(false)}>Cancel</Button><Button variant="success" onClick={payBill} loading={saving}><DollarSign size={14} /> Record Payment</Button></>}><div className="space-y-4"><Input label="Amount" type="number" value={payForm.amount} onChange={(event) => setPayForm({ ...payForm, amount: Number(event.target.value) })} /><Input label="Date" type="date" value={payForm.date} onChange={(event) => setPayForm({ ...payForm, date: event.target.value })} /><Select label="Method" value={payForm.method} onChange={(event) => setPayForm({ ...payForm, method: event.target.value })}><option value="BANK_TRANSFER">Bank Transfer</option><option value="CASH">Cash</option><option value="CHEQUE">Cheque</option><option value="CARD">Card</option></Select><Input label="Reference" value={payForm.reference} onChange={(event) => setPayForm({ ...payForm, reference: event.target.value })} /></div></Modal>
+    <Modal open={detail !== null} onClose={() => setDetail(null)} title={detail?.billNo ?? 'Bill'} size="md" footer={<Button onClick={() => { if (detail) { setDetail(null); openEdit(detail) } }}>Edit Bill</Button>}><div className="space-y-3 text-sm"><p><span className="text-slate-400">Supplier:</span> {detail?.vendor?.name}</p><p><span className="text-slate-400">Due date:</span> {detail && dateLabel(detail.dueDate)}</p><p><span className="text-slate-400">Amount:</span> {detail && formatAmount(detail.total, detail.currency ?? companyCurrency)}</p><p><span className="text-slate-400">Open balance:</span> {detail && formatAmount(detail.balance, detail.currency ?? companyCurrency)}</p>{detail?.notes && <p><span className="text-slate-400">Notes:</span> {detail.notes}</p>}</div></Modal>
+  </div>
 }

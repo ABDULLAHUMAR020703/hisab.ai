@@ -55,6 +55,17 @@ export default function ExpensesPage() {
 
   useEffect(() => { load() }, [search, statusFilter])
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const supplierName = params.get('supplierName')
+    if (params.get('new') !== '1' || !supplierName) return
+    const timer = window.setTimeout(() => {
+      setForm({ date: new Date().toISOString().split('T')[0], description: `Supplier: ${supplierName}`, category: 'Travel', currency: params.get('currency') || primaryCurrency, receiptId: '', lines: [{ ...EMPTY_LINE }] })
+      setShowModal(true)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [primaryCurrency])
+
   function updateLine(idx: number, field: string, value: string | number) {
     setForm(f => ({ ...f, lines: f.lines.map((l, i) => i === idx ? { ...l, [field]: value } : l) }))
   }

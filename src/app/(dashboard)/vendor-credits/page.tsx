@@ -72,9 +72,9 @@ export default function VendorCreditsPage() {
   return (
     <div className="p-6 max-w-[1600px] mx-auto space-y-5">
       <PageHeader
-        title="Vendor Credits"
+        title="Supplier Credits"
         subtitle={`${credits.length} credits · ${formatPrimary(credits.reduce((s, c) => s + c.total, 0))} total`}
-        breadcrumb={[{ label: 'Expenses' }, { label: 'Vendor Credits' }]}
+        breadcrumb={[{ label: 'Expenses' }, { label: 'Supplier Credits' }]}
         action={<Button onClick={() => { setForm({ vendorId: '', billId: '', date: new Date().toISOString().split('T')[0], currency: primaryCurrency, subtotal: 0, taxAmount: 0, notes: '' }); setShowModal(true) }}><Plus size={15} /> New Credit</Button>}
       />
 
@@ -93,7 +93,7 @@ export default function VendorCreditsPage() {
         <table className="w-full data-table">
           <thead>
             <tr className="border-b border-slate-100">
-              {['Credit #', 'Vendor', 'Bill', 'Date', 'Total', 'Status'].map((h) => (
+              {['Credit #', 'Supplier', 'Bill', 'Date', 'Total', 'Status'].map((h) => (
                 <th key={h} className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wider text-left">{h}</th>
               ))}
             </tr>
@@ -102,7 +102,7 @@ export default function VendorCreditsPage() {
             {loading ? (
               <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">Loading...</td></tr>
             ) : credits.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-16 text-center text-slate-400 text-sm">No vendor credits found.</td></tr>
+              <tr><td colSpan={6} className="px-4 py-16 text-center text-slate-400 text-sm">No supplier credits found.</td></tr>
             ) : credits.map((credit) => (
               <tr key={credit.id} className="hover:bg-slate-50/60 transition-colors">
                 <td className="px-4 py-3 font-mono text-xs font-semibold text-indigo-600">{credit.creditNo}</td>
@@ -117,12 +117,12 @@ export default function VendorCreditsPage() {
         </table>
       </div>
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="New Vendor Credit" size="md"
+      <Modal open={showModal} onClose={() => setShowModal(false)} title="New Supplier Credit" size="md"
         footer={<><Button variant="outline" onClick={() => setShowModal(false)}>Cancel</Button><Button onClick={handleSave} loading={saving}>Save Credit</Button></>}
       >
         <div className="space-y-4">
-          <Select label="Vendor" required value={form.vendorId} onChange={(e) => setForm({ ...form, vendorId: e.target.value })}>
-            <option value="">Select vendor...</option>
+          <Select label="Supplier" required value={form.vendorId} onChange={(e) => setForm({ ...form, vendorId: e.target.value })}>
+            <option value="">Select supplier...</option>
             {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
           </Select>
           <Select label="Related Bill (optional)" value={form.billId} onChange={(e) => setForm({ ...form, billId: e.target.value })}>

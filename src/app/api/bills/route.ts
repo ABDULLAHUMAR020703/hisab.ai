@@ -5,6 +5,8 @@ import { maybeStartWorkflow } from '@/lib/workflow/integration'
 import { prisma } from '@/lib/prisma'
 import { resolveCompanyId } from '@/lib/tenant'
 import { getNextSequence } from '@/lib/sequences'
+import { logAudit } from '@/lib/audit/log'
+import { requireRole } from '@/lib/authz'
 
 export async function GET(request: Request) {
   try {
@@ -42,7 +44,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const user = await requireAuth()
+    const user = await requireRole(['OWNER', 'ADMIN', 'ACCOUNTANT', 'MANAGER'])
     const companyId = await resolveCompanyId()
     const body = await request.json()
     const {
@@ -123,6 +125,8 @@ export async function POST(request: Request) {
     if (billStatus === 'RECEIVED' && !workflow) {
       await postBillToLedger(bill.id, companyId)
     }
+
+    await logAudit({ companyId, userId: user.id, action: 'BILL_CREATED', entityType: 'bill', entityId: bill.id, details: { billNo: bill.billNo, total } })
 
     return Response.json(bill, { status: 201 })
   } catch (error) {
