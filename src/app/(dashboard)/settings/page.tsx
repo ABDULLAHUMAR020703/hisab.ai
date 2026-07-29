@@ -183,6 +183,13 @@ export default function SettingsPage() {
 
       <div className="flex flex-wrap gap-3">
         <Link
+          href="/settings/integrations"
+          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+        >
+          Integrations
+          <span className="text-xs font-normal text-slate-400">Connect accounting platforms</span>
+        </Link>
+        <Link
           href="/settings/document-numbering"
           className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
         >

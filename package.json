@@ -16,6 +16,7 @@
     "test:invoices": "npx tsx --test tests/invoices/creation-enhancements.test.ts",
     "test:invoice-pdf": "npx tsx -r ./scripts/zatca/setup-server-only.cjs --test tests/invoices/pdf-layout.test.ts",
     "test:document-numbering": "npx tsx --test tests/document-numbering/format.test.ts",
+    "test:integrations": "npx tsx --test tests/integrations/accounting-integrations.test.ts",
     "test:cost-centers": "npx tsx --test tests/cost-centers/typed-imports.test.ts tests/cost-centers/import-errors.test.ts tests/cost-centers/product-catalog.test.ts tests/cost-centers/project-upsert.test.ts tests/cost-centers/api-serialize.test.ts",
     "test:production": "npx tsx --test tests/security/production.test.ts tests/ops/reliability.test.ts tests/workflows/business-flows.test.ts tests/accounting/core-coverage.test.ts",
     "generate:test-data": "node scripts/import-export/generate-test-data.mjs && node scripts/import-export/generate-edge-cases.mjs",

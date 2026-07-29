@@ -28,8 +28,18 @@ NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 APP_SECRET=
+INTEGRATION_TOKEN_ENCRYPTION_KEY=
+QB_CLIENT_ID=
+QB_CLIENT_SECRET=
+QB_REDIRECT_URI=http://localhost:3000/api/integrations/quickbooks/callback
+QB_ENVIRONMENT=sandbox
 ZATCA_CREDENTIAL_ENCRYPTION_KEY=
 ```
+
+QuickBooks OAuth credentials are configured in the Intuit Developer dashboard. Use
+`QB_ENVIRONMENT=sandbox` for development and register the exact `QB_REDIRECT_URI`
+shown above. Replace the URI with the deployed application callback URL in production;
+never commit real client credentials.
 
 Apply SQL migrations from `supabase/migrations/` in order against your Supabase project.
 
