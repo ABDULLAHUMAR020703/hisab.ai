@@ -11,6 +11,7 @@ import { ProviderAuthenticationException, ProviderRequestException } from '../..
 import { quickBooksEndpoints, type QuickBooksConfig } from './quickbooks-config'
 
 type JsonRecord = Record<string, unknown>
+const MAX_QUERY_ROWS = 10_000
 
 function record(value: unknown): JsonRecord {
   return value !== null && typeof value === 'object' ? value as JsonRecord : {}
@@ -103,12 +104,34 @@ export class QuickBooksIntegrationService implements AccountingProvider {
     }
   }
 
-  async getCustomers(): Promise<unknown[]> { return [] }
+  async getCustomers(context: ProviderAccessContext): Promise<unknown[]> { return this.queryAll(context, 'Customer') }
+  async getVendors(context: ProviderAccessContext): Promise<unknown[]> { return this.queryAll(context, 'Vendor') }
   async getInvoices(): Promise<unknown[]> { return [] }
   async getBills(): Promise<unknown[]> { return [] }
   async getPayments(): Promise<unknown[]> { return [] }
-  async getAccounts(): Promise<unknown[]> { return [] }
-  async getItems(): Promise<unknown[]> { return [] }
+  async getAccounts(context: ProviderAccessContext): Promise<unknown[]> { return this.queryAll(context, 'Account') }
+  async getItems(context: ProviderAccessContext): Promise<unknown[]> { return this.queryAll(context, 'Item') }
+  async getTaxCodes(context: ProviderAccessContext): Promise<unknown[]> { return this.queryAll(context, 'TaxRate') }
+  async getPaymentTerms(context: ProviderAccessContext): Promise<unknown[]> { return this.queryAll(context, 'Term') }
+
+  private async queryAll(context: ProviderAccessContext, entity: string): Promise<unknown[]> {
+    const pageSize = 1000
+    const rows: unknown[] = []
+    for (let start = 1; rows.length < MAX_QUERY_ROWS; start += pageSize) {
+      const query = `SELECT * FROM ${entity} STARTPOSITION ${start} MAXRESULTS ${pageSize}`
+      const url = new URL(`${this.endpoints.api}/v3/company/${encodeURIComponent(context.realmId)}/query`)
+      url.searchParams.set('query', query)
+      url.searchParams.set('minorversion', '75')
+      const body = await this.authorizedJson(url.toString(), context.accessToken)
+      const response = record(body.QueryResponse)
+      const page = Array.isArray(response[entity])
+        ? response[entity] as unknown[]
+        : response[entity] ? [response[entity]] : []
+      rows.push(...page.slice(0, MAX_QUERY_ROWS - rows.length))
+      if (page.length < pageSize) break
+    }
+    return rows
+  }
 
   private async requestTokens(body: URLSearchParams): Promise<ProviderTokenSet> {
     const response = await this.fetchImpl(this.endpoints.token, {
@@ -155,7 +178,7 @@ export class QuickBooksIntegrationService implements AccountingProvider {
       signal: AbortSignal.timeout(15_000),
     })
     if (response.status === 401) throw new ProviderAuthenticationException()
-    if (!response.ok) throw new ProviderRequestException('QuickBooks company information request failed.')
+    if (!response.ok) throw new ProviderRequestException('QuickBooks data request failed.')
     return record(await response.json())
   }
 

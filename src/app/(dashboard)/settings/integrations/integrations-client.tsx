@@ -2,9 +2,10 @@
 
 import Image from 'next/image'
 import { useCallback, useEffect, useState } from 'react'
-import { AlertCircle, CheckCircle2, Clock3, Link2, RefreshCw, ShieldCheck, Unplug } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Clock3, Download, Link2, RefreshCw, ShieldCheck, Unplug } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { ImportWizard } from '@/components/import-export/ImportWizard'
 
 type Status = 'NOT_CONNECTED' | 'PENDING' | 'CONNECTED' | 'FAILED' | 'DISCONNECTED' | 'TOKEN_EXPIRED'
 
@@ -51,6 +52,7 @@ export function IntegrationsClient({ oauthFeedback }: { oauthFeedback?: OAuthFee
   const [loading, setLoading] = useState(true)
   const [busyProvider, setBusyProvider] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [showImport, setShowImport] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -191,9 +193,12 @@ export function IntegrationsClient({ oauthFeedback }: { oauthFeedback?: OAuthFee
                 </div>
                 {isQuickBooks && item.isActive && (
                   canDisconnect ? (
-                    <Button variant="outline" loading={busyProvider === item.provider} onClick={() => void mutate(item.provider, 'disconnect')}>
-                      <Unplug size={14} /> Disconnect
-                    </Button>
+                    <div className="flex gap-2">
+                      {item.status === 'CONNECTED' && <Button onClick={() => setShowImport(true)}><Download size={14} /> Import</Button>}
+                      <Button variant="outline" loading={busyProvider === item.provider} onClick={() => void mutate(item.provider, 'disconnect')}>
+                        <Unplug size={14} /> Disconnect
+                      </Button>
+                    </div>
                   ) : (
                     <Button loading={busyProvider === item.provider} onClick={() => void mutate(item.provider, 'connect')}>
                       <Link2 size={14} /> Connect
@@ -212,6 +217,7 @@ export function IntegrationsClient({ oauthFeedback }: { oauthFeedback?: OAuthFee
           <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Refresh
         </button>
       </div>
+      <ImportWizard open={showImport} onClose={() => setShowImport(false)} onSuccess={() => void load()} initialSource="quickbooks" />
     </div>
   )
 }

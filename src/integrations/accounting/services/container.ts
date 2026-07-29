@@ -11,7 +11,7 @@ import { TokenEncryptionService } from './token-encryption.service'
 import { ConnectionValidationService } from '../validators/connection-validation.service'
 import { OAuthStateService } from './oauth-state.service'
 
-export function createAccountingIntegrationService(): AccountingIntegrationService {
+export function createAccountingIntegrationRuntime() {
   const repository = new SupabaseIntegrationRepository(createAdminClient())
   const providers = new ProviderFactory([new QuickBooksIntegrationService(quickBooksConfigFromEnv())])
   const secret = process.env.INTEGRATION_TOKEN_ENCRYPTION_KEY ?? process.env.APP_SECRET
@@ -24,5 +24,13 @@ export function createAccountingIntegrationService(): AccountingIntegrationServi
     new TokenEncryptionService(secret),
     new OAuthStateService(repository),
   )
-  return new AccountingIntegrationService(repository, connections)
+  return {
+    service: new AccountingIntegrationService(repository, connections),
+    connections,
+    providers,
+  }
+}
+
+export function createAccountingIntegrationService(): AccountingIntegrationService {
+  return createAccountingIntegrationRuntime().service
 }

@@ -256,6 +256,18 @@ export class ConnectionService {
     }
   }
 
+  async executeForProvider<T>(
+    tenantId: string,
+    slug: Provider,
+    operation: (context: { accessToken: string; realmId: string }) => Promise<T>,
+  ): Promise<T> {
+    const provider = this.validation.validateProvider(await this.repository.findProviderBySlug(slug), slug)
+    this.validation.validateProviderActive(provider)
+    const connection = await this.repository.findCurrentConnection(tenantId, provider.id)
+    if (!connection) throw new ConnectionNotFoundException()
+    return this.executeWithAccessToken(tenantId, connection.id, slug, operation)
+  }
+
   private async refreshConnection(
     tenantId: string,
     connection: IntegrationConnectionRecord,

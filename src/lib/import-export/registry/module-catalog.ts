@@ -7,6 +7,7 @@ export const MODULE_CATALOG = [
   { key: 'cost-centers', displayName: 'Cost Centers' },
   { key: 'employees', displayName: 'Employees' },
   { key: 'tax-rates', displayName: 'Tax Rates' },
+  { key: 'payment-terms', displayName: 'Payment Terms' },
 ] as const
 
 export type RegisteredModuleKey = (typeof MODULE_CATALOG)[number]['key']

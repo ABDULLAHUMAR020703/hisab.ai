@@ -41,6 +41,13 @@ QuickBooks OAuth credentials are configured in the Intuit Developer dashboard. U
 shown above. Replace the URI with the deployed application callback URL in production;
 never commit real client credentials.
 
+After connecting QuickBooks under **Settings > Integrations**, choose **Import** to run
+the existing Import Wizard against QuickBooks Online. Phase 3 supports read-only
+provider imports for Chart of Accounts, Customers, Vendors, Products & Services,
+Tax Codes, and Payment Terms. The wizard previews normalized records, detects
+duplicates, and applies the selected Skip, Update, or Create strategy. It does not
+push changes back to QuickBooks or run background synchronization.
+
 Apply SQL migrations from `supabase/migrations/` in order against your Supabase project.
 
 ## Commands
@@ -89,6 +96,12 @@ npm run test:production
 - Configurable prefix, next number, padding (e.g. `INV-000091`)
 - Atomic allocation for concurrent invoice creation
 - Settings → Document Numbering
+
+### Provider imports
+
+- One provider-agnostic Import Wizard for file and connected accounting sources
+- QuickBooks records normalized into existing Hisab AI module models before persistence
+- Source adapters isolate provider models so future Xero, Zoho Books, and Sage support does not change the workflow
 
 ## Project layout
 

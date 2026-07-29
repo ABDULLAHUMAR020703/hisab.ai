@@ -227,11 +227,14 @@ class FakeProvider implements AccountingProvider {
   async validateConnection() { return true }
   async getCompanyInfo() { return this.company }
   async getCustomers() { return [] }
+  async getVendors() { return [] }
   async getInvoices() { return [] }
   async getBills() { return [] }
   async getPayments() { return [] }
   async getAccounts() { return [] }
   async getItems() { return [] }
+  async getTaxCodes() { return [] }
+  async getPaymentTerms() { return [] }
 }
 
 function fixture(repository = new FakeRepository(), adapter = new FakeProvider()) {
@@ -421,6 +424,19 @@ describe('QuickBooks provider', () => {
     assert.equal(tokens.refreshToken, 'new-refresh')
     assert.match(requestBody, /grant_type=refresh_token/)
     assert.match(requestBody, /refresh_token=current-refresh/)
+  })
+
+  it('queries QuickBooks resources through the paginated query endpoint', async () => {
+    let requestUrl = ''
+    const fetchImpl: typeof fetch = async (input) => {
+      requestUrl = String(input)
+      return Response.json({ QueryResponse: { Customer: [{ Id: '1', DisplayName: 'Acme' }] } })
+    }
+    const providerService = new QuickBooksIntegrationService(config, fetchImpl, () => NOW)
+    const customers = await providerService.getCustomers({ accessToken: 'access', realmId: '123456' })
+    assert.equal(customers.length, 1)
+    const query = new URL(requestUrl).searchParams.get('query')
+    assert.equal(query, 'SELECT * FROM Customer STARTPOSITION 1 MAXRESULTS 1000')
   })
 })
 

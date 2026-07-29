@@ -46,12 +46,12 @@ function parseFixture(moduleKey: string, size: string, format: 'csv' | 'xlsx') {
 }
 
 describe('module catalog', () => {
-  it('lists all 7 migrated modules', () => {
-    assert.equal(MODULE_CATALOG.length, 7)
+  it('lists all 8 migrated modules', () => {
+    assert.equal(MODULE_CATALOG.length, 8)
     const keys = MODULE_CATALOG.map((m) => m.key)
     assert.deepEqual(keys, [
       'customers', 'vendors', 'inventory', 'accounts',
-      'cost-centers', 'employees', 'tax-rates',
+      'cost-centers', 'employees', 'tax-rates', 'payment-terms',
     ])
   })
 })

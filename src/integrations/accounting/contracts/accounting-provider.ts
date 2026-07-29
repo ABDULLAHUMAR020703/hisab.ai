@@ -37,9 +37,12 @@ export interface AccountingProvider {
   getCompanyInfo(context: ProviderAccessContext): Promise<CompanyInfo>
 
   getCustomers(context: ProviderAccessContext): Promise<unknown[]>
+  getVendors(context: ProviderAccessContext): Promise<unknown[]>
   getInvoices(context: ProviderAccessContext): Promise<unknown[]>
   getBills(context: ProviderAccessContext): Promise<unknown[]>
   getPayments(context: ProviderAccessContext): Promise<unknown[]>
   getAccounts(context: ProviderAccessContext): Promise<unknown[]>
   getItems(context: ProviderAccessContext): Promise<unknown[]>
+  getTaxCodes(context: ProviderAccessContext): Promise<unknown[]>
+  getPaymentTerms(context: ProviderAccessContext): Promise<unknown[]>
 }

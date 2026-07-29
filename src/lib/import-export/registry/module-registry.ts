@@ -8,6 +8,7 @@ import { employeesModule } from './modules/employees.module'
 import { inventoryModule } from './modules/inventory.module'
 import { taxRatesModule } from './modules/tax-rates.module'
 import { vendorsModule } from './modules/vendors.module'
+import { paymentTermsModule } from './modules/payment-terms.module'
 
 const modules = new Map<string, ModuleDefinition>([
   [customersModule.key, customersModule],
@@ -17,6 +18,7 @@ const modules = new Map<string, ModuleDefinition>([
   [costCentersModule.key, costCentersModule],
   [employeesModule.key, employeesModule],
   [taxRatesModule.key, taxRatesModule],
+  [paymentTermsModule.key, paymentTermsModule],
 ])
 
 export function getModuleDefinition(moduleKey: string): ModuleDefinition {
