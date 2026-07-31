@@ -22,18 +22,25 @@ const provider: AccountingProvider = {
   async getTaxCodes() { return rows.taxCodes }, async getPaymentTerms() { return rows.terms },
 }
 
-test('QuickBooks source exposes all Phase 3 resources', () => {
+test('QuickBooks source exposes master data and transaction resources', () => {
   assert.deepEqual(new QuickBooksImportAdapter().resources.map((item) => item.key), [
     'accounts', 'customers', 'vendors', 'items', 'tax-codes', 'payment-terms',
+    'invoices', 'bills', 'payments', 'expenses', 'journal-entries', 'sales-receipts',
+    'purchase-orders', 'vendor-credits', 'estimates', 'customer-payments', 'vendor-payments',
+    'projects', 'budgets', 'exchange-rates', 'classes', 'departments', 'locations', 'employees',
+    'time-activities', 'credit-memos', 'bill-payments', 'deposits', 'transfers',
+    'inventory-adjustments', 'attachments', 'recurring-transactions', 'tax-agencies',
+    'tax-configurations', 'preferences', 'fixed-assets',
   ])
 })
 
 test('QuickBooks accounts normalize to the existing accounts module fields', async () => {
   const result = await new QuickBooksImportAdapter().fetchResource(provider, { accessToken: 'x', realmId: '1' }, 'accounts')
-  assert.deepEqual(result.rows[0], {
-    accountNo: 'QB-7', name: 'Sales', fullName: 'Income:Sales', parentNo: '', accountType: 'Income',
-    subType: 'SalesOfProductIncome', description: '', isActive: 'true',
-  })
+  assert.equal(result.rows[0].accountNo, 'QB-7')
+  assert.equal(result.rows[0].name, 'Sales')
+  assert.equal(result.rows[0]._quickbooksId, '7')
+  assert.equal(result.rows[0]._realmId, '1')
+  assert.deepEqual(JSON.parse(result.rows[0]._quickbooksRaw), rows.accounts[0])
 })
 
 test('QuickBooks contacts normalize nested email and address values', async () => {

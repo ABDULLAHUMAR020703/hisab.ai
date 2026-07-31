@@ -17,7 +17,7 @@ import {
   mapPaymentRow,
 } from '../entity-mappers'
 import type { InvoiceRecord } from '../entities'
-import { isUuid, queryByIdOrLegacy, resolveCompanyId, supabaseDb } from '../repository-utils'
+import { isUuid, queryByIdOrLegacy, resolveCompanyId, resolveCompanyIdOrThrow, supabaseDb } from '../repository-utils'
 import { allocateDocumentNumber } from '@/lib/document-numbering/service'
 import type {
   InvoiceAdjustmentCreateInput,
@@ -335,13 +335,13 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
 
   async create(input: InvoiceCreateInput) {
     const db = supabaseDb()
-    const companyId = await resolveCompanyId()
+    const companyId = await resolveCompanyIdOrThrow(input.companyId)
     const customerId = await resolveScopedUuid('customers', input.customerId, companyId)
     if (!customerId) throw new Error('Customer not found')
 
     const method = normalizeTaxCalculationMethod(input.taxCalculationMethod)
     const { processedLines, subtotal, taxAmount, total } = processLines(input.lines, method)
-    const invoiceNo = await allocateDocumentNumber('INVOICE', companyId)
+    const invoiceNo = input.documentNo ?? await allocateDocumentNumber('INVOICE', companyId)
     const issueDate = new Date(input.date)
     const createdById = await resolveProfileUuid(input.createdById)
     const invoiceType = await resolveInvoiceTypeForCustomer(customerId, companyId)
@@ -352,6 +352,7 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
       .from('invoices')
       .insert({
         company_id: companyId,
+        legacy_id: input.legacyId ?? null,
         invoice_no: invoiceNo,
         invoice_uuid: randomUUID(),
         customer_id: customerId,
@@ -367,6 +368,8 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
         tax_amount: taxAmount,
         total,
         balance: total,
+        status: input.status ?? 'DRAFT',
+        reference: input.reference ?? null,
         notes: input.notes ?? null,
         terms: input.terms ?? null,
         is_recurring: input.isRecurring ?? false,
@@ -385,6 +388,8 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
       if (lineError) throw lineError
     }
 
+    if (input.companyId) return { ...mapInvoiceRow(data), lines:lineRows.map(mapInvoiceLineRow) } as InvoiceRecord
+
     const created = await this.findById(invoiceId)
     if (!created) throw new Error('Invoice not found')
     return created
@@ -392,22 +397,24 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
 
   async createAdjustment(input: InvoiceAdjustmentCreateInput) {
     const db = supabaseDb()
-    const companyId = await resolveCompanyId()
+    const companyId = await resolveCompanyIdOrThrow(input.companyId)
     const sourceInvoiceId = await resolveScopedUuid('invoices', input.sourceInvoiceId, companyId)
     if (!sourceInvoiceId) throw new Error('Source invoice not found')
 
-    const source = await this.findById(sourceInvoiceId)
+    const source = input.companyId
+      ? mapInvoiceRow((await queryByIdOrLegacy(db,'invoices',sourceInvoiceId,companyId))!)
+      : await this.findById(sourceInvoiceId)
     if (!source) throw new Error('Source invoice not found')
     if (!isAdjustableTaxInvoice(source.invoiceType)) {
       throw new Error('Credit/debit notes can only be created from a standard or simplified tax invoice')
     }
-    if (!source.customer) throw new Error('Source invoice customer not found')
+    if (!input.companyId && !source.customer) throw new Error('Source invoice customer not found')
 
     const method = normalizeTaxCalculationMethod(source.taxCalculationMethod)
     const { processedLines, subtotal, taxAmount, total } = processLines(input.lines, method)
     if (total <= 0) throw new Error('Adjustment total must be greater than zero')
 
-    const invoiceNo = await allocateDocumentNumber('INVOICE', companyId)
+    const invoiceNo = input.documentNo ?? await allocateDocumentNumber('INVOICE', companyId)
     const issueDate = new Date(input.date)
     const createdById = await resolveProfileUuid(input.createdById)
     const defaultNote = input.adjustmentType === 'CREDIT_NOTE' ? 'Credit note' : 'Debit note'
@@ -416,6 +423,7 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
       .from('invoices')
       .insert({
         company_id: companyId,
+        legacy_id: input.legacyId ?? null,
         invoice_no: invoiceNo,
         invoice_uuid: randomUUID(),
         customer_id: source.customerId,
@@ -431,6 +439,7 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
         tax_amount: taxAmount,
         total,
         balance: total,
+        status: input.status ?? 'DRAFT',
         notes: input.notes?.trim() || `${defaultNote} for ${source.invoiceNo}`,
         terms: source.terms ?? null,
         created_by_id: createdById,
@@ -446,6 +455,8 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
       const { error: lineError } = await db.from('invoice_lines').insert(lineRows)
       if (lineError) throw lineError
     }
+
+    if (input.companyId) return { ...mapInvoiceRow(data), lines:lineRows.map(mapInvoiceLineRow) } as InvoiceRecord
 
     const created = await this.findById(invoiceId)
     if (!created) throw new Error('Invoice not found')

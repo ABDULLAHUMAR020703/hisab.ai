@@ -25,6 +25,11 @@ export async function GET(
       failedCount: job.failedCount,
       durationMs: job.durationMs,
       completedAt: job.completedAt,
+      batchSize: job.batchSize,
+      batchCursor: job.batchCursor,
+      retryCount: job.retryCount,
+      pausedAt: job.pausedAt,
+      progressPercent: job.totalRows ? Math.round((job.processedRows / job.totalRows) * 10000) / 100 : 0,
     })
   } catch (error) {
     return apiError(error)

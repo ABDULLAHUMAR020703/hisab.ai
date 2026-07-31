@@ -8,6 +8,7 @@ export type ImportJobStatus =
   | 'mapping'
   | 'validating'
   | 'processing'
+  | 'paused'
   | 'completed'
   | 'failed'
   | 'cancelled'
@@ -131,6 +132,7 @@ export interface ImportProcessorResult {
   skippedCount: number
   failedCount: number
   errors: ImportRowError[]
+  paused?: boolean
 }
 
 export interface ImportRowError {
@@ -167,6 +169,12 @@ export interface ImportJobRecord {
   errorSummary: Record<string, number> | null
   createdAt: string
   updatedAt: string
+  batchSize?: number
+  batchCursor?: number
+  retryCount?: number
+  pausedAt?: string | null
+  lastHeartbeatAt?: string | null
+  payloadSnapshot?: Record<string, unknown> | null
 }
 
 export interface MappingTemplateRecord {
@@ -192,6 +200,7 @@ export const ACTIVE_JOB_STATUSES: ImportJobStatus[] = [
   'processing',
 ]
 
-export const MAX_IMPORT_ROWS = 10_000
+/** File imports are streamed/batched by the job runner; no QuickBooks-sized row ceiling. */
+export const MAX_IMPORT_ROWS = Number.MAX_SAFE_INTEGER
 export const MAX_EXPORT_ROWS = 50_000
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024

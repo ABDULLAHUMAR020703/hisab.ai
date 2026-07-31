@@ -12,19 +12,25 @@ import { Input, Select, Textarea } from '@/components/ui/input'
 import { PageHeader, SearchBar, FilterBar } from '@/components/ui/page-header'
 
 interface Customer { id: string; name: string }
-interface ReceiptLine { description: string; quantity: number; unitPrice: number; taxRate: number }
+interface PaymentMethod { id: string; name: string }
+interface Account { id: string; accountNo: string; name: string }
+interface InventoryItem { id: string; name: string }
+interface ReceiptLine { description: string; quantity: number; unitPrice: number; taxRate: number; accountId: string; inventoryItemId: string }
 interface SalesReceipt {
   id: string; receiptNo: string; customer?: { name: string }; date: string
   total: number; paymentMethod: string; currency?: string
 }
 
-const EMPTY_LINE: ReceiptLine = { description: '', quantity: 1, unitPrice: 0, taxRate: 15 }
+const EMPTY_LINE: ReceiptLine = { description: '', quantity: 1, unitPrice: 0, taxRate: 15, accountId: '', inventoryItemId: '' }
 
 export default function SalesReceiptsPage() {
   const formatPrimary = useFormatCurrency()
   const { currency: primaryCurrency } = useCompanyCurrency()
   const [receipts, setReceipts] = useState<SalesReceipt[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
+  const [accounts, setAccounts] = useState<Account[]>([])
+  const [items, setItems] = useState<InventoryItem[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -32,7 +38,7 @@ export default function SalesReceiptsPage() {
 
   const [form, setForm] = useState({
     customerId: '', date: new Date().toISOString().split('T')[0],
-    notes: '', currency: primaryCurrency, paymentMethod: 'CASH',
+    notes: '', currency: primaryCurrency, paymentMethodId: '', depositAccountId: '',
     lines: [{ ...EMPTY_LINE }],
   })
 
@@ -40,16 +46,28 @@ export default function SalesReceiptsPage() {
     setLoading(true)
     const params = new URLSearchParams()
     if (search) params.set('search', search)
-    const [recRes, custRes] = await Promise.all([
+    const [recRes, custRes, methodRes, accountRes, itemRes] = await Promise.all([
       fetch(`/api/sales-receipts?${params}`),
       fetch('/api/customers'),
+      fetch('/api/product-master/payment-methods'),
+      fetch('/api/accounts'),
+      fetch('/api/inventory'),
     ])
     if (recRes.ok) setReceipts(await recRes.json())
     if (custRes.ok) setCustomers(await custRes.json())
+    if (methodRes.ok) {
+      const methods = await methodRes.json()
+      setPaymentMethods(methods)
+      setForm(current => current.paymentMethodId || methods.length === 0 ? current : { ...current, paymentMethodId: methods[0].id })
+    }
+    if(accountRes.ok)setAccounts(await accountRes.json())
+    if(itemRes.ok)setItems(await itemRes.json())
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [search])
+  // Search is the intentional reload boundary for this client-side list.
+  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
+  useEffect(() => { void load() }, [search])
 
   function updateLine(idx: number, field: string, value: string | number) {
     setForm(f => ({ ...f, lines: f.lines.map((l, i) => i === idx ? { ...l, [field]: value } : l) }))
@@ -131,21 +149,26 @@ export default function SalesReceiptsPage() {
             <Select label="Currency" value={form.currency} onChange={e => setForm({ ...form, currency: e.target.value })}>
               {ALLOWED_CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
             </Select>
-            <Select label="Payment Method" value={form.paymentMethod} onChange={e => setForm({ ...form, paymentMethod: e.target.value })}>
-              <option value="CASH">Cash</option>
-              <option value="CARD">Card</option>
-              <option value="BANK_TRANSFER">Bank Transfer</option>
+            <Select label="Payment Method" required value={form.paymentMethodId} onChange={e => setForm({ ...form, paymentMethodId: e.target.value })}>
+              <option value="">Select payment method</option>
+              {paymentMethods.map(method => <option key={method.id} value={method.id}>{method.name}</option>)}
+            </Select>
+            <Select label="Deposit account" required value={form.depositAccountId} onChange={e => setForm({ ...form, depositAccountId: e.target.value })}>
+              <option value="">Select bank or Undeposited Funds</option>
+              {accounts.map(account=><option key={account.id} value={account.id}>{account.accountNo} · {account.name}</option>)}
             </Select>
           </div>
           <div className="border border-slate-200 rounded-xl overflow-hidden">
             <table className="w-full">
-              <thead><tr className="bg-slate-50 border-b">{['Description', 'Qty', 'Price', 'Tax %', ''].map(h => (
+              <thead><tr className="bg-slate-50 border-b">{['Item', 'Description', 'Revenue account', 'Qty', 'Price', 'Tax %', ''].map(h => (
                 <th key={h} className="px-3 py-2 text-[10px] font-semibold text-slate-500 uppercase text-left">{h}</th>
               ))}</tr></thead>
               <tbody className="divide-y divide-slate-100">
                 {form.lines.map((line, idx) => (
                   <tr key={idx}>
+                    <td className="px-2 py-2"><select value={line.inventoryItemId} onChange={e=>updateLine(idx,'inventoryItemId',e.target.value)} className="input-base text-xs py-1.5"><option value="">Service / non-inventory</option>{items.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></td>
                     <td className="px-2 py-2"><input value={line.description} onChange={e => updateLine(idx, 'description', e.target.value)} className="input-base text-xs py-1.5" /></td>
+                    <td className="px-2 py-2"><select required value={line.accountId} onChange={e=>updateLine(idx,'accountId',e.target.value)} className="input-base text-xs py-1.5"><option value="">Select revenue</option>{accounts.map(account=><option key={account.id} value={account.id}>{account.accountNo} · {account.name}</option>)}</select></td>
                     <td className="px-2 py-2 w-20"><input type="number" value={line.quantity} onChange={e => updateLine(idx, 'quantity', parseFloat(e.target.value) || 0)} className="input-base text-xs py-1.5 text-right" /></td>
                     <td className="px-2 py-2 w-28"><input type="number" value={line.unitPrice} onChange={e => updateLine(idx, 'unitPrice', parseFloat(e.target.value) || 0)} className="input-base text-xs py-1.5 text-right" /></td>
                     <td className="px-2 py-2 w-20"><input type="number" value={line.taxRate} onChange={e => updateLine(idx, 'taxRate', parseFloat(e.target.value) || 0)} className="input-base text-xs py-1.5 text-right" /></td>

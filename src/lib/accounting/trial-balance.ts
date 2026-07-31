@@ -55,7 +55,7 @@ export async function buildBalanceSheetFromLedger(options: { asOf: Date; company
     canonicalTypes: ['Asset', 'Liability', 'Equity'],
   })
 
-  const sections: Record<string, { accountNo: string; name: string; balance: number }[]> = {
+  const sections: Record<string, { accountId:string; accountNo: string; name: string; balance: number }[]> = {
     Asset: [],
     Liability: [],
     Equity: [],
@@ -64,6 +64,7 @@ export async function buildBalanceSheetFromLedger(options: { asOf: Date; company
   for (const b of balances) {
     if (b.canonicalType in sections && Math.abs(b.balance) > 0.0001) {
       sections[b.canonicalType].push({
+        accountId: b.accountId,
         accountNo: b.accountNo,
         name: b.accountName,
         balance: b.balance,
@@ -100,21 +101,21 @@ export async function buildProfitLossFromLedger(options: {
   let totalRevenue = 0
   let totalCOGS = 0
   let totalExpenses = 0
-  const revenueByAccount: { name: string; amount: number }[] = []
-  const expenseByAccount: { name: string; amount: number }[] = []
+  const revenueByAccount: { accountId:string; name: string; amount: number }[] = []
+  const expenseByAccount: { accountId:string; name: string; amount: number }[] = []
 
   for (const b of balances) {
     if (b.canonicalType === 'Income') {
       totalRevenue += b.balance
       if (Math.abs(b.balance) > 0.0001) {
-        revenueByAccount.push({ name: b.accountName, amount: b.balance })
+        revenueByAccount.push({ accountId:b.accountId, name: b.accountName, amount: b.balance })
       }
     } else if (b.canonicalType === 'CostOfGoodsSold') {
       totalCOGS += b.balance
     } else if (b.canonicalType === 'Expense') {
       totalExpenses += b.balance
       if (Math.abs(b.balance) > 0.0001) {
-        expenseByAccount.push({ name: b.accountName, amount: b.balance })
+        expenseByAccount.push({ accountId:b.accountId, name: b.accountName, amount: b.balance })
       }
     }
   }

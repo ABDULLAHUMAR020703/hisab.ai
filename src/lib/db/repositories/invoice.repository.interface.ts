@@ -49,6 +49,11 @@ export interface InvoiceLineInput {
 }
 
 export interface InvoiceCreateInput {
+  companyId?: string
+  documentNo?: string
+  legacyId?: string | null
+  status?: string
+  reference?: string | null
   customerId: string
   date: string | Date
   dueDate: string | Date
@@ -79,6 +84,10 @@ export interface InvoiceUpdateInput {
 }
 
 export interface InvoiceAdjustmentCreateInput {
+  companyId?: string
+  documentNo?: string
+  legacyId?: string | null
+  status?: string
   sourceInvoiceId: string
   adjustmentType: 'CREDIT_NOTE' | 'DEBIT_NOTE'
   date: string | Date

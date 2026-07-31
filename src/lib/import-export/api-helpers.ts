@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { TenantAccessError } from '@/lib/tenant-error'
 import { FrameworkBadRequestError, FrameworkNotFoundError } from './errors'
+import { ForbiddenError } from '@/lib/authz'
 
 export function apiError(error: unknown, fallback = 'Request failed') {
   if (error instanceof FrameworkNotFoundError) {
@@ -11,6 +12,9 @@ export function apiError(error: unknown, fallback = 'Request failed') {
   }
   if (error instanceof TenantAccessError) {
     return NextResponse.json({ error: error.message }, { status: 403 })
+  }
+  if (error instanceof ForbiddenError) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   if (error instanceof Error) {
     if (error.message === 'Unauthorized') {

@@ -1,0 +1,7 @@
+import { requireAccountingAdmin as requireAuth } from '@/lib/product-parity/permissions'
+import { setImportJobStatus } from '@/lib/import-export/jobs/import-job.service'
+import { apiError } from '@/lib/import-export/api-helpers'
+
+export async function POST(_request: Request, { params }: { params: Promise<{ jobId: string }> }) {
+  try { await requireAuth(); const { jobId } = await params; const job = await setImportJobStatus(jobId, 'paused'); if (!job) return Response.json({ error: 'Job not found' }, { status: 404 }); return Response.json({ id: job.id, status: job.status, processedRows: job.processedRows }) } catch (error) { return apiError(error) }
+}

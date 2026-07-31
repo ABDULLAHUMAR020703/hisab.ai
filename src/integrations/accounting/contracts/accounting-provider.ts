@@ -27,6 +27,28 @@ export interface ProviderAccessContext {
   realmId: string
 }
 
+export interface ProviderEntityFetchOptions {
+  includeInactive?: boolean
+  partitioned?: boolean
+  partitionStart?: Date
+  partitionEnd?: Date
+  pageSize?: number
+  startPosition?: number
+  onCheckpoint?: (checkpoint: { startPosition: number; partitionStart?: string; partitionEnd?: string; extractedCount: number }) => Promise<void>
+  onPage?: (rows:unknown[],checkpoint:{startPosition:number;partitionStart?:string;partitionEnd?:string;extractedCount:number})=>Promise<void>
+}
+
+export interface ProviderCdcResult {
+  changedSince: string
+  fetchedAt: string
+  entities: Record<string, unknown[]>
+}
+
+export interface ProviderReportRequest {
+  reportName: string
+  parameters?: Record<string, string | number | boolean>
+}
+
 export interface AccountingProvider {
   readonly slug: Provider
   connect(context: ProviderConnectContext): Promise<ProviderConnectResult>
@@ -41,8 +63,23 @@ export interface AccountingProvider {
   getInvoices(context: ProviderAccessContext): Promise<unknown[]>
   getBills(context: ProviderAccessContext): Promise<unknown[]>
   getPayments(context: ProviderAccessContext): Promise<unknown[]>
+  getCustomerPayments?(context: ProviderAccessContext): Promise<unknown[]>
+  getVendorPayments?(context: ProviderAccessContext): Promise<unknown[]>
+  getExpenses?(context: ProviderAccessContext): Promise<unknown[]>
+  getJournalEntries?(context: ProviderAccessContext): Promise<unknown[]>
+  getSalesReceipts?(context: ProviderAccessContext): Promise<unknown[]>
+  getPurchaseOrders?(context: ProviderAccessContext): Promise<unknown[]>
+  getVendorCredits?(context: ProviderAccessContext): Promise<unknown[]>
+  getEstimates?(context: ProviderAccessContext): Promise<unknown[]>
   getAccounts(context: ProviderAccessContext): Promise<unknown[]>
   getItems(context: ProviderAccessContext): Promise<unknown[]>
   getTaxCodes(context: ProviderAccessContext): Promise<unknown[]>
+  getTaxRates?(context: ProviderAccessContext): Promise<unknown[]>
   getPaymentTerms(context: ProviderAccessContext): Promise<unknown[]>
+  getEntityRecords?(context: ProviderAccessContext, entity: string, options?: ProviderEntityFetchOptions): Promise<unknown[]>
+  getEntityCount?(context: ProviderAccessContext, entity: string): Promise<number>
+  getPreferences?(context: ProviderAccessContext): Promise<unknown[]>
+  getReports?(context: ProviderAccessContext, requests: ProviderReportRequest[]): Promise<Record<string, unknown>>
+  getChangeData?(context: ProviderAccessContext, entities: string[], changedSince: Date): Promise<ProviderCdcResult>
+  downloadAttachment?(context: ProviderAccessContext, attachableId: string): Promise<{ url: string; content?: ArrayBuffer; contentType?: string }>
 }

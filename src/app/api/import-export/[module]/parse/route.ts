@@ -54,10 +54,10 @@ export async function POST(
       )
     }
 
-    const module = getModuleDefinition(moduleKey)
+    const definition = getModuleDefinition(moduleKey)
     const fingerprint = buildHeaderFingerprint(parsed.headers)
 
-    const officialTemplate = detectOfficialTemplate(parsed.headers, module.officialTemplates)
+    const officialTemplate = detectOfficialTemplate(parsed.headers, definition.officialTemplates)
     let suggestedMapping
     let skipMapping = false
     let templateId: string | null = null
@@ -75,7 +75,7 @@ export async function POST(
               savedTemplate.columnMapping[header] ?? null,
             ]),
           )
-        : autoMapColumns(parsed.headers, module.fields)
+        : autoMapColumns(parsed.headers, definition.fields)
       templateId = savedTemplate?.id ?? null
     }
 

@@ -8,6 +8,8 @@ export interface SalesLineInput {
   taxRateId?: string | null
   taxGroupId?: string | null
   accountId?: string | null
+  inventoryItemId?: string | null
+  costCenterId?: string | null
 }
 
 export interface ProcessedSalesLine {
@@ -17,6 +19,8 @@ export interface ProcessedSalesLine {
   taxRate: number
   amount: number
   accountId: string | null
+  inventoryItemId: string | null
+  costCenterId: string | null
 }
 
 import { computeLegacyLineTax } from '@/lib/tax/calculator'
@@ -35,6 +39,8 @@ export function processSalesLines(lines: SalesLineInput[]) {
       taxRate: result.effectiveTaxRate,
       amount: result.netAmount,
       accountId: line.accountId || null,
+      inventoryItemId: line.inventoryItemId || null,
+      costCenterId: line.costCenterId || null,
     }
   })
   return { processedLines, subtotal, taxAmount, total: subtotal + taxAmount }

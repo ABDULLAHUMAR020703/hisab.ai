@@ -4,7 +4,7 @@ import { resolveCompanyId } from '@/lib/tenant'
 import { getCurrencyRoles, getCurrencySettings } from '@/lib/currency/fx-accounts'
 import { getExchangeRateAtDate } from '@/lib/currency/exchange-rates'
 import { computeRealizedFxDifference } from '@/lib/currency/fx-conversion'
-import { postGoodsReceiptFromBill, postGoodsIssueFromInvoice } from '@/lib/inventory/document-hooks'
+import { postGoodsReceiptFromBill, postGoodsIssueFromInvoice, postGoodsIssueFromSalesReceipt, postGoodsReturnFromCreditNote, postGoodsReturnToVendorFromCredit } from '@/lib/inventory/document-hooks'
 import { buildTaxJournalLines } from '@/lib/tax/journal-posting'
 import { findSystemAccount, postSourceDocumentToLedger } from './posting-service'
 import type { PostingLine } from './posting-service'
@@ -24,7 +24,7 @@ async function getAccountIds(companyId: string) {
 }
 
 async function storeDocumentBaseAmounts(
-  table: 'invoices' | 'bills',
+  table: 'invoices' | 'bills' | 'vendor_credits' | 'sales_receipts',
   id: string,
   companyId: string,
   currency: string,
@@ -32,11 +32,12 @@ async function storeDocumentBaseAmounts(
   subtotal: number,
   taxAmount: number,
   total: number,
+  rateOverride?: number | null,
 ) {
   const roles = await getCurrencyRoles(companyId)
-  const rate = await getExchangeRateAtDate(currency, roles.baseCurrency, entryDate, companyId)
+  const rate = rateOverride && rateOverride > 0 ? rateOverride : await getExchangeRateAtDate(currency, roles.baseCurrency, entryDate, companyId)
   const client = createAdminClient()
-  await client
+  const updated = await client
     .from(table)
     .update({
       exchange_rate: rate,
@@ -46,6 +47,7 @@ async function storeDocumentBaseAmounts(
     })
     .eq('id', id)
     .eq('company_id', companyId)
+  if(updated.error)throw updated.error
   return rate
 }
 
@@ -71,28 +73,32 @@ export async function postInvoiceToLedger(invoiceId: string, companyId?: string)
   const total = Number(invoice.total)
 
   const exchangeRate = await storeDocumentBaseAmounts(
-    'invoices', invoiceId, cid, currency, entryDate, subtotal, taxAmount, total,
+    'invoices', invoiceId, cid, currency, entryDate, subtotal, taxAmount, total, Number(invoice.exchange_rate) || null,
   )
 
   const lines: PostingLine[] = []
   const arAccount = accounts.ar
   const revenueAccount = accounts.revenue
+  const isCreditNote = String(invoice.invoice_type) === 'CREDIT_NOTE'
 
   if (arAccount && total > 0) {
     lines.push({
       accountId: arAccount,
-      debit: total,
+      debit: isCreditNote ? undefined : total,
+      credit: isCreditNote ? total : undefined,
       description: `Invoice ${invoice.invoice_no}`,
       exchangeRateOverride: exchangeRate,
     })
   }
-  if (revenueAccount && subtotal > 0) {
-    lines.push({
-      accountId: revenueAccount,
-      credit: subtotal,
-      description: `Revenue ${invoice.invoice_no}`,
-      exchangeRateOverride: exchangeRate,
-    })
+  const revenueLines = (invoice.lines ?? []).filter((line: Record<string,unknown>) => Number(line.amount ?? 0) > 0)
+  if (revenueLines.length) {
+    for (const line of revenueLines) {
+      const accountId = line.account_id ? String(line.account_id) : revenueAccount
+      if (!accountId) continue
+      lines.push({ accountId, debit:isCreditNote?Number(line.amount):undefined, credit:isCreditNote?undefined:Number(line.amount), description:String(line.description ?? `Revenue ${invoice.invoice_no}`), costCenterId:line.cost_center_id ? String(line.cost_center_id) : null, exchangeRateOverride:exchangeRate })
+    }
+  } else if (revenueAccount && subtotal > 0) {
+    lines.push({ accountId:revenueAccount, debit:isCreditNote?subtotal:undefined, credit:isCreditNote?undefined:subtotal, description:`Revenue ${invoice.invoice_no}`, exchangeRateOverride:exchangeRate })
   }
 
   const taxComponents = taxAmount > 0
@@ -115,7 +121,7 @@ export async function postInvoiceToLedger(invoiceId: string, companyId?: string)
     components: taxComponents,
   })
   for (const tl of taxLines) {
-    lines.push({ ...tl, exchangeRateOverride: exchangeRate })
+    lines.push({ ...tl, debit:isCreditNote?tl.credit:tl.debit, credit:isCreditNote?tl.debit:tl.credit, exchangeRateOverride: exchangeRate })
   }
 
   if (lines.length >= 2) {
@@ -128,7 +134,8 @@ export async function postInvoiceToLedger(invoiceId: string, companyId?: string)
       currency,
       lines,
     })
-    await postGoodsIssueFromInvoice(invoiceId, cid)
+    if(isCreditNote) await postGoodsReturnFromCreditNote(invoiceId,cid)
+    else await postGoodsIssueFromInvoice(invoiceId, cid)
   }
 }
 
@@ -139,7 +146,7 @@ export async function postBillToLedger(billId: string, companyId?: string) {
 
   const { data: bill, error } = await client
     .from('bills')
-    .select('*')
+    .select('*, lines:bill_lines(*)')
     .eq('id', billId)
     .eq('company_id', cid)
     .single()
@@ -154,20 +161,22 @@ export async function postBillToLedger(billId: string, companyId?: string) {
   const total = Number(bill.total)
 
   const exchangeRate = await storeDocumentBaseAmounts(
-    'bills', billId, cid, currency, entryDate, subtotal, taxAmount, total,
+    'bills', billId, cid, currency, entryDate, subtotal, taxAmount, total, Number(bill.exchange_rate) || null,
   )
 
   const lines: PostingLine[] = []
   const expenseAccount = accounts.expense
   const apAccount = accounts.ap
 
-  if (expenseAccount && subtotal > 0) {
-    lines.push({
-      accountId: expenseAccount,
-      debit: subtotal,
-      description: `Bill ${bill.bill_no}`,
-      exchangeRateOverride: exchangeRate,
-    })
+  const purchaseLines = (bill.lines ?? []).filter((line: Record<string,unknown>) => Number(line.amount ?? 0) > 0)
+  if (purchaseLines.length) {
+    for (const line of purchaseLines) {
+      const accountId = line.account_id ? String(line.account_id) : expenseAccount
+      if (!accountId) continue
+      lines.push({ accountId, debit:Number(line.amount), description:String(line.description ?? `Bill ${bill.bill_no}`), costCenterId:line.cost_center_id ? String(line.cost_center_id) : null, exchangeRateOverride:exchangeRate })
+    }
+  } else if (expenseAccount && subtotal > 0) {
+    lines.push({ accountId:expenseAccount, debit:subtotal, description:`Bill ${bill.bill_no}`, exchangeRateOverride:exchangeRate })
   }
 
   if (taxAmount > 0) {
@@ -178,7 +187,7 @@ export async function postBillToLedger(billId: string, companyId?: string) {
       isSales: false,
       components: [{
         name: 'VAT',
-        rate: 15,
+        rate: subtotal > 0 ? roundMoney((taxAmount / subtotal) * 100) : 15,
         taxMode: 'EXCLUSIVE',
         taxableAmount: subtotal,
         taxAmount,
@@ -233,7 +242,7 @@ export async function postPaymentToLedger(paymentId: string, companyId?: string)
   const entryDate = new Date(String(payment.date))
   const amount = Number(payment.amount)
   const roles = await getCurrencyRoles(cid)
-  const paymentRate = await getExchangeRateAtDate(currency, roles.baseCurrency, entryDate, cid)
+  const paymentRate = Number(payment.exchange_rate)>0?Number(payment.exchange_rate):await getExchangeRateAtDate(currency, roles.baseCurrency, entryDate, cid)
 
   await client
     .from('payments')
@@ -245,92 +254,35 @@ export async function postPaymentToLedger(paymentId: string, companyId?: string)
     .eq('company_id', cid)
 
   const lines: PostingLine[] = []
-  const bankAccount = accounts.bank
+  const realizedLines: PostingLine[] = []
+  let settlementAccount = accounts.bank
+  const allocationResult=await client.from('payment_allocations').select('invoice_id,bill_id,cash_amount,source_target_id').eq('company_id',cid).eq('payment_id',paymentId)
+  if(allocationResult.error)throw allocationResult.error
+  const allocations=allocationResult.data??[]
+  const invoiceIds=allocations.map(item=>item.invoice_id).filter(Boolean) as string[],billIds=allocations.map(item=>item.bill_id).filter(Boolean) as string[]
+  const invoiceResult=invoiceIds.length?await client.from('invoices').select('id,exchange_rate,invoice_no').eq('company_id',cid).in('id',invoiceIds):{data:[],error:null}
+  const billResult=billIds.length?await client.from('bills').select('id,exchange_rate,bill_no').eq('company_id',cid).in('id',billIds):{data:[],error:null}
+  if(invoiceResult.error)throw invoiceResult.error;if(billResult.error)throw billResult.error
+  const documents=new Map<string,{exchange_rate:unknown}>();for(const item of invoiceResult.data??[])documents.set(String(item.id),item);for(const item of billResult.data??[])documents.set(String(item.id),item)
+  const customerPayment=invoiceIds.length>0||Boolean(payment.customer_id)||Boolean(payment.invoice_id)
+  const vendorPayment=billIds.length>0||Boolean(payment.vendor_id)||Boolean(payment.bill_id)
+  if(customerPayment===vendorPayment)throw new Error('Payment must belong to exactly one customer or vendor subledger.')
+  if(customerPayment&&payment.deposit_account_id)settlementAccount=String(payment.deposit_account_id)
+  else if(payment.bank_account_id){const linkedBank=await client.from('bank_accounts').select('account_id').eq('company_id',cid).eq('id',payment.bank_account_id).is('deleted_at',null).maybeSingle();if(linkedBank.error)throw linkedBank.error;if(linkedBank.data?.account_id)settlementAccount=String(linkedBank.data.account_id)}
+  if(!settlementAccount)throw new Error(customerPayment?'A bank or Undeposited Funds account is required to post a customer payment.':'A bank account is required to post a vendor payment.')
+  const controlAccount=customerPayment?accounts.ar:accounts.ap
+  if(!controlAccount)throw new Error(customerPayment?'Accounts Receivable account is required.':'Accounts Payable account is required.')
+  lines.push({accountId:settlementAccount,debit:customerPayment?amount:undefined,credit:vendorPayment?amount:undefined,description:`Payment ${payment.payment_no}`,exchangeRateOverride:paymentRate})
+  lines.push({accountId:controlAccount,debit:vendorPayment?amount:undefined,credit:customerPayment?amount:undefined,description:`Payment ${payment.payment_no}`,exchangeRateOverride:paymentRate})
 
-  let invoiceRate: number | null = null
-  if (payment.invoice_id) {
-    const { data: invoice } = await client
-      .from('invoices')
-      .select('exchange_rate, currency, invoice_no')
-      .eq('id', payment.invoice_id)
-      .eq('company_id', cid)
-      .maybeSingle()
-    invoiceRate = invoice?.exchange_rate ? Number(invoice.exchange_rate) : null
-
-    if (bankAccount && accounts.ar) {
-      lines.push({
-        accountId: bankAccount,
-        debit: amount,
-        description: `Payment ${payment.payment_no}`,
-        exchangeRateOverride: paymentRate,
-      })
-      lines.push({
-        accountId: accounts.ar,
-        credit: amount,
-        description: `Payment ${payment.payment_no}`,
-        exchangeRateOverride: invoiceRate ?? paymentRate,
-      })
-
-      if (invoiceRate && currency !== roles.baseCurrency) {
-        const fxDiff = computeRealizedFxDifference({
-          transactionAmount: amount,
-          originalRate: invoiceRate,
-          settlementRate: paymentRate,
-        })
-        if (Math.abs(fxDiff) > 0.01) {
-          const gainAccount = fxSettings?.realizedGainAccountId
-            ?? await findSystemAccount(cid, { nameContains: 'Realized FX Gain' })
-          const lossAccount = fxSettings?.realizedLossAccountId
-            ?? await findSystemAccount(cid, { nameContains: 'Realized FX Loss' })
-
-          if (fxDiff > 0 && gainAccount) {
-            lines.push({ accountId: gainAccount, credit: fxDiff, description: `Realized FX gain ${payment.payment_no}` })
-          } else if (fxDiff < 0 && lossAccount) {
-            lines.push({ accountId: lossAccount, debit: Math.abs(fxDiff), description: `Realized FX loss ${payment.payment_no}` })
-          }
-        }
-      }
-    }
-  } else if (payment.bill_id && bankAccount && accounts.ap) {
-    const { data: bill } = await client
-      .from('bills')
-      .select('exchange_rate, currency')
-      .eq('id', payment.bill_id)
-      .eq('company_id', cid)
-      .maybeSingle()
-    invoiceRate = bill?.exchange_rate ? Number(bill.exchange_rate) : null
-
-    lines.push({
-      accountId: accounts.ap,
-      debit: amount,
-      description: `Payment ${payment.payment_no}`,
-      exchangeRateOverride: invoiceRate ?? paymentRate,
-    })
-    lines.push({
-      accountId: bankAccount,
-      credit: amount,
-      description: `Payment ${payment.payment_no}`,
-      exchangeRateOverride: paymentRate,
-    })
-
-    if (invoiceRate && currency !== roles.baseCurrency) {
-      const fxDiff = computeRealizedFxDifference({
-        transactionAmount: amount,
-        originalRate: invoiceRate,
-        settlementRate: paymentRate,
-      })
-      if (Math.abs(fxDiff) > 0.01) {
-        const gainAccount = fxSettings?.realizedGainAccountId
-          ?? await findSystemAccount(cid, { nameContains: 'Realized FX Gain' })
-        const lossAccount = fxSettings?.realizedLossAccountId
-          ?? await findSystemAccount(cid, { nameContains: 'Realized FX Loss' })
-
-        if (fxDiff > 0 && lossAccount) {
-          lines.push({ accountId: lossAccount, debit: fxDiff, description: `Realized FX loss ${payment.payment_no}` })
-        } else if (fxDiff < 0 && gainAccount) {
-          lines.push({ accountId: gainAccount, credit: Math.abs(fxDiff), description: `Realized FX gain ${payment.payment_no}` })
-        }
-      }
+  if(currency!==roles.baseCurrency){
+    const gainAccount=fxSettings?.realizedGainAccountId??await findSystemAccount(cid,{nameContains:'Realized FX Gain'})
+    const lossAccount=fxSettings?.realizedLossAccountId??await findSystemAccount(cid,{nameContains:'Realized FX Loss'})
+    for(const allocation of allocations){const cashAmount=Number(allocation.cash_amount??0),document=documents.get(String(allocation.invoice_id??allocation.bill_id??'')),documentRate=Number(document?.exchange_rate??0);if(cashAmount<=0||documentRate<=0)continue;const fxDiff=computeRealizedFxDifference({transactionAmount:cashAmount,originalRate:documentRate,settlementRate:paymentRate});if(Math.abs(fxDiff)<=0.01)continue
+      if(customerPayment&&fxDiff>0){if(!gainAccount)throw new Error('Realized FX gain account is required.');realizedLines.push({accountId:controlAccount,debit:fxDiff,description:`Realized FX settlement ${payment.payment_no}`},{accountId:gainAccount,credit:fxDiff,description:`Realized FX gain ${payment.payment_no}`})}
+      else if(customerPayment){if(!lossAccount)throw new Error('Realized FX loss account is required.');realizedLines.push({accountId:lossAccount,debit:Math.abs(fxDiff),description:`Realized FX loss ${payment.payment_no}`},{accountId:controlAccount,credit:Math.abs(fxDiff),description:`Realized FX settlement ${payment.payment_no}`})}
+      else if(fxDiff>0){if(!lossAccount)throw new Error('Realized FX loss account is required.');realizedLines.push({accountId:lossAccount,debit:fxDiff,description:`Realized FX loss ${payment.payment_no}`},{accountId:controlAccount,credit:fxDiff,description:`Realized FX settlement ${payment.payment_no}`})}
+      else{if(!gainAccount)throw new Error('Realized FX gain account is required.');realizedLines.push({accountId:controlAccount,debit:Math.abs(fxDiff),description:`Realized FX settlement ${payment.payment_no}`},{accountId:gainAccount,credit:Math.abs(fxDiff),description:`Realized FX gain ${payment.payment_no}`})}
     }
   }
 
@@ -345,6 +297,40 @@ export async function postPaymentToLedger(paymentId: string, companyId?: string)
       lines,
     })
   }
+  if(realizedLines.length>=2){await postSourceDocumentToLedger({companyId:cid,sourceType:'REALIZED_FX',sourceId:paymentId,entryDate,description:`Realized FX ${payment.payment_no}`,currency:roles.baseCurrency,lines:realizedLines})}
+}
+
+export async function postVendorCreditToLedger(vendorCreditId:string,companyId?:string) {
+  const cid=companyId??await resolveCompanyId(),client=createAdminClient(),accounts=await getAccountIds(cid),credit=await client.from('vendor_credits').select('*, lines:vendor_credit_lines(*, item:inventory_items(inventory_asset_account_id))').eq('company_id',cid).eq('id',vendorCreditId).is('deleted_at',null).single()
+  if(credit.error||!credit.data)throw new Error('Vendor Credit not found')
+  const document=credit.data,currency=String(document.currency??'SAR'),entryDate=new Date(String(document.date)),subtotal=Number(document.subtotal),taxAmount=Number(document.tax_amount),total=Number(document.total),exchangeRate=await storeDocumentBaseAmounts('vendor_credits',vendorCreditId,cid,currency,entryDate,subtotal,taxAmount,total,Number(document.exchange_rate)||null),apAccount=document.ap_account_id?String(document.ap_account_id):accounts.ap
+  if(!apAccount)throw new Error('Accounts Payable account is required to post a Vendor Credit.')
+  const postingLines=(document.lines??[]).filter((line:Record<string,unknown>)=>['AccountBasedExpenseLineDetail','ItemBasedExpenseLineDetail','PurchaseItemLineDetail'].includes(String(line.detail_type))&&Number(line.amount??0)>0),lines:PostingLine[]=[],sourceSubtotal=postingLines.reduce((sum:number,line:Record<string,unknown>)=>sum+Number(line.amount??0),0)
+  if(Math.abs(sourceSubtotal-subtotal)>0.01)throw new Error(`Vendor Credit lines (${sourceSubtotal.toFixed(4)}) do not equal subtotal (${subtotal.toFixed(4)}).`)
+  for(const line of postingLines){const item=line.item as Record<string,unknown>|null,accountId=line.account_id?String(line.account_id):item?.inventory_asset_account_id?String(item.inventory_asset_account_id):accounts.expense;if(!accountId)throw new Error(`Vendor Credit line ${line.line_no} has no posting account.`);lines.push({accountId,credit:Number(line.amount),description:String(line.description??`Vendor Credit ${document.credit_no}`),costCenterId:line.cost_center_id?String(line.cost_center_id):null,exchangeRateOverride:exchangeRate})}
+  if(taxAmount>0){const taxLines=await buildTaxJournalLines({companyId:cid,documentNo:String(document.credit_no),documentType:'VENDOR_CREDIT',isSales:false,components:[{name:'VAT',rate:subtotal>0?roundMoney((taxAmount/subtotal)*100):15,taxMode:'EXCLUSIVE',taxableAmount:subtotal,taxAmount,isReverseCharge:false,isWithholding:false}]});for(const line of taxLines)lines.push({accountId:line.accountId,debit:line.credit,credit:line.debit,description:line.description,exchangeRateOverride:exchangeRate})}
+  lines.push({accountId:apAccount,debit:total,description:`Vendor Credit ${document.credit_no}`,exchangeRateOverride:exchangeRate})
+  await postSourceDocumentToLedger({companyId:cid,sourceType:'SUPPLIER_CREDIT',sourceId:vendorCreditId,entryDate,description:`Vendor Credit ${document.credit_no}`,currency,lines})
+  await postGoodsReturnToVendorFromCredit(vendorCreditId,cid)
+}
+
+export async function postSalesReceiptToLedger(receiptId:string,companyId?:string) {
+  const cid=companyId??await resolveCompanyId(),client=createAdminClient(),accounts=await getAccountIds(cid)
+  const result=await client.from('sales_receipts').select('*, lines:sales_receipt_lines(*)').eq('company_id',cid).eq('id',receiptId).is('deleted_at',null).single()
+  if(result.error||!result.data)throw new Error('Sales Receipt not found')
+  const receipt=result.data,currency=String(receipt.currency??'SAR'),entryDate=new Date(String(receipt.date)),subtotal=Number(receipt.subtotal),taxAmount=Number(receipt.tax_amount),total=Number(receipt.total)
+  if(!Number.isFinite(entryDate.getTime()))throw new Error('Sales Receipt date is invalid.')
+  const exchangeRate=await storeDocumentBaseAmounts('sales_receipts',receiptId,cid,currency,entryDate,subtotal,taxAmount,total,Number(receipt.exchange_rate)||null)
+  const depositAccount=receipt.deposit_account_id?String(receipt.deposit_account_id):accounts.bank
+  if(!depositAccount)throw new Error('A bank or Undeposited Funds account is required to post a Sales Receipt.')
+  const postingLines=(receipt.lines??[]).filter((line:Record<string,unknown>)=>String(line.detail_type)==='SalesItemLineDetail'&&Math.abs(Number(line.amount??0))>0.0001)
+  const sourceSubtotal=postingLines.reduce((sum:number,line:Record<string,unknown>)=>sum+Number(line.amount),0)
+  if(Math.abs(sourceSubtotal-subtotal)>0.01)throw new Error(`Sales Receipt lines (${sourceSubtotal.toFixed(4)}) do not equal subtotal (${subtotal.toFixed(4)}).`)
+  const lines:PostingLine[]=[{accountId:depositAccount,debit:total,description:`Sales Receipt ${receipt.receipt_no}`,exchangeRateOverride:exchangeRate}]
+  for(const line of postingLines){const accountId=line.account_id?String(line.account_id):accounts.revenue,amount=Number(line.amount);if(!accountId)throw new Error(`Sales Receipt line ${line.line_no} has no revenue account.`);lines.push({accountId,debit:amount<0?Math.abs(amount):undefined,credit:amount>0?amount:undefined,description:String(line.description??`Sales Receipt ${receipt.receipt_no}`),costCenterId:line.cost_center_id?String(line.cost_center_id):null,exchangeRateOverride:exchangeRate})}
+  if(taxAmount>0){const taxLines=await buildTaxJournalLines({companyId:cid,documentNo:String(receipt.receipt_no),documentType:'SALES_RECEIPT',isSales:true,components:[{name:'VAT',rate:subtotal>0?roundMoney((taxAmount/subtotal)*100):15,taxMode:'EXCLUSIVE',taxableAmount:subtotal,taxAmount,isReverseCharge:false,isWithholding:false}]});for(const line of taxLines)lines.push({...line,exchangeRateOverride:exchangeRate})}
+  await postSourceDocumentToLedger({companyId:cid,sourceType:'SALES_RECEIPT',sourceId:receiptId,entryDate,description:`Sales Receipt ${receipt.receipt_no}`,currency,lines})
+  await postGoodsIssueFromSalesReceipt(receiptId,cid)
 }
 
 export async function postExpenseToLedger(expenseId: string, companyId?: string) {
@@ -364,20 +350,28 @@ export async function postExpenseToLedger(expenseId: string, companyId?: string)
 
   const currency = String(expense.currency ?? 'SAR')
   const entryDate = new Date(String(expense.date))
-  const exchangeRate = await getExchangeRateAtDate(currency, (await getCurrencyRoles(cid)).baseCurrency, entryDate, cid)
+  const exchangeRate = Number(expense.exchange_rate)>0?Number(expense.exchange_rate):await getExchangeRateAtDate(currency, (await getCurrencyRoles(cid)).baseCurrency, entryDate, cid)
 
   const lines: PostingLine[] = []
   const expenseAccount = accounts.expense
   const bankAccount = accounts.bank
   const total = Number(expense.total)
+  const taxAmount = Number(expense.tax_amount ?? 0)
+  const subtotal = Math.max(0,total - taxAmount)
 
-  if (expenseAccount && total > 0) {
-    lines.push({
-      accountId: expenseAccount,
-      debit: total,
-      description: `Expense ${expense.expense_no}`,
-      exchangeRateOverride: exchangeRate,
-    })
+  const expenseLines = (expense.lines ?? []).filter((line: Record<string,unknown>) => Number(line.amount ?? 0) > 0)
+  if (expenseLines.length) {
+    for (const line of expenseLines) {
+      const accountId = line.account_id ? String(line.account_id) : expenseAccount
+      if (!accountId) continue
+      lines.push({ accountId, debit:Number(line.amount), description:String(line.description ?? `Expense ${expense.expense_no}`), costCenterId:line.cost_center_id ? String(line.cost_center_id) : null, exchangeRateOverride:exchangeRate })
+    }
+  } else if (expenseAccount && subtotal > 0) {
+    lines.push({ accountId:expenseAccount, debit:subtotal, description:`Expense ${expense.expense_no}`, exchangeRateOverride:exchangeRate })
+  }
+  if (taxAmount > 0) {
+    const taxLines = await buildTaxJournalLines({ companyId:cid, documentNo:String(expense.expense_no), documentType:'EXPENSE', isSales:false, components:[{ name:'VAT', rate:subtotal > 0 ? roundMoney((taxAmount/subtotal)*100) : 15, taxMode:'EXCLUSIVE', taxableAmount:subtotal, taxAmount, isReverseCharge:false, isWithholding:false }] })
+    for (const taxLine of taxLines) lines.push({ ...taxLine, exchangeRateOverride:exchangeRate })
   }
   if (bankAccount && total > 0) {
     lines.push({

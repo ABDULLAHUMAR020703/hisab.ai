@@ -7,6 +7,7 @@ import { validateFiscalPeriodOpen } from './validation'
 import { logPostingAudit } from './posting-audit'
 import { aggregateLedgerBalances } from './ledger'
 import { closeFiscalPeriod } from './fiscal-periods'
+import { nextFiscalPeriod } from './fiscal-calendar'
 
 export interface YearCloseResult {
   fiscalYear: number
@@ -39,7 +40,14 @@ export async function closeFiscalYear(options: {
 
   const periodEnd = new Date(String(period.period_end))
   const periodStart = new Date(String(period.period_start))
-  const fiscalYear = periodStart.getFullYear()
+  const fiscalYear = periodEnd.getUTCFullYear()
+  const { data: company, error: companyError } = await client
+    .from('companies')
+    .select('currency')
+    .eq('id', companyId)
+    .single()
+  if (companyError) throw companyError
+  const companyCurrency = String(company.currency ?? 'SAR')
 
   const { data: existingClose } = await client
     .from('fiscal_year_closings')
@@ -126,7 +134,7 @@ export async function closeFiscalYear(options: {
       created_by_id: options.userId,
       entry_type: 'CLOSING',
       post_reason: options.reason ?? 'Fiscal year close',
-      currency: 'SAR',
+      currency: companyCurrency,
     })
     .select('id')
     .single()
@@ -154,9 +162,7 @@ export async function closeFiscalYear(options: {
     canonicalTypes: ['Asset', 'Liability', 'Equity'],
   })
 
-  const nextYear = fiscalYear + 1
-  const nextStart = new Date(nextYear, 0, 1)
-  const nextEnd = new Date(nextYear, 11, 31, 23, 59, 59)
+  const {start:nextStart,end:nextEnd,fiscalYear:nextYear}=nextFiscalPeriod(periodEnd)
 
   const { data: nextPeriod, error: nextPeriodError } = await client
     .from('fiscal_periods')
@@ -209,7 +215,7 @@ export async function closeFiscalYear(options: {
       created_by_id: options.userId,
       entry_type: 'OPENING',
       post_reason: 'Auto-generated opening balances',
-      currency: 'SAR',
+      currency: companyCurrency,
     })
     .select('id')
     .single()
@@ -228,7 +234,9 @@ export async function closeFiscalYear(options: {
         credit: l.credit,
       })),
     )
-    await postJournalEntry(openingJournalId, { companyId, userId: options.userId, reason: 'Opening balances', ipAddress: options.ipAddress })
+    // Hisab's ledger is continuous. This journal is a carry-forward memorandum
+    // for audit/report presentation only; posting it would duplicate every
+    // permanent-account balance in the next period.
   }
 
   await closeFiscalPeriod(options.periodId, options.userId, companyId)

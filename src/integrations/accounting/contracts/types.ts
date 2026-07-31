@@ -67,6 +67,8 @@ export interface CompanyInfo {
   baseCurrency: string | null
   timezone: string | null
   legalName: string | null
+  /** Provider-reported fiscal-year start, when available. */
+  fiscalYear?: string | null
 }
 
 export interface ProviderTokenSet {

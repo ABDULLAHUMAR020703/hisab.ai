@@ -27,18 +27,18 @@ export async function GET(
       return Response.json({ error: 'Invalid format' }, { status: 400 })
     }
 
-    const module = getModuleDefinition(moduleKey)
+    const definition = getModuleDefinition(moduleKey)
     const companyId = await resolveCompanyId()
     const filters = filtersFromSearchParams(searchParams)
-    const records = await module.exportRecords(filters, { companyId, userId: user.id })
+    const records = await definition.exportRecords(filters, { companyId, userId: user.id })
     if (records.length > MAX_EXPORT_ROWS) {
       throw new FrameworkBadRequestError(
         `Export exceeds maximum of ${MAX_EXPORT_ROWS} rows. Apply filters to reduce the dataset.`,
       )
     }
-    const headers = getExportHeaders(module.fields)
-    const labels = getExportLabels(module.fields)
-    const rows = records.map((record) => module.mapExportRow(record))
+    const headers = getExportHeaders(definition.fields)
+    const labels = getExportLabels(definition.fields)
+    const rows = records.map((record) => definition.mapExportRow(record))
     const payload = serializeExport(format, headers, rows, labels)
 
     return new Response(payload.content, {

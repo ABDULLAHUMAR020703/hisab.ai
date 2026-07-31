@@ -5,6 +5,9 @@ import { resolveCompanyId } from '@/lib/tenant'
 import { getNextSequence } from '@/lib/sequences'
 import { logAudit } from '@/lib/audit/log'
 import { requireRole } from '@/lib/authz'
+import { resolvePaymentMethod } from '@/lib/product-parity/payment-methods'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { replacePaymentAllocations } from '@/lib/accounting/payment-allocations'
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -22,9 +25,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       return Response.json({ error: 'A positive payment amount is required' }, { status: 400 })
     }
 
-    const amount = Math.min(requestedAmount, bill.balance)
+    const appliedAmount = Math.min(requestedAmount, bill.balance)
     const paymentNo = await getNextSequence('PAYMENT', 'PAY-')
     const currency = bill.currency || await getCompanyPrimaryCurrency()
+    const method = await resolvePaymentMethod(companyId, body.paymentMethodId, body.method || 'BANK_TRANSFER')
 
     const payment = await prisma.payment.create({
       data: {
@@ -32,23 +36,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         billId: id,
         date: new Date(body.date || new Date()),
         currency,
-        amount,
-        method: body.method || 'BANK_TRANSFER',
+        amount: requestedAmount,
+        method: method.code,
         reference: body.reference,
         notes: body.notes,
         bankAccountId: body.bankAccountId || null,
       },
     })
-
-    const newAmountPaid = bill.amountPaid + amount
-    const newBalance = bill.total - newAmountPaid
-    const newStatus = newBalance <= 0 ? 'PAID' : 'PARTIAL'
-
-    const updated = await prisma.bill.update({
-      where: { id },
-      data: { amountPaid: newAmountPaid, balance: newBalance, status: newStatus },
-    })
-
+    const { error: methodError } = await createAdminClient().from('payments').update({ payment_method_id: method.id }).eq('company_id', companyId).eq('id', payment.id)
+    if (methodError) throw methodError
+    await replacePaymentAllocations(companyId,payment.id,[{billId:id,amount:appliedAmount,cashAmount:appliedAmount,creditAmount:0,currency,sourceSystem:'HISAB',sourceLineKey:`bill:${id}`}])
     await postPaymentToLedger(payment.id, companyId)
     await logAudit({
       companyId,
@@ -56,9 +53,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       action: 'PAYMENT',
       entityType: 'bill',
       entityId: id,
-      details: { paymentId: payment.id, amount, paymentNo },
+      details: { paymentId: payment.id, amount:requestedAmount, appliedAmount, paymentNo },
     })
-
+    const updated = await prisma.bill.findUnique({ where: { id } })
     return Response.json(updated)
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {

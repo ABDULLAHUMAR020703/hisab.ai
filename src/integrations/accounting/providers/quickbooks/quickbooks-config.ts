@@ -7,6 +7,7 @@ export interface QuickBooksConfig {
   clientSecret: string
   redirectUri: string
   environment: QuickBooksEnvironment
+  additionalScopes?: string[]
 }
 
 export interface QuickBooksEndpoints {
@@ -36,7 +37,8 @@ export function quickBooksConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Q
   if (!['http:', 'https:'].includes(parsed.protocol)) {
     throw new ProviderRequestException('QB_REDIRECT_URI must use HTTP or HTTPS.', 503)
   }
-  return { clientId, clientSecret, redirectUri, environment }
+  const additionalScopes = (env.QB_ADDITIONAL_SCOPES ?? '').split(/[ ,]+/).map(scope => scope.trim()).filter(Boolean)
+  return { clientId, clientSecret, redirectUri, environment, additionalScopes }
 }
 
 export function quickBooksEndpoints(environment: QuickBooksEnvironment): QuickBooksEndpoints {

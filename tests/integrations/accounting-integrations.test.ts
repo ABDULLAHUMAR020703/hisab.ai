@@ -436,7 +436,54 @@ describe('QuickBooks provider', () => {
     const customers = await providerService.getCustomers({ accessToken: 'access', realmId: '123456' })
     assert.equal(customers.length, 1)
     const query = new URL(requestUrl).searchParams.get('query')
-    assert.equal(query, 'SELECT * FROM Customer STARTPOSITION 1 MAXRESULTS 1000')
+    assert.equal(query, 'SELECT * FROM Customer WHERE Active IN (true, false) STARTPOSITION 1 MAXRESULTS 1000')
+  })
+
+  it('continues pagination beyond the former 10,000-record ceiling', async () => {
+    const positions: number[] = []
+    const fetchImpl: typeof fetch = async (input) => {
+      const query = new URL(String(input)).searchParams.get('query') ?? ''
+      const position = Number(query.match(/STARTPOSITION (\d+)/)?.[1] ?? 1)
+      positions.push(position)
+      const count = position <= 10001 ? (position === 10001 ? 1 : 1000) : 0
+      return Response.json({ QueryResponse: { Invoice: Array.from({ length: count }, (_, index) => ({ Id: String(position + index) })) } })
+    }
+    const providerService = new QuickBooksIntegrationService(config, fetchImpl, () => NOW)
+    const invoices = await providerService.getInvoices({ accessToken:'access', realmId:'123456' })
+    assert.equal(invoices.length, 10001)
+    assert.equal(positions.includes(10001), true)
+  })
+
+  it('partitions historical transaction extraction and emits durable checkpoints', async () => {
+    const queries: string[] = []
+    const checkpoints: Array<{ partitionStart?:string; partitionEnd?:string }> = []
+    const fetchImpl: typeof fetch = async input => {
+      queries.push(new URL(String(input)).searchParams.get('query') ?? '')
+      return Response.json({ QueryResponse:{} })
+    }
+    const providerService = new QuickBooksIntegrationService(config, fetchImpl, () => NOW)
+    await providerService.getEntityRecords({ accessToken:'access', realmId:'123456' }, 'Deposit', {
+      partitioned:true,
+      partitionStart:new Date('2000-01-01T00:00:00.000Z'),
+      partitionEnd:new Date('2021-01-01T00:00:00.000Z'),
+      onCheckpoint:async checkpoint => { checkpoints.push(checkpoint) },
+    })
+    assert.equal(queries.length, 3)
+    assert.match(queries[0], /TxnDate >= '2000-01-01' AND TxnDate < '2010-01-01'/)
+    assert.equal(checkpoints.length, 3)
+  })
+
+  it('fetches CDC changes with a 30-day safety window', async () => {
+    let requestUrl = ''
+    const fetchImpl: typeof fetch = async input => {
+      requestUrl = String(input)
+      return Response.json({ CDCResponse:[{ QueryResponse:{ Invoice:[{ Id:'9', SyncToken:'2' }] } }] })
+    }
+    const providerService = new QuickBooksIntegrationService(config, fetchImpl, () => NOW)
+    const result = await providerService.getChangeData({ accessToken:'access', realmId:'123456' }, ['Invoice'], new Date('2020-01-01'))
+    assert.equal(result.entities.Invoice.length, 1)
+    const changedSince = new URL(requestUrl).searchParams.get('changedSince')
+    assert.equal(changedSince, new Date(NOW.getTime() - 30 * 86400000).toISOString())
   })
 })
 

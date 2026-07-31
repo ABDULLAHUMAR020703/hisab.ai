@@ -30,6 +30,7 @@ const NAV = [
       { label: 'Journal Entry', href: '/journal', icon: BookOpen },
       { label: 'Currency Revaluation', href: '/currency/revaluation', icon: ArrowRightLeft },
       { label: 'Master Data', href: '/master-data', icon: Database },
+      { label: 'Accounting Operations', href: '/accounting-operations', icon: ClipboardList },
     ]
   },
   {

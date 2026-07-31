@@ -1,0 +1,6 @@
+export type MigrationCutoffMode='FULL_HISTORY'|'OPENING_BALANCE_ONLY'|'HYBRID'
+export interface CutoffConfiguration{mode:MigrationCutoffMode;cutoffDate:string;reconciliationDate:string;accountingBasis:'Cash'|'Accrual';homeCurrency?:string;absoluteTolerance:number;exact:boolean}
+export interface CutoffBalance{key:string;label:string;opening:number;movement:number;quickBooksClosing:number;hisabClosing:number;currency:string;sourceId?:string;localId?:string;category?:string}
+export interface CutoffDifference extends CutoffBalance{expectedClosing:number;rollForwardDifference:number;closingDifference:number;severity:'ERROR'|'WARNING';recommendedAction:string}
+export interface CutoffSection{key:string;label:string;status:'MATCHED'|'WARNING'|'FAILED';matched:number;compared:number;maximumDifference:number;differences:CutoffDifference[]}
+export interface CutoffReconciliationReport{id:string;realmId:string;mode:MigrationCutoffMode;cutoffDate:string;openingAsOfDate:string;reconciliationDate:string;accountingBasis:'Cash'|'Accrual';homeCurrency:string;openingJournalId?:string|null;status:'PASSED'|'FAILED';generatedAt:string;sections:CutoffSection[];summary:{matched:number;failed:number;warnings:number;differenceCount:number}}

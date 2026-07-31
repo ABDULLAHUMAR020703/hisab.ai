@@ -35,6 +35,12 @@ function mapJobRow(row: Record<string, unknown>): ImportJobRecord {
     errorSummary: (row.error_summary as Record<string, number> | null) ?? null,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
+    batchSize: Number(row.batch_size ?? 250),
+    batchCursor: Number(row.batch_cursor ?? 0),
+    retryCount: Number(row.retry_count ?? 0),
+    pausedAt: row.paused_at ? String(row.paused_at) : null,
+    lastHeartbeatAt: row.last_heartbeat_at ? String(row.last_heartbeat_at) : null,
+    payloadSnapshot: (row.payload_snapshot as Record<string, unknown> | null) ?? null,
   }
 }
 
@@ -46,6 +52,8 @@ export async function createImportJob(input: {
   duplicateStrategy?: DuplicateStrategy
   mappingSnapshot?: Record<string, string>
   totalRows?: number
+  payloadSnapshot?: Record<string, unknown>
+  batchSize?: number
 }): Promise<ImportJobRecord> {
   const db = supabaseDb()
   const companyId = await resolveCompanyId()
@@ -64,6 +72,9 @@ export async function createImportJob(input: {
       total_rows: input.totalRows ?? 0,
       mapping_snapshot: input.mappingSnapshot ?? null,
       started_at: now,
+      payload_snapshot: input.payloadSnapshot ?? null,
+      batch_size: input.batchSize ?? 250,
+      last_heartbeat_at: now,
     })
     .select('*')
     .single()
@@ -89,15 +100,34 @@ export async function getImportJob(jobId: string): Promise<ImportJobRecord | nul
 export async function updateImportJobProgress(
   jobId: string,
   processedRows: number,
+  counts?: { importedCount?: number; updatedCount?: number; skippedCount?: number; failedCount?: number },
 ): Promise<void> {
   const db = supabaseDb()
   const companyId = await resolveCompanyId()
+  const countPatch = counts ? { imported_count: counts.importedCount, updated_count: counts.updatedCount, skipped_count: counts.skippedCount, failed_count: counts.failedCount } : {}
   const { error } = await db
     .from('import_jobs')
-    .update({ processed_rows: processedRows, status: 'processing' })
+    .update({ processed_rows: processedRows, batch_cursor: processedRows, last_heartbeat_at: new Date().toISOString(), ...countPatch })
     .eq('id', jobId)
     .eq('company_id', companyId)
 
+  if (error) throw error
+}
+
+export async function setImportJobStatus(jobId: string, status: 'processing' | 'paused' | 'pending'): Promise<ImportJobRecord | null> {
+  const current = await getImportJob(jobId)
+  if (!current || ['completed', 'failed', 'cancelled'].includes(current.status)) return current
+  const db = supabaseDb(); const companyId = await resolveCompanyId()
+  const patch: Record<string, unknown> = { status, last_heartbeat_at: new Date().toISOString(), paused_at: status === 'paused' ? new Date().toISOString() : null }
+  const { data, error } = await db.from('import_jobs').update(patch).eq('id', jobId).eq('company_id', companyId).select('*').maybeSingle()
+  if (error) throw error
+  return data ? mapJobRow(data) : null
+}
+
+export async function incrementImportJobRetry(jobId: string): Promise<void> {
+  const job = await getImportJob(jobId); if (!job) return
+  const db = supabaseDb(); const companyId = await resolveCompanyId()
+  const { error } = await db.from('import_jobs').update({ retry_count: (job.retryCount ?? 0) + 1, status: 'pending', last_heartbeat_at: new Date().toISOString() }).eq('id', jobId).eq('company_id', companyId)
   if (error) throw error
 }
 
@@ -225,4 +255,18 @@ export async function getImportJobErrors(jobId: string): Promise<ImportRowError[
 export async function isJobCancelled(jobId: string): Promise<boolean> {
   const job = await getImportJob(jobId)
   return job?.status === 'cancelled'
+}
+
+export async function isJobPaused(jobId: string): Promise<boolean> {
+  const job = await getImportJob(jobId)
+  return job?.status === 'paused'
+}
+
+/** Marks abandoned workers as resumable instead of losing their cursor. */
+export async function recoverStaleImportJobs(maxAgeMs = 5 * 60 * 1000): Promise<number> {
+  const db = supabaseDb(); const companyId = await resolveCompanyId()
+  const cutoff = new Date(Date.now() - maxAgeMs).toISOString()
+  const { data, error } = await db.from('import_jobs').update({ status: 'pending' }).eq('company_id', companyId).eq('status', 'processing').lt('last_heartbeat_at', cutoff).select('id')
+  if (error) throw error
+  return data?.length ?? 0
 }

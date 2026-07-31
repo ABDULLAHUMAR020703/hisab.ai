@@ -30,7 +30,7 @@ export default async function IntegrationsPage({
         <div className="rounded-xl bg-indigo-600 p-2.5 text-white"><Blocks size={20} /></div>
         <div>
           <h2 className="text-sm font-semibold text-slate-900">Your accounting ecosystem, in one place</h2>
-          <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600">QuickBooks Online is available for connection setup. Additional providers are staged for future releases; importing and synchronization are intentionally not enabled in this phase.</p>
+          <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600">QuickBooks Online supports secure connection, guided import, and exact-source validation. Additional providers are staged for future releases.</p>
         </div>
       </div>
       <IntegrationsClient oauthFeedback={oauthFeedback} />

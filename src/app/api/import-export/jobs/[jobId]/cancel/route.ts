@@ -1,4 +1,4 @@
-import { requireAuth } from '@/lib/auth'
+import { requireAccountingAdmin as requireAuth } from '@/lib/product-parity/permissions'
 import {
   cancelImportJob,
 } from '@/lib/import-export/jobs/import-job.service'

@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { performance } from 'node:perf_hooks'
+import { fileURLToPath } from 'node:url'
 import { autoMapColumns, applyColumnMapping } from '../../src/lib/import-export/mapping/auto-mapper'
 import { parseCsv } from '../../src/lib/import-export/parsers/csv-parser'
 import { parseExcel } from '../../src/lib/import-export/parsers/excel-parser'
@@ -10,7 +11,7 @@ import { coerceMappedRows, validateMappedRows } from '../../src/lib/import-expor
 import { serializeExport, getExportHeaders } from '../../src/lib/import-export/export/export-engine'
 import { CUSTOMER_FIELDS } from '../../src/lib/import-export/registry/modules/customers.fields'
 
-const ROOT = path.resolve(import.meta.dirname ?? path.dirname(new URL(import.meta.url).pathname), '../..')
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const TEST_DATA = path.join(ROOT, 'test-data')
 
 interface BenchResult {

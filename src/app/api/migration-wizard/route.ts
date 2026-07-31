@@ -1,4 +1,4 @@
-import { requireAuth } from '@/lib/auth'
+import { requireAccountingAdmin as requireAuth } from '@/lib/product-parity/permissions'
 import { logAudit } from '@/lib/audit/log'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveCompanyId } from '@/lib/tenant'

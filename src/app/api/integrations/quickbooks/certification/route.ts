@@ -1,0 +1,7 @@
+import { authzErrorResponse } from '@/lib/authz'
+import { requireAccountingAdmin, requireAccountingRead } from '@/lib/product-parity/permissions'
+import { getCertificationReports, reviewCertification, runQuickBooksCertification } from '@/lib/quickbooks-certification/service'
+
+export async function GET(request:Request){try{const user=await requireAccountingRead();const runId=new URL(request.url).searchParams.get('runId')??undefined;return Response.json(await getCertificationReports(user.companyId,runId),{headers:{'Cache-Control':'no-store'}})}catch(error){return authzErrorResponse(error)}}
+export async function POST(request:Request){try{const user=await requireAccountingAdmin();const body=await request.json();return Response.json(await runQuickBooksCertification(user.companyId,user.id,body),{status:201,headers:{'Cache-Control':'no-store'}})}catch(error){return authzErrorResponse(error)}}
+export async function PATCH(request:Request){try{const user=await requireAccountingAdmin();const body=await request.json() as {runId?:string;approvalStatus?:string};if(!body.runId||!['APPROVED','REJECTED'].includes(body.approvalStatus??''))return Response.json({error:'runId and a valid approvalStatus are required.'},{status:400});return Response.json(await reviewCertification(user.companyId,user.id,body.runId,body.approvalStatus as 'APPROVED'|'REJECTED'))}catch(error){return authzErrorResponse(error)}}

@@ -13,7 +13,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
     const { data, error } = await client
       .from('vendor_credits')
-      .select('*, vendor:vendors(*), bill:bills(*)')
+      .select('*, vendor:vendors(*), bill:bills(*), lines:vendor_credit_lines(*, account:chart_of_accounts(account_no,name), item:inventory_items(item_code,name)), applications:vendor_credit_applications(*, bill:bills(bill_no), payment:payments(payment_no))')
       .eq('id', id)
       .eq('company_id', companyId)
       .is('deleted_at', null)
@@ -48,6 +48,9 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     if (findError) throw findError
     if (!existing) return Response.json({ error: 'Not found' }, { status: 404 })
+    const posted=await client.from('ledger_entries').select('id').eq('company_id',companyId).eq('source_type','SUPPLIER_CREDIT').eq('source_id',id).limit(1)
+    if(posted.error)throw posted.error
+    if(posted.data?.length)return Response.json({error:'Posted Vendor Credits are immutable. Reverse the document instead of editing it.'},{status:409})
 
     const resolvedCurrency = body.currency !== undefined
       ? await resolveTransactionCurrency(body.currency)
@@ -56,6 +59,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const subtotal = body.subtotal !== undefined ? Number(body.subtotal) : Number(existing.subtotal)
     const taxAmount = body.taxAmount !== undefined ? Number(body.taxAmount) : Number(existing.tax_amount)
     const total = body.total !== undefined ? Number(body.total) : subtotal + taxAmount
+    const appliedAmount=Number(existing.applied_amount??0)
+    if(total<appliedAmount)return Response.json({error:'Total cannot be lower than the amount already applied to Bills.'},{status:400})
 
     const { data, error } = await client
       .from('vendor_credits')
@@ -68,6 +73,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         subtotal,
         tax_amount: taxAmount,
         total,
+        balance: total-appliedAmount,
         notes: body.notes ?? existing.notes,
       })
       .eq('id', id)
@@ -91,6 +97,9 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     const companyId = await resolveCompanyId()
     const { id } = await params
     const client = createAdminClient()
+    const posted=await client.from('ledger_entries').select('id').eq('company_id',companyId).eq('source_type','SUPPLIER_CREDIT').eq('source_id',id).limit(1)
+    if(posted.error)throw posted.error
+    if(posted.data?.length)return Response.json({error:'Posted Vendor Credits are immutable. Reverse the document instead of deleting it.'},{status:409})
 
     const { error } = await client
       .from('vendor_credits')

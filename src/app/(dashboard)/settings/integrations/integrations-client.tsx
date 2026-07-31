@@ -1,8 +1,9 @@
 'use client'
 
 import Image from 'next/image'
+import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
-import { AlertCircle, CheckCircle2, Clock3, Download, Link2, RefreshCw, ShieldCheck, Unplug } from 'lucide-react'
+import { AlertCircle, BadgeCheck, CheckCircle2, Clock3, Download, Link2, RefreshCw, ShieldCheck, Unplug } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { ImportWizard } from '@/components/import-export/ImportWizard'
@@ -53,6 +54,8 @@ export function IntegrationsClient({ oauthFeedback }: { oauthFeedback?: OAuthFee
   const [busyProvider, setBusyProvider] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showImport, setShowImport] = useState(false)
+  const [syncSettings, setSyncSettings] = useState<{ mode: 'import_only' | 'two_way'; conflictStrategy: 'source_wins' | 'hisab_wins' | 'manual'; scheduleEnabled: boolean; scheduleCron: string | null; lastRunAt: string | null } | null>(null)
+  const [syncBusy, setSyncBusy] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -72,6 +75,12 @@ export function IntegrationsClient({ oauthFeedback }: { oauthFeedback?: OAuthFee
     const timer = window.setTimeout(() => { void load() }, 0)
     return () => window.clearTimeout(timer)
   }, [load])
+
+  useEffect(() => {
+    if (oauthFeedback?.kind !== 'connected') return
+    const timer = window.setTimeout(() => setShowImport(true), 0)
+    return () => window.clearTimeout(timer)
+  }, [oauthFeedback])
 
   async function mutate(provider: string, action: 'connect' | 'disconnect') {
     setBusyProvider(provider)
@@ -95,6 +104,18 @@ export function IntegrationsClient({ oauthFeedback }: { oauthFeedback?: OAuthFee
     } finally {
       setBusyProvider(null)
     }
+  }
+
+  async function loadSyncSettings() {
+    const response = await fetch('/api/integrations/quickbooks/sync', { cache: 'no-store' })
+    if (response.ok) setSyncSettings(await response.json())
+  }
+  async function runSync() {
+    setSyncBusy(true); setError(null)
+    try { const response = await fetch('/api/integrations/quickbooks/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }); if (!response.ok) throw new Error(await apiError(response)); await loadSyncSettings() } catch (reason) { setError(reason instanceof Error ? reason.message : 'Synchronization failed.') } finally { setSyncBusy(false) }
+  }
+  async function saveSync(patch: Record<string, unknown>) {
+    const response = await fetch('/api/integrations/quickbooks/sync', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }); if (response.ok) setSyncSettings(await response.json())
   }
 
   if (loading && items.length === 0) {
@@ -194,7 +215,9 @@ export function IntegrationsClient({ oauthFeedback }: { oauthFeedback?: OAuthFee
                 {isQuickBooks && item.isActive && (
                   canDisconnect ? (
                     <div className="flex gap-2">
-                      {item.status === 'CONNECTED' && <Button onClick={() => setShowImport(true)}><Download size={14} /> Import</Button>}
+                      {item.status === 'CONNECTED' && <Link href="/settings/integrations/quickbooks-validation" className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"><ShieldCheck size={14} /> Validate</Link>}
+                      {item.status === 'CONNECTED' && <Link href="/settings/integrations/quickbooks-certification" className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"><BadgeCheck size={14} /> Certify</Link>}
+                      {item.status === 'CONNECTED' && <Button onClick={() => setShowImport(true)}><Download size={14} /> Migrate</Button>}
                       <Button variant="outline" loading={busyProvider === item.provider} onClick={() => void mutate(item.provider, 'disconnect')}>
                         <Unplug size={14} /> Disconnect
                       </Button>
@@ -206,6 +229,7 @@ export function IntegrationsClient({ oauthFeedback }: { oauthFeedback?: OAuthFee
                   )
                 )}
               </div>
+              {isQuickBooks && item.status === 'CONNECTED' && <div className="mt-4 space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-indigo-900">Synchronization</p><Button variant="outline" loading={syncBusy} onClick={() => void runSync()}><RefreshCw size={13} /> Sync now</Button></div><div className="grid grid-cols-2 gap-2"><label className="text-[11px] text-slate-600">Mode<select value={syncSettings?.mode ?? 'import_only'} onFocus={() => void loadSyncSettings()} onChange={(event) => void saveSync({ mode: event.target.value })} className="mt-1 block w-full rounded-md border-slate-200 text-xs"><option value="import_only">Import only</option><option value="two_way">Two-way sync</option></select></label><label className="text-[11px] text-slate-600">Conflicts<select value={syncSettings?.conflictStrategy ?? 'source_wins'} onFocus={() => void loadSyncSettings()} onChange={(event) => void saveSync({ conflictStrategy: event.target.value })} className="mt-1 block w-full rounded-md border-slate-200 text-xs"><option value="source_wins">QuickBooks wins</option><option value="hisab_wins">Hisab wins</option><option value="manual">Review manually</option></select></label></div><label className="flex items-center gap-2 text-[11px] text-slate-600"><input type="checkbox" checked={syncSettings?.scheduleEnabled ?? false} onFocus={() => void loadSyncSettings()} onChange={(event) => void saveSync({ scheduleEnabled: event.target.checked, scheduleCron: '@hourly' })} /> Schedule hourly sync {syncSettings?.lastRunAt ? `· Last run ${new Date(syncSettings.lastRunAt).toLocaleString()}` : ''}</label><Link href="/settings/integrations/quickbooks-validation" className="text-[11px] font-medium text-indigo-700 hover:underline">Review changes and conflicts</Link></div>}
             </article>
           )
         })}

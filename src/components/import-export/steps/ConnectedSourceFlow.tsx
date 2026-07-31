@@ -1,15 +1,28 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { CheckCircle2, Database, PlugZap } from 'lucide-react'
+import { Building2, CheckCircle2, Database, FileCheck2, PlugZap, RefreshCw, ShieldCheck } from 'lucide-react'
 import { Modal } from '@/components/ui/modal'
 import { Button } from '@/components/ui/button'
 import { readApiError } from '@/lib/api-client'
 import type { DuplicateMatch, DuplicateStrategy, ValidationResult } from '@/lib/import-export/types'
 import { DuplicateStep } from './DuplicateStep'
+import { buildMigrationReport, type MigrationReport } from '@/lib/import-export/migration-report'
 
 interface SourceResource { key: string; label: string; moduleKey: string }
-interface ImportSource { key: string; label: string; connected: boolean; connectionStatus: string; resources: SourceResource[] }
+interface ImportSource {
+  key: string
+  provider?: string
+  label: string
+  connected: boolean
+  connectionStatus: string
+  resources: SourceResource[]
+  companyName?: string | null
+  realmId?: string | null
+  baseCurrency?: string | null
+  country?: string | null
+  connectedAt?: string | null
+}
 interface PreviewResource extends SourceResource {
   count: number
   headers: string[]
@@ -20,7 +33,28 @@ interface PreviewResource extends SourceResource {
   duplicates: DuplicateMatch[]
 }
 interface ImportTotals { importedCount: number; updatedCount: number; skippedCount: number; failedCount: number }
-type Step = 'source' | 'resources' | 'preview' | 'duplicates' | 'importing' | 'complete'
+interface ImportResult extends ImportTotals { durationMs?: number }
+interface CompanyAnalysis {
+  companyName: string | null
+  fiscalYear: string | null
+  country: string | null
+  currency: string | null
+  realmId: string
+  recordCounts: Array<{ key: string; label: string; count: number; supported: boolean }>
+  estimatedMigrationMinutes: number
+  supportedModules: string[]
+  unsupportedModules: string[]
+  migrationCoveragePercent: number
+}
+type Step = 'analyze' | 'modules' | 'validation' | 'import' | 'report'
+
+const STAGES: Array<{ key: Step; label: string }> = [
+  { key: 'analyze', label: 'Analyze Company' },
+  { key: 'modules', label: 'Module Selection' },
+  { key: 'validation', label: 'Validation' },
+  { key: 'import', label: 'Import' },
+  { key: 'report', label: 'Migration Report' },
+]
 
 export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }: {
   open: boolean
@@ -28,13 +62,15 @@ export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }:
   onSuccess?: () => void
   initialSource?: string
 }) {
-  const [step, setStep] = useState<Step>('source')
+  const [step, setStep] = useState<Step>('analyze')
   const [sources, setSources] = useState<ImportSource[]>([])
   const [source, setSource] = useState<ImportSource | null>(null)
+  const [analysis, setAnalysis] = useState<CompanyAnalysis | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [previews, setPreviews] = useState<PreviewResource[]>([])
   const [strategy, setStrategy] = useState<DuplicateStrategy>('skip')
   const [totals, setTotals] = useState<ImportTotals | null>(null)
+  const [report, setReport] = useState<MigrationReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -43,51 +79,81 @@ export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }:
     let active = true
     const timer = window.setTimeout(() => {
       setLoading(true)
-      fetch('/api/import-export/sources', { cache: 'no-store' })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(await readApiError(response))
-        return response.json() as Promise<ImportSource[]>
-      })
-      .then((items) => {
+      void Promise.all([
+        fetch('/api/integrations', { cache: 'no-store' }),
+        fetch('/api/import-export/sources', { cache: 'no-store' }),
+        fetch('/api/integrations/quickbooks/analyze', { cache: 'no-store' }),
+      ]).then(async ([integrationResponse, sourceResponse, analysisResponse]) => {
+        if (!integrationResponse.ok) throw new Error(await readApiError(integrationResponse))
+        if (!sourceResponse.ok) throw new Error(await readApiError(sourceResponse))
+        const integrations = await integrationResponse.json() as ImportSource[]
+        const sourceAdapters = await sourceResponse.json() as ImportSource[]
+        const analysisPayload = analysisResponse.ok ? await analysisResponse.json() as CompanyAnalysis : null
+        const items = sourceAdapters.map((adapter) => ({
+          ...adapter,
+          ...(integrations.find((item) => item.provider === adapter.key) ?? {}),
+          resources: adapter.resources,
+        }))
+        return { items, analysis: analysisPayload }
+      }).then(({ items, analysis: analysisPayload }) => {
         if (!active) return
         setSources(items)
+        setAnalysis(analysisPayload)
         const preferred = items.find((item) => item.key === initialSource && item.connected)
-        if (preferred) setSource(preferred)
+        setSource(preferred ?? items.find((item) => item.connected) ?? null)
       })
-      .catch((reason) => active && setError(reason instanceof Error ? reason.message : 'Unable to load import sources.'))
-        .finally(() => active && setLoading(false))
+      .catch((reason) => active && setError(reason instanceof Error ? reason.message : 'Unable to analyze the company.'))
+      .finally(() => active && setLoading(false))
     }, 0)
     return () => { active = false; window.clearTimeout(timer) }
   }, [initialSource, open])
 
   function close() {
-    setStep('source'); setSource(null); setSelected([]); setPreviews([]); setStrategy('skip'); setTotals(null); setError(null)
+    setStep('analyze')
+    setSource(null)
+    setAnalysis(null)
+    setSelected([])
+    setPreviews([])
+    setStrategy('skip')
+    setTotals(null)
+    setReport(null)
+    setError(null)
     onClose()
   }
 
   async function preview() {
     if (!source || selected.length === 0) return
-    setLoading(true); setError(null)
+    setLoading(true)
+    setError(null)
     try {
       const response = await fetch(`/api/import-export/sources/${source.key}/preview`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resources: selected }),
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resources: selected }),
       })
       if (!response.ok) throw new Error(await readApiError(response))
       const payload = await response.json() as { resources: PreviewResource[] }
-      setPreviews(payload.resources); setStep('preview')
+      setPreviews(payload.resources)
+      setStep('validation')
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Unable to fetch provider data.')
-    } finally { setLoading(false) }
+      setError(reason instanceof Error ? reason.message : 'Unable to validate source data.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function runImport() {
     if (!source) return
-    setStep('importing'); setLoading(true); setError(null)
+    setLoading(true)
+    setError(null)
     const summary: ImportTotals = { importedCount: 0, updatedCount: 0, skippedCount: 0, failedCount: 0 }
+    const startedAt = Date.now()
+    const moduleReports: MigrationReport['modules'] = []
     try {
       for (const resource of previews) {
         const response = await fetch(`/api/import-export/${resource.moduleKey}/import`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             rows: resource.rows,
             mapping: resource.mapping,
@@ -98,38 +164,83 @@ export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }:
           }),
         })
         if (!response.ok) throw new Error(`${resource.label}: ${await readApiError(response)}`)
-        const result = await response.json() as ImportTotals
+        const result = await response.json() as ImportResult
         for (const key of Object.keys(summary) as Array<keyof ImportTotals>) summary[key] += result[key]
+        moduleReports.push({ key: resource.key, label: resource.label, sourceCount: resource.count, validCount: resource.validation.validRowNumbers.length, warningCount: resource.validation.warningCount, validationErrors: resource.validation.errorCount, importedCount: result.importedCount, updatedCount: result.updatedCount, skippedCount: result.skippedCount, failedCount: result.failedCount, durationMs: result.durationMs ?? 0 })
       }
-      setTotals(summary); setStep('complete'); onSuccess?.()
+      setTotals(summary)
+      setReport(buildMigrationReport({ source: source.label, companyName: source.companyName, currency: source.baseCurrency, durationMs: Date.now() - startedAt, modules: moduleReports }))
+      setStep('report')
+      onSuccess?.()
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Import failed.'); setStep('duplicates')
-    } finally { setLoading(false) }
+      setError(reason instanceof Error ? reason.message : 'Migration failed.')
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const order: Step[] = ['source', 'resources', 'preview', 'duplicates', 'importing', 'complete']
-  const title = { source: 'Select Import Source', resources: 'Select Resources', preview: 'Preview Import', duplicates: 'Duplicate Strategy', importing: 'Importing', complete: 'Import Complete' }[step]
+  async function downloadReport(format: 'pdf' | 'csv' | 'json') {
+    if (!report) return
+    const response = await fetch('/api/migration-wizard/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ format, report }) })
+    if (!response.ok) return
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `migration-report.${format}`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const stageIndex = STAGES.findIndex((stage) => stage.key === step)
   const duplicateCount = previews.reduce((sum, item) => sum + item.duplicates.length, 0)
+  const validCount = previews.reduce((sum, item) => sum + item.validation.validRowNumbers.length, 0)
 
-  const footer = step === 'complete' ? <Button onClick={close}>Close</Button> : <>
-    <Button variant="outline" onClick={close}>Cancel</Button>
-    {step === 'source' && <Button disabled={!source?.connected} onClick={() => setStep('resources')}>Continue</Button>}
-    {step === 'resources' && <><Button variant="outline" onClick={() => setStep('source')}>Back</Button><Button loading={loading} disabled={!selected.length} onClick={() => void preview()}>Fetch & Preview</Button></>}
-    {step === 'preview' && <><Button variant="outline" onClick={() => setStep('resources')}>Back</Button><Button disabled={!previews.some((item) => item.validation.validRowNumbers.length)} onClick={() => setStep('duplicates')}>Continue</Button></>}
-    {step === 'duplicates' && <><Button variant="outline" onClick={() => setStep('preview')}>Back</Button><Button onClick={() => void runImport()}>Start Import</Button></>}
-  </>
+  const footer = step === 'report' ? (
+    <Button onClick={close}>Close</Button>
+  ) : (
+    <>
+      <Button variant="outline" onClick={close}>Cancel</Button>
+      {step === 'analyze' && <Button disabled={!source?.connected} onClick={() => setStep('modules')}>Continue</Button>}
+      {step === 'modules' && <><Button variant="outline" onClick={() => setStep('analyze')}>Back</Button><Button loading={loading} disabled={!selected.length} onClick={() => void preview()}>Validate Selected Modules</Button></>}
+      {step === 'validation' && <><Button variant="outline" onClick={() => setStep('modules')}>Back</Button><Button disabled={validCount === 0} onClick={() => setStep('import')}>Continue to Import</Button></>}
+      {step === 'import' && <><Button variant="outline" onClick={() => setStep('validation')} disabled={loading}>Back</Button><Button loading={loading} disabled={validCount === 0} onClick={() => void runImport()}>Start Migration</Button></>}
+    </>
+  )
 
-  return <Modal open={open} onClose={close} title="Import Data" subtitle={`Step ${Math.min(order.indexOf(step) + 1, 6)} of 6 — ${title}`} size="2xl" footer={footer}>
-    <div className="space-y-5">
-      <div className="flex gap-2">{order.slice(0, 5).map((item, index) => <div key={item} className={`h-1.5 flex-1 rounded-full ${index <= order.indexOf(step) ? 'bg-indigo-500' : 'bg-slate-200'}`} />)}</div>
-      {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-      {loading && step !== 'importing' && <p className="text-sm text-slate-500">Loading…</p>}
-      {step === 'source' && <div className="grid gap-3 md:grid-cols-2">{sources.map((item) => <button key={item.key} onClick={() => item.connected && setSource(item)} disabled={!item.connected} className={`rounded-xl border p-5 text-left ${source?.key === item.key ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200'} disabled:opacity-55`}><div className="flex items-center gap-3"><PlugZap className="text-emerald-600" size={22} /><div><p className="font-semibold text-slate-800">{item.label}</p><p className="text-xs text-slate-500">{item.connected ? 'Connected and ready' : `Connection: ${item.connectionStatus}`}</p></div></div></button>)}</div>}
-      {step === 'resources' && source && <div className="grid gap-3 md:grid-cols-2">{source.resources.map((resource) => <label key={resource.key} className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 p-4"><input type="checkbox" checked={selected.includes(resource.key)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, resource.key] : current.filter((key) => key !== resource.key))} /><Database size={18} className="text-indigo-500" /><span className="text-sm font-medium">{resource.label}</span></label>)}</div>}
-      {step === 'preview' && <div className="space-y-5">{previews.map((resource) => <section key={resource.key} className="rounded-xl border border-slate-200 p-4"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-slate-800">{resource.label}</h3><div className="flex gap-2 text-xs"><span className="rounded-full bg-slate-100 px-2.5 py-1">{resource.count} records</span><span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700">{resource.duplicates.length} duplicates</span><span className="rounded-full bg-red-50 px-2.5 py-1 text-red-700">{resource.validation.errorCount} errors</span></div></div><div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="bg-slate-50">{resource.headers.slice(0, 6).map((header) => <th key={header} className="px-2 py-2 text-left">{header}</th>)}</tr></thead><tbody>{resource.sampleRows.slice(0, 5).map((row, index) => <tr key={index} className="border-t">{resource.headers.slice(0, 6).map((header) => <td key={header} className="max-w-48 truncate px-2 py-2">{row[header] || '—'}</td>)}</tr>)}</tbody></table></div></section>)}</div>}
-      {step === 'duplicates' && <DuplicateStep duplicateCount={duplicateCount} strategy={strategy} onStrategyChange={setStrategy} />}
-      {step === 'importing' && <div className="py-12 text-center"><div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" /><p className="text-sm text-slate-600">Importing selected resources…</p></div>}
-      {step === 'complete' && totals && <div className="space-y-4"><div className="flex items-center gap-2 text-emerald-700"><CheckCircle2 size={20} /><span className="font-semibold">Provider import completed.</span></div><div className="grid grid-cols-2 gap-3 md:grid-cols-4">{([['Imported', totals.importedCount], ['Updated', totals.updatedCount], ['Skipped', totals.skippedCount], ['Failed', totals.failedCount]] as const).map(([label, count]) => <div key={label} className="rounded-xl border p-4 text-center"><p className="text-xs text-slate-400">{label}</p><p className="mt-1 text-2xl font-bold">{count}</p></div>)}</div></div>}
-    </div>
-  </Modal>
+  return (
+    <Modal open={open} onClose={close} title="Migration Wizard" subtitle={`Step ${stageIndex + 1} of ${STAGES.length} — ${STAGES[stageIndex]?.label ?? ''}`} size="2xl" footer={footer}>
+      <div className="space-y-5">
+        <div className="flex gap-2" aria-label="Migration stages">
+          {STAGES.map((stage, index) => <div key={stage.key} title={stage.label} className={`h-1.5 flex-1 rounded-full ${index <= stageIndex ? 'bg-indigo-500' : 'bg-slate-200'}`} />)}
+        </div>
+        {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+        {loading && step !== 'import' && <p className="flex items-center gap-2 text-sm text-slate-500"><RefreshCw size={14} className="animate-spin" /> Working…</p>}
+
+        {step === 'analyze' && (
+          <div className="space-y-5">
+            <div className="flex items-start gap-4 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-5">
+              <div className="rounded-xl bg-indigo-600 p-3 text-white"><Building2 size={22} /></div>
+              <div><h3 className="font-semibold text-slate-900">Analyze Company</h3><p className="mt-1 text-sm leading-6 text-slate-600">Review the connected source and company identity before choosing what to migrate.</p></div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              {sources.map((item) => <button key={item.key} type="button" onClick={() => item.connected && setSource(item)} disabled={!item.connected} className={`rounded-xl border p-4 text-left transition-colors ${source?.key === item.key ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 hover:border-slate-300'} disabled:cursor-not-allowed disabled:opacity-50`}><div className="flex items-center gap-3"><PlugZap size={20} className="text-emerald-600" /><div><p className="font-semibold text-slate-800">{item.label}</p><p className="text-xs text-slate-500">{item.connected ? 'Connected and ready' : item.connectionStatus}</p></div></div></button>)}
+            </div>
+            {source?.connected && <>
+              <dl className="grid grid-cols-2 gap-4 rounded-xl bg-slate-50 p-4 text-sm md:grid-cols-5"><div><dt className="text-xs text-slate-400">Company</dt><dd className="mt-1 font-medium text-slate-800">{analysis?.companyName ?? source.companyName ?? 'Connected company'}</dd></div><div><dt className="text-xs text-slate-400">Fiscal year</dt><dd className="mt-1 font-medium text-slate-800">{analysis?.fiscalYear ?? 'Not provided'}</dd></div><div><dt className="text-xs text-slate-400">Country</dt><dd className="mt-1 font-medium text-slate-800">{analysis?.country ?? source.country ?? '—'}</dd></div><div><dt className="text-xs text-slate-400">Currency</dt><dd className="mt-1 font-medium text-slate-800">{analysis?.currency ?? source.baseCurrency ?? '—'}</dd></div><div><dt className="text-xs text-slate-400">Estimated time</dt><dd className="mt-1 font-medium text-slate-800">{analysis ? `~${analysis.estimatedMigrationMinutes} min` : 'Calculating…'}</dd></div></dl>
+              {analysis && <div className="space-y-4 rounded-2xl border border-slate-200 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-semibold text-slate-900">Migration coverage</h3><span className="rounded-full bg-indigo-50 px-3 py-1 text-sm font-semibold text-indigo-700">{analysis.migrationCoveragePercent}%</span></div><div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-indigo-500" style={{ width: `${analysis.migrationCoveragePercent}%` }} /></div><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{analysis.recordCounts.map((item) => <div key={item.key} className="rounded-xl bg-slate-50 p-3"><p className="text-xs text-slate-500">{item.label}</p><p className="mt-1 text-lg font-semibold text-slate-900">{item.count.toLocaleString()}</p><p className="text-[11px] text-emerald-600">Supported</p></div>)}</div><div className="grid gap-4 md:grid-cols-2"><div><p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-600">Supported modules</p><div className="flex flex-wrap gap-2">{analysis.supportedModules.map((item) => <span key={item} className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs text-emerald-700">{item}</span>)}</div></div><div><p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Unsupported modules</p><div className="flex flex-wrap gap-2">{analysis.unsupportedModules.map((item) => <span key={item} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600">{item}</span>)}</div></div></div></div>}
+            </>}
+          </div>
+        )}
+
+        {step === 'modules' && source && <div className="space-y-4"><div><h3 className="font-semibold text-slate-900">Select modules</h3><p className="mt-1 text-sm text-slate-500">Choose the records to fetch, validate, and migrate from {source.companyName ?? source.label}.</p></div><div className="grid gap-3 md:grid-cols-2">{source.resources.map((resource) => <label key={resource.key} className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 p-4 hover:bg-slate-50"><input type="checkbox" checked={selected.includes(resource.key)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, resource.key] : current.filter((key) => key !== resource.key))} className="h-4 w-4 rounded border-slate-300 text-indigo-600" /><Database size={18} className="text-indigo-500" /><span className="text-sm font-medium text-slate-700">{resource.label}</span></label>)}</div></div>}
+
+        {step === 'validation' && <div className="space-y-5"><div className="flex items-start gap-3 rounded-xl border border-emerald-100 bg-emerald-50 p-4"><FileCheck2 size={20} className="mt-0.5 text-emerald-600" /><div><h3 className="font-semibold text-emerald-900">Validation complete</h3><p className="mt-1 text-sm text-emerald-800">Review counts, invalid rows, and duplicates before writing anything.</p></div></div>{previews.map((resource) => <section key={resource.key} className="rounded-xl border border-slate-200 p-4"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-slate-800">{resource.label}</h3><div className="flex gap-2 text-xs"><span className="rounded-full bg-slate-100 px-2.5 py-1">{resource.count} records</span><span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700">{resource.duplicates.length} duplicates</span><span className="rounded-full bg-red-50 px-2.5 py-1 text-red-700">{resource.validation.errorCount} errors</span></div></div><div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="bg-slate-50">{resource.headers.slice(0, 6).map((header) => <th key={header} className="px-2 py-2 text-left">{header}</th>)}</tr></thead><tbody>{resource.sampleRows.slice(0, 5).map((row, index) => <tr key={index} className="border-t">{resource.headers.slice(0, 6).map((header) => <td key={header} className="max-w-48 truncate px-2 py-2">{row[header] || '—'}</td>)}</tr>)}</tbody></table></div></section>)}</div>}
+
+        {step === 'import' && <div className="space-y-5">{loading ? <div className="py-12 text-center"><div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" /><p className="text-sm text-slate-600">Migrating validated records…</p></div> : <><div className="flex items-start gap-3 rounded-xl border border-indigo-100 bg-indigo-50 p-4"><ShieldCheck size={20} className="mt-0.5 text-indigo-600" /><div><h3 className="font-semibold text-indigo-900">Ready to migrate</h3><p className="mt-1 text-sm text-indigo-800">{validCount} validated rows will be processed. Select how existing records should be handled.</p></div></div><DuplicateStep duplicateCount={duplicateCount} strategy={strategy} onStrategyChange={setStrategy} /></>}</div>}
+
+        {step === 'report' && totals && report && <div className="space-y-5"><div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-5"><CheckCircle2 size={24} className="mt-0.5 text-emerald-600" /><div><h3 className="font-semibold text-emerald-900">Migration complete</h3><p className="mt-1 text-sm text-emerald-800">Your professional migration report is ready.</p></div></div><div className="grid grid-cols-2 gap-3 md:grid-cols-4">{([['Imported', totals.importedCount, 'text-emerald-700'], ['Updated', totals.updatedCount, 'text-blue-700'], ['Skipped', totals.skippedCount, 'text-amber-700'], ['Failed', totals.failedCount, 'text-red-700']] as const).map(([label, count, color]) => <div key={label} className="rounded-xl border border-slate-200 p-4 text-center"><p className="text-xs uppercase tracking-wide text-slate-400">{label}</p><p className={`mt-1 text-2xl font-bold ${color}`}>{count}</p></div>)}</div><div className="grid grid-cols-2 gap-3 md:grid-cols-4"><div className="rounded-xl bg-indigo-50 p-4"><p className="text-xs text-indigo-600">Validation score</p><p className="mt-1 text-2xl font-bold text-indigo-800">{report.validationScore}%</p></div><div className="rounded-xl bg-emerald-50 p-4"><p className="text-xs text-emerald-600">Integrity score</p><p className="mt-1 text-2xl font-bold text-emerald-800">{report.integrityScore}%</p></div><div className="rounded-xl bg-amber-50 p-4"><p className="text-xs text-amber-600">Warnings</p><p className="mt-1 text-2xl font-bold text-amber-800">{report.totals.warnings}</p></div><div className="rounded-xl bg-slate-100 p-4"><p className="text-xs text-slate-500">Duration</p><p className="mt-1 text-2xl font-bold text-slate-800">{(report.durationMs / 1000).toFixed(1)}s</p></div></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => void downloadReport('pdf')}>Export PDF</Button><Button variant="outline" onClick={() => void downloadReport('csv')}>Export CSV</Button><Button variant="outline" onClick={() => void downloadReport('json')}>Export JSON</Button></div><div className="space-y-2"><h3 className="text-sm font-semibold text-slate-800">Module report</h3>{report.modules.map((module) => <div key={module.key} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-4 py-3 text-sm"><span className="font-medium text-slate-700">{module.label}</span><span className="text-slate-500">{module.sourceCount} records · {module.importedCount} imported · {module.updatedCount} updated · {module.skippedCount} skipped · {module.failedCount} failed · {module.warningCount} warnings</span></div>)}</div></div>}
+      </div>
+    </Modal>
+  )
 }

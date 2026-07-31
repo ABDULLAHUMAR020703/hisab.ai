@@ -67,6 +67,8 @@ export async function POST(request: Request) {
         subtotal: resolvedSubtotal,
         tax_amount: resolvedTax,
         total: resolvedTotal,
+        applied_amount: 0,
+        balance: resolvedTotal,
         notes: notes ?? null,
       })
       .select('*, vendor:vendors(name), bill:bills(bill_no)')

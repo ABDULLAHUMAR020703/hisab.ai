@@ -139,6 +139,8 @@ export interface MovementInput {
   userId?: string | null
   reason?: string | null
   postCogsJournal?: boolean
+  /** Historical source date used by migrations; native callers default to now. */
+  movementDate?: Date
 }
 
 export async function processInventoryMovement(input: MovementInput): Promise<{
@@ -261,7 +263,7 @@ export async function processInventoryMovement(input: MovementInput): Promise<{
       batch_no: input.batchNo ?? null,
       expiry_date: input.expiryDate?.toISOString() ?? null,
       created_by_id: input.userId ?? null,
-      date: new Date().toISOString(),
+      date: (input.movementDate ?? new Date()).toISOString(),
     })
     .select('id')
     .single()
@@ -318,7 +320,7 @@ export async function processInventoryMovement(input: MovementInput): Promise<{
       sourceId: String(movement.id),
       cogsAmount: totalCost,
       description: `${input.movementType} ${movementNo}`,
-      entryDate: new Date(),
+      entryDate: input.movementDate ?? new Date(),
       userId: input.userId,
     })
   }

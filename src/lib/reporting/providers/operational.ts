@@ -120,7 +120,7 @@ export async function runExpenseSummary(req: ReportRunRequest) {
 }
 
 export async function runInventoryValuation(req: ReportRunRequest) {
-  return buildInventoryValuationReport({ companyId: req.companyId })
+  return buildInventoryValuationReport({ companyId: req.companyId, asOf: req.asOf ? new Date(req.asOf) : undefined })
 }
 
 export async function runInventoryMovement(req: ReportRunRequest) {
