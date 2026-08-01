@@ -1,7 +1,15 @@
 -- Authoritative many-to-many payment application ledger.
-ALTER TABLE public.payments ADD CONSTRAINT payments_company_id_id_key UNIQUE (company_id,id);
-ALTER TABLE public.customers ADD CONSTRAINT customers_company_id_id_key UNIQUE (company_id,id);
-ALTER TABLE public.vendors ADD CONSTRAINT vendors_company_id_id_key UNIQUE (company_id,id);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.payments'::regclass AND conname='payments_company_id_id_key') THEN
+    ALTER TABLE public.payments ADD CONSTRAINT payments_company_id_id_key UNIQUE (company_id,id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.customers'::regclass AND conname='customers_company_id_id_key') THEN
+    ALTER TABLE public.customers ADD CONSTRAINT customers_company_id_id_key UNIQUE (company_id,id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.vendors'::regclass AND conname='vendors_company_id_id_key') THEN
+    ALTER TABLE public.vendors ADD CONSTRAINT vendors_company_id_id_key UNIQUE (company_id,id);
+  END IF;
+END $$;
 
 ALTER TABLE public.payments
   ADD COLUMN IF NOT EXISTS customer_id UUID,
@@ -15,17 +23,26 @@ ALTER TABLE public.vendor_credits
   ADD COLUMN IF NOT EXISTS balance NUMERIC(18,4) NOT NULL DEFAULT 0;
 UPDATE public.vendor_credits SET balance=total WHERE balance=0 AND total>0;
 
-ALTER TABLE public.payments
-  ADD CONSTRAINT payments_company_customer_fkey FOREIGN KEY (company_id,customer_id)
-    REFERENCES public.customers(company_id,id) ON DELETE SET NULL,
-  ADD CONSTRAINT payments_company_vendor_fkey FOREIGN KEY (company_id,vendor_id)
-    REFERENCES public.vendors(company_id,id) ON DELETE SET NULL,
-  ADD CONSTRAINT payments_single_party_chk CHECK (customer_id IS NULL OR vendor_id IS NULL),
-  ADD CONSTRAINT payments_allocation_amounts_chk CHECK (
-    applied_amount>=0 AND credit_applied_amount>=0 AND unapplied_amount>=0
-  );
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.payments'::regclass AND conname='payments_company_customer_fkey') THEN
+    ALTER TABLE public.payments ADD CONSTRAINT payments_company_customer_fkey FOREIGN KEY (company_id,customer_id)
+      REFERENCES public.customers(company_id,id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.payments'::regclass AND conname='payments_company_vendor_fkey') THEN
+    ALTER TABLE public.payments ADD CONSTRAINT payments_company_vendor_fkey FOREIGN KEY (company_id,vendor_id)
+      REFERENCES public.vendors(company_id,id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.payments'::regclass AND conname='payments_single_party_chk') THEN
+    ALTER TABLE public.payments ADD CONSTRAINT payments_single_party_chk CHECK (customer_id IS NULL OR vendor_id IS NULL);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.payments'::regclass AND conname='payments_allocation_amounts_chk') THEN
+    ALTER TABLE public.payments ADD CONSTRAINT payments_allocation_amounts_chk CHECK (
+      applied_amount>=0 AND credit_applied_amount>=0 AND unapplied_amount>=0
+    );
+  END IF;
+END $$;
 
-CREATE TABLE public.payment_allocations (
+CREATE TABLE IF NOT EXISTS public.payment_allocations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
   payment_id UUID NOT NULL,
@@ -59,14 +76,16 @@ CREATE TABLE public.payment_allocations (
   UNIQUE (company_id,payment_id,source_system,source_line_key)
 );
 
-CREATE INDEX payment_allocations_invoice_idx ON public.payment_allocations(company_id,invoice_id) WHERE invoice_id IS NOT NULL;
-CREATE INDEX payment_allocations_bill_idx ON public.payment_allocations(company_id,bill_id) WHERE bill_id IS NOT NULL;
-CREATE INDEX payment_allocations_source_idx ON public.payment_allocations(company_id,source_system,source_payment_id,source_target_id);
+CREATE INDEX IF NOT EXISTS payment_allocations_invoice_idx ON public.payment_allocations(company_id,invoice_id) WHERE invoice_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS payment_allocations_bill_idx ON public.payment_allocations(company_id,bill_id) WHERE bill_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS payment_allocations_source_idx ON public.payment_allocations(company_id,source_system,source_payment_id,source_target_id);
 
 ALTER TABLE public.payment_allocations ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS payment_allocations_tenant ON public.payment_allocations;
 CREATE POLICY payment_allocations_tenant ON public.payment_allocations FOR ALL TO authenticated
   USING (company_id IN (SELECT public.user_company_ids()))
   WITH CHECK (company_id IN (SELECT public.user_company_ids()));
+DROP POLICY IF EXISTS payment_allocations_service ON public.payment_allocations;
 CREATE POLICY payment_allocations_service ON public.payment_allocations FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 CREATE OR REPLACE FUNCTION public.refresh_payment_document_balances(
@@ -189,8 +208,21 @@ GRANT EXECUTE ON FUNCTION public.refresh_payment_document_balances(UUID,UUID[],U
 
 -- Backfill legacy one-document payments without changing their accounting history.
 INSERT INTO public.payment_allocations(company_id,payment_id,invoice_id,bill_id,amount,cash_amount,credit_amount,currency,exchange_rate,source_system,source_payment_id,source_line_key)
-SELECT company_id,id,invoice_id,bill_id,amount,amount,0,currency,exchange_rate,'LEGACY',legacy_id,'legacy:0'
-FROM public.payments WHERE deleted_at IS NULL AND (invoice_id IS NOT NULL OR bill_id IS NOT NULL)
+SELECT payment.company_id,payment.id,payment.invoice_id,payment.bill_id,payment.amount,payment.amount,0,
+  COALESCE(
+    CASE WHEN payment.invoice_id IS NOT NULL THEN invoice.currency END,
+    CASE WHEN payment.bill_id IS NOT NULL THEN company.currency END,
+    company.currency
+  ),
+  payment.exchange_rate,'LEGACY',payment.legacy_id,'legacy:0'
+FROM public.payments payment
+LEFT JOIN public.invoices invoice
+  ON invoice.company_id=payment.company_id AND invoice.id=payment.invoice_id
+LEFT JOIN public.bills bill
+  ON bill.company_id=payment.company_id AND bill.id=payment.bill_id
+LEFT JOIN public.companies company
+  ON company.id=payment.company_id
+WHERE payment.deleted_at IS NULL AND (payment.invoice_id IS NOT NULL OR payment.bill_id IS NOT NULL)
 ON CONFLICT (company_id,payment_id,source_system,source_line_key) DO NOTHING;
 
 UPDATE public.payments payment SET applied_amount=summary.cash_amount,credit_applied_amount=summary.credit_amount,

@@ -4,14 +4,42 @@ import { createAccountingIntegrationRuntime } from '@/integrations/accounting/se
 import { QuickBooksImportAdapter } from './quickbooks.adapter'
 import type { ImportSourceAdapter, NormalizedImportResource } from './types'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { PreviewStageError, type PreviewStage, type PreviewStageState } from './preview-service'
 
-async function fetchWithCheckpoint(tenantId: string, source: ImportSourceAdapter, provider: Parameters<ImportSourceAdapter['fetchResource']>[0], context: Parameters<ImportSourceAdapter['fetchResource']>[1], resourceKey: string) {
+interface SourceFetchDiagnostics {
+  preview?: boolean
+  onStage?: (stage: PreviewStage, state: PreviewStageState, module: string) => void
+}
+
+async function runStage<T>(stage: PreviewStage, module: string, diagnostics: SourceFetchDiagnostics | undefined, operation: () => Promise<T> | T): Promise<T> {
+  diagnostics?.onStage?.(stage, 'started', module)
+  try {
+    const result = await operation()
+    diagnostics?.onStage?.(stage, 'completed', module)
+    return result
+  } catch (error) {
+    diagnostics?.onStage?.(stage, 'failed', module)
+    if (error instanceof PreviewStageError) throw error
+    const record = error !== null && typeof error === 'object' ? error as Record<string, unknown> : {}
+    const message = error instanceof Error ? error.message : typeof record.message === 'string' ? record.message : `Preview failed during ${stage}.`
+    const code = typeof record.code === 'string' ? record.code : `${stage.toUpperCase()}_FAILED`
+    throw new PreviewStageError(stage, code, message, { cause: error })
+  }
+}
+
+async function fetchWithCheckpoint(tenantId: string, source: ImportSourceAdapter, provider: Parameters<ImportSourceAdapter['fetchResource']>[0], context: Parameters<ImportSourceAdapter['fetchResource']>[1], resourceKey: string, diagnostics?: SourceFetchDiagnostics) {
   if (source.key !== 'quickbooks') return source.fetchResource(provider, context, resourceKey)
   const db = createAdminClient()
-  const existing = await db.from('quickbooks_migration_checkpoints').select('*').eq('company_id',tenantId).eq('realm_id',context.realmId).eq('resource_key',resourceKey).maybeSingle()
-  if (existing.error) throw existing.error
+  const existing = await runStage('checkpoint_lookup', resourceKey, diagnostics, async () => {
+    const result = await db.from('quickbooks_migration_checkpoints').select('*').eq('company_id',tenantId).eq('realm_id',context.realmId).eq('resource_key',resourceKey).maybeSingle()
+    if (result.error) throw result.error
+    return result
+  })
   const checkpoint = existing.data
   const resumable=['running','failed'].includes(String(checkpoint?.status))
+  if (diagnostics?.preview) {
+    return runStage('quickbooks_request', resourceKey, diagnostics, () => source.fetchResource(provider, context, resourceKey, { companyId: tenantId }))
+  }
   if(!resumable){const cleared=await db.from('quickbooks_extraction_staging').delete().eq('company_id',tenantId).eq('realm_id',context.realmId).eq('resource_key',resourceKey);if(cleared.error)throw cleared.error}
   const write = async (progress: { startPosition:number; partitionStart?:string; partitionEnd?:string; fetched:number }) => {
     const result = await db.from('quickbooks_migration_checkpoints').upsert({
@@ -67,14 +95,28 @@ export async function fetchSourceResource(
   tenantId: string,
   sourceKey: string,
   resourceKey: string,
+  diagnostics?: SourceFetchDiagnostics,
 ): Promise<NormalizedImportResource> {
-  const source = getImportSource(sourceKey)
-  const runtime = createAccountingIntegrationRuntime()
+  const source = await runStage('adapter_initialization', resourceKey, diagnostics, () => getImportSource(sourceKey))
+  const runtime = await runStage('provider_lookup', resourceKey, diagnostics, () => createAccountingIntegrationRuntime())
   const providerSlug = sourceKey as Provider
-  const provider = runtime.providers.get(providerSlug)
-  return runtime.connections.executeForProvider(tenantId, providerSlug, (context) => (
-    fetchWithCheckpoint(tenantId, source, provider, context, resourceKey)
-  ))
+  const provider = await runStage('provider_lookup', resourceKey, diagnostics, () => runtime.providers.get(providerSlug))
+  diagnostics?.onStage?.('connection_lookup', 'started', resourceKey)
+  let connectionResolved = false
+  try {
+    return await runtime.connections.executeForProvider(tenantId, providerSlug, (context) => {
+      connectionResolved = true
+      diagnostics?.onStage?.('connection_lookup', 'completed', resourceKey)
+      return fetchWithCheckpoint(tenantId, source, provider, context, resourceKey, diagnostics)
+    })
+  } catch (error) {
+    if (error instanceof PreviewStageError) throw error
+    if (!connectionResolved) diagnostics?.onStage?.('connection_lookup', 'failed', resourceKey)
+    const record = error !== null && typeof error === 'object' ? error as Record<string, unknown> : {}
+    const message = error instanceof Error ? error.message : typeof record.message === 'string' ? record.message : 'QuickBooks connection lookup failed.'
+    const code = typeof record.code === 'string' ? record.code : 'CONNECTION_LOOKUP_FAILED'
+    throw new PreviewStageError('connection_lookup', code, message, { cause: error })
+  }
 }
 
 export async function fetchSourceResources(

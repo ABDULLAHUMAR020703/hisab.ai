@@ -78,21 +78,23 @@ CREATE INDEX vendor_credit_applications_credit_idx ON public.vendor_credit_appli
 CREATE INDEX vendor_credit_applications_bill_idx ON public.vendor_credit_applications(company_id,bill_id);
 
 CREATE OR REPLACE FUNCTION public.materialize_vendor_credit_application() RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
-DECLARE credit_id UUID;credit public.vendor_credits%ROWTYPE;bill public.bills%ROWTYPE;credit_count INT;already_applied NUMERIC(18,4);
+DECLARE credit_id UUID;credit public.vendor_credits%ROWTYPE;bill_id UUID;bill_vendor_id UUID;bill_currency TEXT;credit_count INT;already_applied NUMERIC(18,4);
 BEGIN
   IF NEW.credit_amount<=0 OR NEW.bill_id IS NULL THEN RETURN NEW; END IF;
   credit_count:=jsonb_array_length(COALESCE(NEW.local_credit_ids,'[]'::jsonb));
   credit_id:=(NEW.local_credit_ids->>0)::UUID;
   IF credit_count<>1 THEN RAISE EXCEPTION 'Vendor credit application must identify exactly one credit'; END IF;
   SELECT * INTO credit FROM public.vendor_credits WHERE company_id=NEW.company_id AND id=credit_id AND deleted_at IS NULL FOR UPDATE;
-  SELECT * INTO bill FROM public.bills WHERE company_id=NEW.company_id AND id=NEW.bill_id AND deleted_at IS NULL FOR UPDATE;
-  IF credit.id IS NULL OR bill.id IS NULL THEN RAISE EXCEPTION 'Vendor credit or target bill not found'; END IF;
-  IF credit.vendor_id<>bill.vendor_id THEN RAISE EXCEPTION 'Vendor credit and bill must belong to the same vendor'; END IF;
-  IF UPPER(credit.currency)<>UPPER(NEW.currency) OR UPPER(bill.currency)<>UPPER(NEW.currency) THEN RAISE EXCEPTION 'Vendor credit, bill, and application currency must match'; END IF;
+  SELECT target_bill.id,target_bill.vendor_id,company.currency INTO bill_id,bill_vendor_id,bill_currency
+  FROM public.bills target_bill JOIN public.companies company ON company.id=target_bill.company_id
+  WHERE target_bill.company_id=NEW.company_id AND target_bill.id=NEW.bill_id AND target_bill.deleted_at IS NULL FOR UPDATE OF target_bill;
+  IF credit.id IS NULL OR bill_id IS NULL THEN RAISE EXCEPTION 'Vendor credit or target bill not found'; END IF;
+  IF credit.vendor_id<>bill_vendor_id THEN RAISE EXCEPTION 'Vendor credit and bill must belong to the same vendor'; END IF;
+  IF UPPER(credit.currency)<>UPPER(NEW.currency) OR UPPER(bill_currency)<>UPPER(NEW.currency) THEN RAISE EXCEPTION 'Vendor credit, bill, and application currency must match'; END IF;
   SELECT COALESCE(SUM(amount),0) INTO already_applied FROM public.vendor_credit_applications WHERE company_id=NEW.company_id AND vendor_credit_id=credit.id;
   IF already_applied+NEW.credit_amount>credit.total+0.0001 THEN RAISE EXCEPTION 'Vendor credit is applied above its total'; END IF;
   INSERT INTO public.vendor_credit_applications(company_id,vendor_credit_id,bill_id,payment_id,payment_allocation_id,amount,currency,source_bill_payment_id,source_line_key,source_bill_id,source_vendor_credit_id)
-  VALUES(NEW.company_id,credit.id,bill.id,NEW.payment_id,NEW.id,NEW.credit_amount,NEW.currency,NEW.source_payment_id,NEW.source_line_key,NEW.source_target_id,NEW.source_credit_ids->>0);
+  VALUES(NEW.company_id,credit.id,bill_id,NEW.payment_id,NEW.id,NEW.credit_amount,NEW.currency,NEW.source_payment_id,NEW.source_line_key,NEW.source_target_id,NEW.source_credit_ids->>0);
   RETURN NEW;
 END;
 $$;
@@ -106,7 +108,7 @@ SELECT allocation.company_id,(allocation.local_credit_ids->>0)::UUID,allocation.
 FROM public.payment_allocations allocation WHERE allocation.credit_amount>0 AND allocation.bill_id IS NOT NULL
 ON CONFLICT(company_id,payment_allocation_id,vendor_credit_id) DO NOTHING;
 DO $$ BEGIN
-  IF EXISTS(SELECT 1 FROM public.vendor_credit_applications application JOIN public.vendor_credits credit ON credit.company_id=application.company_id AND credit.id=application.vendor_credit_id JOIN public.bills bill ON bill.company_id=application.company_id AND bill.id=application.bill_id WHERE credit.vendor_id<>bill.vendor_id OR UPPER(credit.currency)<>UPPER(application.currency) OR UPPER(bill.currency)<>UPPER(application.currency)) THEN RAISE EXCEPTION 'Existing Vendor Credit applications have invalid vendor or currency relationships'; END IF;
+  IF EXISTS(SELECT 1 FROM public.vendor_credit_applications application JOIN public.vendor_credits credit ON credit.company_id=application.company_id AND credit.id=application.vendor_credit_id JOIN public.bills bill ON bill.company_id=application.company_id AND bill.id=application.bill_id JOIN public.companies company ON company.id=bill.company_id WHERE credit.vendor_id<>bill.vendor_id OR UPPER(credit.currency)<>UPPER(application.currency) OR UPPER(company.currency)<>UPPER(application.currency)) THEN RAISE EXCEPTION 'Existing Vendor Credit applications have invalid vendor or currency relationships'; END IF;
   IF EXISTS(SELECT 1 FROM public.vendor_credit_applications application JOIN public.vendor_credits credit ON credit.company_id=application.company_id AND credit.id=application.vendor_credit_id GROUP BY credit.id,credit.total HAVING SUM(application.amount)>credit.total+0.0001) THEN RAISE EXCEPTION 'Existing Vendor Credits are over-applied'; END IF;
 END $$;
 

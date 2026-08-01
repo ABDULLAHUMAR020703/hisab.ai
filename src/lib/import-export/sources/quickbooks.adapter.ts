@@ -86,6 +86,20 @@ const PARTITIONED_RESOURCES = new Set([
   'credit-memos','bill-payments','deposits','transfers','inventory-adjustments',
 ])
 
+const SPECIAL_PREVIEW_RESOURCES = new Set([
+  'accounts', 'customers', 'vendors', 'items', 'tax-codes', 'payment-terms',
+  'invoices', 'bills', 'payments', 'expenses', 'journal-entries', 'sales-receipts',
+  'purchase-orders', 'vendor-credits', 'estimates', 'customer-payments', 'vendor-payments',
+  'preferences',
+])
+
+export function getQuickBooksPreviewSupport(resourceKey: string): { supported: boolean; message?: string } {
+  const registered = RESOURCES.some((resource) => resource.key === resourceKey)
+  if (!registered) return { supported: false, message: `QuickBooks resource ${resourceKey} has no adapter implementation.` }
+  if (SPECIAL_PREVIEW_RESOURCES.has(resourceKey) || QUICKBOOKS_ENTITY_BY_RESOURCE[resourceKey]) return { supported: true }
+  return { supported: false, message: `QuickBooks resource ${resourceKey} has no provider mapping or preview implementation.` }
+}
+
 export class QuickBooksImportAdapter implements ImportSourceAdapter {
   readonly key = 'quickbooks'
   readonly label = 'QuickBooks Online'

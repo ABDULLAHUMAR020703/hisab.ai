@@ -23,7 +23,8 @@ interface ImportSource {
   country?: string | null
   connectedAt?: string | null
 }
-interface PreviewResource extends SourceResource {
+interface PreviewSuccess extends SourceResource {
+  status: 'success'
   count: number
   headers: string[]
   rows: Record<string, string>[]
@@ -32,6 +33,15 @@ interface PreviewResource extends SourceResource {
   validation: ValidationResult
   duplicates: DuplicateMatch[]
 }
+interface PreviewFailure extends SourceResource {
+  status: 'error' | 'unsupported'
+  stage: string
+  module: string | null
+  errorCode: string
+  message: string
+  correlationId: string
+}
+type PreviewResource = PreviewSuccess | PreviewFailure
 interface ImportTotals { importedCount: number; updatedCount: number; skippedCount: number; failedCount: number }
 interface ImportResult extends ImportTotals { durationMs?: number }
 interface CompanyAnalysis {
@@ -150,7 +160,7 @@ export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }:
     const startedAt = Date.now()
     const moduleReports: MigrationReport['modules'] = []
     try {
-      for (const resource of previews) {
+      for (const resource of previews.filter(isPreviewSuccess)) {
         const response = await fetch(`/api/import-export/${resource.moduleKey}/import`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -193,8 +203,9 @@ export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }:
   }
 
   const stageIndex = STAGES.findIndex((stage) => stage.key === step)
-  const duplicateCount = previews.reduce((sum, item) => sum + item.duplicates.length, 0)
-  const validCount = previews.reduce((sum, item) => sum + item.validation.validRowNumbers.length, 0)
+  const successfulPreviews = previews.filter(isPreviewSuccess)
+  const duplicateCount = successfulPreviews.reduce((sum, item) => sum + item.duplicates.length, 0)
+  const validCount = successfulPreviews.reduce((sum, item) => sum + item.validation.validRowNumbers.length, 0)
 
   const footer = step === 'report' ? (
     <Button onClick={close}>Close</Button>
@@ -235,7 +246,7 @@ export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }:
 
         {step === 'modules' && source && <div className="space-y-4"><div><h3 className="font-semibold text-slate-900">Select modules</h3><p className="mt-1 text-sm text-slate-500">Choose the records to fetch, validate, and migrate from {source.companyName ?? source.label}.</p></div><div className="grid gap-3 md:grid-cols-2">{source.resources.map((resource) => <label key={resource.key} className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 p-4 hover:bg-slate-50"><input type="checkbox" checked={selected.includes(resource.key)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, resource.key] : current.filter((key) => key !== resource.key))} className="h-4 w-4 rounded border-slate-300 text-indigo-600" /><Database size={18} className="text-indigo-500" /><span className="text-sm font-medium text-slate-700">{resource.label}</span></label>)}</div></div>}
 
-        {step === 'validation' && <div className="space-y-5"><div className="flex items-start gap-3 rounded-xl border border-emerald-100 bg-emerald-50 p-4"><FileCheck2 size={20} className="mt-0.5 text-emerald-600" /><div><h3 className="font-semibold text-emerald-900">Validation complete</h3><p className="mt-1 text-sm text-emerald-800">Review counts, invalid rows, and duplicates before writing anything.</p></div></div>{previews.map((resource) => <section key={resource.key} className="rounded-xl border border-slate-200 p-4"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-slate-800">{resource.label}</h3><div className="flex gap-2 text-xs"><span className="rounded-full bg-slate-100 px-2.5 py-1">{resource.count} records</span><span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700">{resource.duplicates.length} duplicates</span><span className="rounded-full bg-red-50 px-2.5 py-1 text-red-700">{resource.validation.errorCount} errors</span></div></div><div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="bg-slate-50">{resource.headers.slice(0, 6).map((header) => <th key={header} className="px-2 py-2 text-left">{header}</th>)}</tr></thead><tbody>{resource.sampleRows.slice(0, 5).map((row, index) => <tr key={index} className="border-t">{resource.headers.slice(0, 6).map((header) => <td key={header} className="max-w-48 truncate px-2 py-2">{row[header] || '—'}</td>)}</tr>)}</tbody></table></div></section>)}</div>}
+        {step === 'validation' && <div className="space-y-5"><div className="flex items-start gap-3 rounded-xl border border-emerald-100 bg-emerald-50 p-4"><FileCheck2 size={20} className="mt-0.5 text-emerald-600" /><div><h3 className="font-semibold text-emerald-900">Validation complete</h3><p className="mt-1 text-sm text-emerald-800">Review counts, invalid rows, duplicates, and module-specific failures before writing anything.</p></div></div>{previews.map(renderPreviewResource)}</div>}
 
         {step === 'import' && <div className="space-y-5">{loading ? <div className="py-12 text-center"><div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" /><p className="text-sm text-slate-600">Migrating validated records…</p></div> : <><div className="flex items-start gap-3 rounded-xl border border-indigo-100 bg-indigo-50 p-4"><ShieldCheck size={20} className="mt-0.5 text-indigo-600" /><div><h3 className="font-semibold text-indigo-900">Ready to migrate</h3><p className="mt-1 text-sm text-indigo-800">{validCount} validated rows will be processed. Select how existing records should be handled.</p></div></div><DuplicateStep duplicateCount={duplicateCount} strategy={strategy} onStrategyChange={setStrategy} /></>}</div>}
 
@@ -243,4 +254,20 @@ export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }:
       </div>
     </Modal>
   )
+}
+
+function isPreviewSuccess(resource: PreviewResource): resource is PreviewSuccess {
+  return resource.status === 'success'
+}
+
+function renderPreviewResource(resource: PreviewResource) {
+  if (resource.status !== 'success') {
+    const tone = resource.status === 'unsupported' ? 'border-amber-200 bg-amber-50' : 'border-red-200 bg-red-50'
+    return <section key={resource.key} className={`rounded-xl border p-4 ${tone}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-slate-800">{resource.label}</h3><span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-700">{resource.status}</span></div>
+      <p className="mt-2 text-sm text-slate-700">{resource.message}</p>
+      <p className="mt-2 text-xs text-slate-500">Stage: {resource.stage} · Code: {resource.errorCode} · Correlation: {resource.correlationId}</p>
+    </section>
+  }
+  return <section key={resource.key} className="rounded-xl border border-slate-200 p-4"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-slate-800">{resource.label}</h3><div className="flex gap-2 text-xs"><span className="rounded-full bg-slate-100 px-2.5 py-1">{resource.count} records</span><span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700">{resource.duplicates.length} duplicates</span><span className="rounded-full bg-red-50 px-2.5 py-1 text-red-700">{resource.validation.errorCount} errors</span></div></div><div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr className="bg-slate-50">{resource.headers.slice(0, 6).map((header) => <th key={header} className="px-2 py-2 text-left">{header}</th>)}</tr></thead><tbody>{resource.sampleRows.slice(0, 5).map((row, index) => <tr key={index} className="border-t">{resource.headers.slice(0, 6).map((header) => <td key={header} className="max-w-48 truncate px-2 py-2">{row[header] || '—'}</td>)}</tr>)}</tbody></table></div></section>
 }

@@ -2,20 +2,52 @@
 ALTER TABLE public.payments
   ADD COLUMN IF NOT EXISTS deposit_account_id UUID,
   ADD COLUMN IF NOT EXISTS deposited_amount NUMERIC(18,4) NOT NULL DEFAULT 0,
-  ADD COLUMN IF NOT EXISTS deposit_status TEXT NOT NULL DEFAULT 'UNDEPOSITED',
-  ADD CONSTRAINT payments_company_deposit_account_fkey FOREIGN KEY (company_id,deposit_account_id)
-    REFERENCES public.chart_of_accounts(company_id,id) ON DELETE SET NULL,
-  ADD CONSTRAINT payments_deposited_amount_chk CHECK (deposited_amount>=0 AND deposited_amount<=amount),
-  ADD CONSTRAINT payments_deposit_status_chk CHECK (deposit_status IN ('UNDEPOSITED','PARTIAL','DEPOSITED'));
+  ADD COLUMN IF NOT EXISTS deposit_status TEXT NOT NULL DEFAULT 'UNDEPOSITED';
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.payments'::regclass AND conname='payments_deposit_account_fkey') THEN
+    ALTER TABLE public.payments ADD CONSTRAINT payments_deposit_account_fkey FOREIGN KEY (deposit_account_id)
+      REFERENCES public.chart_of_accounts(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.payments'::regclass AND conname='payments_deposited_amount_chk') THEN
+    ALTER TABLE public.payments ADD CONSTRAINT payments_deposited_amount_chk CHECK (deposited_amount>=0 AND deposited_amount<=amount);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.payments'::regclass AND conname='payments_deposit_status_chk') THEN
+    ALTER TABLE public.payments ADD CONSTRAINT payments_deposit_status_chk CHECK (deposit_status IN ('UNDEPOSITED','PARTIAL','DEPOSITED'));
+  END IF;
+END $$;
 
 ALTER TABLE public.bank_transactions
   ADD COLUMN IF NOT EXISTS external_document_no TEXT,
   ADD COLUMN IF NOT EXISTS external_account_source_id TEXT,
   ADD COLUMN IF NOT EXISTS source_payload_hash TEXT,
   ADD COLUMN IF NOT EXISTS reconciled_at TIMESTAMPTZ;
-ALTER TABLE public.bank_transactions ADD CONSTRAINT bank_transactions_company_id_id_key UNIQUE(company_id,id);
-ALTER TABLE public.bank_reconciliations ADD CONSTRAINT bank_reconciliations_company_id_id_key UNIQUE(company_id,id);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.bank_transactions'::regclass AND conname='bank_transactions_company_id_id_key') THEN
+    ALTER TABLE public.bank_transactions ADD CONSTRAINT bank_transactions_company_id_id_key UNIQUE(company_id,id);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='public.bank_reconciliations'::regclass AND conname='bank_reconciliations_company_id_id_key') THEN
+    ALTER TABLE public.bank_reconciliations ADD CONSTRAINT bank_reconciliations_company_id_id_key UNIQUE(company_id,id);
+  END IF;
+END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS bank_accounts_active_ledger_account_uniq ON public.bank_accounts(company_id,account_id) WHERE account_id IS NOT NULL AND deleted_at IS NULL;
+
+-- source_id stores an external provider identifier. Migration 050 introduced
+-- this column as UUID, so convert those guaranteed-valid UUID values to their
+-- lossless text representation before restoring the original QuickBooks IDs.
+DO $$
+DECLARE source_id_type TEXT;
+BEGIN
+  SELECT schema_column.udt_name INTO source_id_type
+  FROM information_schema.columns schema_column
+  WHERE schema_column.table_schema='public' AND schema_column.table_name='bank_transactions' AND schema_column.column_name='source_id';
+
+  IF source_id_type='uuid' THEN
+    ALTER TABLE public.bank_transactions ALTER COLUMN source_id TYPE TEXT USING source_id::TEXT;
+  ELSIF source_id_type IS DISTINCT FROM 'text' THEN
+    RAISE EXCEPTION 'Unsupported bank_transactions.source_id type: %',COALESCE(source_id_type,'missing');
+  END IF;
+END $$;
 
 -- Older deposit materialization used the archive UUID as source_id. Restore the
 -- immutable QuickBooks ID before enforcing idempotency so upgrades cannot create
@@ -29,7 +61,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS bank_transactions_external_source_uniq
   ON public.bank_transactions(company_id,source_type,source_id)
   WHERE source_type IS NOT NULL AND source_id IS NOT NULL;
 
-CREATE TABLE public.deposit_allocations (
+CREATE TABLE IF NOT EXISTS public.deposit_allocations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
   bank_transaction_id UUID NOT NULL,
@@ -51,13 +83,13 @@ CREATE TABLE public.deposit_allocations (
   CONSTRAINT deposit_allocations_rate_chk CHECK (exchange_rate IS NULL OR exchange_rate>0),
   CONSTRAINT deposit_allocations_company_transaction_fkey FOREIGN KEY(company_id,bank_transaction_id) REFERENCES public.bank_transactions(company_id,id) ON DELETE CASCADE,
   CONSTRAINT deposit_allocations_company_payment_fkey FOREIGN KEY(company_id,payment_id) REFERENCES public.payments(company_id,id) ON DELETE RESTRICT,
-  CONSTRAINT deposit_allocations_company_account_fkey FOREIGN KEY(company_id,account_id) REFERENCES public.chart_of_accounts(company_id,id) ON DELETE RESTRICT,
+  CONSTRAINT deposit_allocations_account_fkey FOREIGN KEY(account_id) REFERENCES public.chart_of_accounts(id) ON DELETE RESTRICT,
   UNIQUE(company_id,bank_transaction_id,source_line_key)
 );
-CREATE INDEX deposit_allocations_payment_idx ON public.deposit_allocations(company_id,payment_id) WHERE payment_id IS NOT NULL;
-CREATE INDEX deposit_allocations_source_idx ON public.deposit_allocations(company_id,source_deposit_id,source_transaction_type,source_transaction_id);
+CREATE INDEX IF NOT EXISTS deposit_allocations_payment_idx ON public.deposit_allocations(company_id,payment_id) WHERE payment_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS deposit_allocations_source_idx ON public.deposit_allocations(company_id,source_deposit_id,source_transaction_type,source_transaction_id);
 
-CREATE TABLE public.deposit_audit_log (
+CREATE TABLE IF NOT EXISTS public.deposit_audit_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
   bank_transaction_id UUID,
@@ -68,9 +100,9 @@ CREATE TABLE public.deposit_audit_log (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT deposit_audit_company_transaction_fkey FOREIGN KEY(company_id,bank_transaction_id) REFERENCES public.bank_transactions(company_id,id) ON DELETE SET NULL
 );
-CREATE INDEX deposit_audit_log_source_idx ON public.deposit_audit_log(company_id,source_deposit_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS deposit_audit_log_source_idx ON public.deposit_audit_log(company_id,source_deposit_id,created_at DESC);
 
-CREATE TABLE public.bank_reconciliation_items (
+CREATE TABLE IF NOT EXISTS public.bank_reconciliation_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   company_id UUID NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
   reconciliation_id UUID NOT NULL,
@@ -82,17 +114,31 @@ CREATE TABLE public.bank_reconciliation_items (
   UNIQUE(company_id,bank_transaction_id),
   UNIQUE(company_id,reconciliation_id,bank_transaction_id)
 );
-CREATE INDEX bank_reconciliation_items_reconciliation_idx ON public.bank_reconciliation_items(company_id,reconciliation_id);
+CREATE INDEX IF NOT EXISTS bank_reconciliation_items_reconciliation_idx ON public.bank_reconciliation_items(company_id,reconciliation_id);
 
 ALTER TABLE public.deposit_allocations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.deposit_audit_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bank_reconciliation_items ENABLE ROW LEVEL SECURITY;
-CREATE POLICY deposit_allocations_tenant ON public.deposit_allocations FOR ALL TO authenticated USING (company_id IN (SELECT public.user_company_ids())) WITH CHECK (company_id IN (SELECT public.user_company_ids()));
-CREATE POLICY deposit_allocations_service ON public.deposit_allocations FOR ALL TO service_role USING (true) WITH CHECK (true);
-CREATE POLICY deposit_audit_log_tenant ON public.deposit_audit_log FOR SELECT TO authenticated USING (company_id IN (SELECT public.user_company_ids()));
-CREATE POLICY deposit_audit_log_service ON public.deposit_audit_log FOR ALL TO service_role USING (true) WITH CHECK (true);
-CREATE POLICY bank_reconciliation_items_tenant ON public.bank_reconciliation_items FOR ALL TO authenticated USING (company_id IN (SELECT public.user_company_ids())) WITH CHECK (company_id IN (SELECT public.user_company_ids()));
-CREATE POLICY bank_reconciliation_items_service ON public.bank_reconciliation_items FOR ALL TO service_role USING (true) WITH CHECK (true);
+DO $migration$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='deposit_allocations' AND policyname='deposit_allocations_tenant') THEN
+    EXECUTE $policy$CREATE POLICY deposit_allocations_tenant ON public.deposit_allocations FOR ALL TO authenticated USING (company_id IN (SELECT public.user_company_ids())) WITH CHECK (company_id IN (SELECT public.user_company_ids()))$policy$;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='deposit_allocations' AND policyname='deposit_allocations_service') THEN
+    EXECUTE $policy$CREATE POLICY deposit_allocations_service ON public.deposit_allocations FOR ALL TO service_role USING (true) WITH CHECK (true)$policy$;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='deposit_audit_log' AND policyname='deposit_audit_log_tenant') THEN
+    EXECUTE $policy$CREATE POLICY deposit_audit_log_tenant ON public.deposit_audit_log FOR SELECT TO authenticated USING (company_id IN (SELECT public.user_company_ids()))$policy$;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='deposit_audit_log' AND policyname='deposit_audit_log_service') THEN
+    EXECUTE $policy$CREATE POLICY deposit_audit_log_service ON public.deposit_audit_log FOR ALL TO service_role USING (true) WITH CHECK (true)$policy$;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='bank_reconciliation_items' AND policyname='bank_reconciliation_items_tenant') THEN
+    EXECUTE $policy$CREATE POLICY bank_reconciliation_items_tenant ON public.bank_reconciliation_items FOR ALL TO authenticated USING (company_id IN (SELECT public.user_company_ids())) WITH CHECK (company_id IN (SELECT public.user_company_ids()))$policy$;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='bank_reconciliation_items' AND policyname='bank_reconciliation_items_service') THEN
+    EXECUTE $policy$CREATE POLICY bank_reconciliation_items_service ON public.bank_reconciliation_items FOR ALL TO service_role USING (true) WITH CHECK (true)$policy$;
+  END IF;
+END $migration$;
 
 CREATE OR REPLACE FUNCTION public.replace_deposit_allocations(p_company_id UUID,p_bank_transaction_id UUID,p_allocations JSONB)
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
