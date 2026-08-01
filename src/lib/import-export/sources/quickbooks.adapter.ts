@@ -120,6 +120,35 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
         })
       : fallback()
 
+    if (options?.preview) {
+      const sampleSize = Math.min(25, Math.max(1, options.preview.sampleSize))
+      if (resourceKey === 'preferences') {
+        const sourceRows = provider.getPreferences ? await provider.getPreferences(context) : []
+        const rows = this.normalizeRecords(resourceKey, sourceRows.slice(0, sampleSize), context.realmId)
+        return { ...resource, rows, totalCount: sourceRows.length, countAccuracy: 'exact', sampled: true }
+      }
+      const entity = QUICKBOOKS_ENTITY_BY_RESOURCE[resourceKey]
+      if (!entity || !provider.getEntityRecords) return { ...resource, rows: [], totalCount: 0, countAccuracy: 'exact', sampled: true }
+      const where = resourceKey === 'projects' ? 'Job = true'
+        : resourceKey === 'fixed-assets' ? "Type = 'FixedAsset'"
+          : undefined
+      const cacheKey = `${entity}:${where ?? 'all'}:${sampleSize}:inactive`
+      let pending = options.preview.cache?.get(cacheKey)
+      if (!pending) {
+        pending = Promise.all([
+          provider.getEntityCount ? provider.getEntityCount(context, entity, { where }) : Promise.resolve<number | null>(null),
+          provider.getEntityRecords(context, entity, { includeInactive:true, pageSize:sampleSize, maxRecords:sampleSize, where }),
+        ]).then(([count, rows]) => ({ count: count ?? rows.length, rows }))
+        options.preview.cache?.set(cacheKey, pending)
+      }
+      const preview = await pending
+      let sourceRows = preview.rows
+      if (resourceKey === 'projects') sourceRows = sourceRows.filter(row => Boolean(object(row).Job) || Boolean(object(row).ParentRef))
+      if (resourceKey === 'fixed-assets') sourceRows = sourceRows.filter(row => value(object(row).Type).toLowerCase() === 'fixedasset')
+      const rows = this.normalizeRecords(resourceKey, sourceRows.slice(0, sampleSize), context.realmId)
+      return { ...resource, rows, totalCount: preview.count, countAccuracy: 'exact', sampled: true }
+    }
+
     let sourceRows: unknown[]
     switch (resourceKey) {
       case 'accounts': sourceRows = await provider.getAccounts(context); break

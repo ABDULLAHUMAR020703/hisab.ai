@@ -12,6 +12,7 @@ import type {
 import { Provider, type CompanyInfo, type ProviderTokenSet } from '../../contracts/types'
 import { ProviderAuthenticationException, ProviderRequestException } from '../../utils/exceptions'
 import { quickBooksEndpoints, type QuickBooksConfig } from './quickbooks-config'
+import { diagnosticFetch } from '@/lib/ops/external-request-diagnostics'
 
 type JsonRecord = Record<string, unknown>
 const QUERY_PAGE_SIZE = 1000
@@ -41,7 +42,7 @@ export class QuickBooksIntegrationService implements AccountingProvider {
 
   constructor(
     private readonly config: QuickBooksConfig,
-    private readonly fetchImpl: typeof fetch = globalThis.fetch,
+    private readonly fetchImpl: typeof fetch = diagnosticFetch,
     private readonly now: () => Date = () => new Date(),
   ) {
     this.endpoints = quickBooksEndpoints(config.environment)
@@ -152,10 +153,10 @@ export class QuickBooksIntegrationService implements AccountingProvider {
     return this.queryAll(context, entity, options)
   }
 
-  async getEntityCount(context:ProviderAccessContext,entity:string):Promise<number>{
+  async getEntityCount(context:ProviderAccessContext,entity:string,options:Pick<ProviderEntityFetchOptions,'where'>={}):Promise<number>{
     if(!/^[A-Za-z][A-Za-z0-9]*$/.test(entity))throw new ProviderRequestException('Invalid QuickBooks entity name.')
     const url=new URL(`${this.endpoints.api}/v3/company/${encodeURIComponent(context.realmId)}/query`)
-    url.searchParams.set('query',`SELECT COUNT(*) FROM ${entity}`)
+    url.searchParams.set('query',`SELECT COUNT(*) FROM ${entity}${options.where ? ` WHERE ${options.where}` : ''}`)
     url.searchParams.set('minorversion',MINOR_VERSION)
     const body=await this.authorizedJson(url.toString(),context.accessToken),response=record(body.QueryResponse)
     return Number(response.totalCount??0)
@@ -221,7 +222,7 @@ export class QuickBooksIntegrationService implements AccountingProvider {
 
   private async queryAll(context: ProviderAccessContext, entity: string, options: ProviderEntityFetchOptions = {}): Promise<unknown[]> {
     if (options.partitioned && TRANSACTION_DATE_ENTITIES.has(entity)) return this.queryPartitioned(context, entity, options)
-    return this.queryPages(context, entity, options)
+    return this.queryPages(context, entity, options, options.where)
   }
 
   private async queryPartitioned(context: ProviderAccessContext, entity: string, options: ProviderEntityFetchOptions): Promise<unknown[]> {
@@ -240,11 +241,13 @@ export class QuickBooksIntegrationService implements AccountingProvider {
   }
 
   private async queryPages(context: ProviderAccessContext, entity: string, options: ProviderEntityFetchOptions, where?: string, offset = 0, partitionStart?: Date, partitionEnd?: Date): Promise<unknown[]> {
-    const pageSize = Math.min(QUERY_PAGE_SIZE, Math.max(1, options.pageSize ?? QUERY_PAGE_SIZE))
+    const configuredPageSize = Math.min(QUERY_PAGE_SIZE, Math.max(1, options.pageSize ?? QUERY_PAGE_SIZE))
+    const maxRecords = options.maxRecords === undefined ? Number.POSITIVE_INFINITY : Math.max(0, options.maxRecords)
     const rows: unknown[] = []
     const inactive = options.includeInactive && INACTIVE_ENTITIES.has(entity) ? 'Active IN (true, false)' : ''
     const predicate = [where, inactive].filter(Boolean).join(' AND ')
-    for (let start = options.startPosition ?? 1; ; start += pageSize) {
+    for (let start = options.startPosition ?? 1; rows.length < maxRecords;) {
+      const pageSize = Math.min(configuredPageSize, maxRecords - rows.length)
       const query = `SELECT * FROM ${entity}${predicate ? ` WHERE ${predicate}` : ''} STARTPOSITION ${start} MAXRESULTS ${pageSize}`
       const url = new URL(`${this.endpoints.api}/v3/company/${encodeURIComponent(context.realmId)}/query`)
       url.searchParams.set('query', query)
@@ -258,7 +261,8 @@ export class QuickBooksIntegrationService implements AccountingProvider {
       const checkpoint={ startPosition: start + page.length, partitionStart: partitionStart?.toISOString(), partitionEnd: partitionEnd?.toISOString(), extractedCount: offset + rows.length }
       if(options.onPage)await options.onPage(page,checkpoint)
       if (options.onCheckpoint) await options.onCheckpoint(checkpoint)
-      if (page.length < pageSize) break
+      if (page.length < pageSize || rows.length >= maxRecords) break
+      start += page.length
     }
     return rows
   }

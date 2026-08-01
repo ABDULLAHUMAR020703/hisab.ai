@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import type { AccountingProvider } from '../../src/integrations/accounting/contracts/accounting-provider'
+import { QuickBooksIntegrationService } from '../../src/integrations/accounting/providers/quickbooks/quickbooks-integration.service'
 import { MODULE_CATALOG } from '../../src/lib/import-export/registry/module-catalog'
 import { getQuickBooksPreviewSupport, QuickBooksImportAdapter } from '../../src/lib/import-export/sources/quickbooks.adapter'
-import { generateIsolatedPreviews, PreviewStageError } from '../../src/lib/import-export/sources/preview-service'
+import { generateIsolatedPreviews, PreviewProfiler, PreviewStageError } from '../../src/lib/import-export/sources/preview-service'
+import type { SourcePreviewBatch } from '../../src/lib/import-export/sources/types'
 
 const descriptors = [
   { key: 'accounts', label: 'Chart of Accounts', moduleKey: 'accounts' },
@@ -86,6 +89,117 @@ test('a mixed preview returns successful, failed, and unsupported module results
   assert.deepEqual(result.map((item) => item.status), ['success', 'error', 'unsupported'])
 })
 
+test('independent module previews use bounded concurrency and retain request order', async () => {
+  const resources = Array.from({ length: 7 }, (_, index) => ({ key: `module-${index}`, label: `Module ${index}`, moduleKey: `module-${index}` }))
+  let active = 0
+  let maximumActive = 0
+  const result = await generateIsolatedPreviews({
+    ...base,
+    resources,
+    requested: resources.map((resource) => resource.key),
+    concurrency: 3,
+    generate: async (resource) => {
+      active += 1
+      maximumActive = Math.max(maximumActive, active)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      active -= 1
+      return { ...resource, count: 1 }
+    },
+  })
+  assert.equal(maximumActive, 3)
+  assert.deepEqual(result.map((item) => item.key), resources.map((resource) => resource.key))
+})
+
+test('QuickBooks preview fetches only a count and bounded sample and shares duplicate entity requests', async () => {
+  const calls = { count: 0, records: 0 }
+  const provider = {
+    getEntityCount: async (_context: unknown, entity: string) => {
+      calls.count += 1
+      assert.equal(entity, 'Payment')
+      return 250_000
+    },
+    getEntityRecords: async (_context: unknown, entity: string, options: { pageSize?: number; maxRecords?: number }) => {
+      calls.records += 1
+      assert.equal(entity, 'Payment')
+      assert.equal(options.pageSize, 10)
+      assert.equal(options.maxRecords, 10)
+      return Array.from({ length: 10 }, (_, index) => ({ Id: String(index + 1), TotalAmt: 10 }))
+    },
+  } as unknown as AccountingProvider
+  const adapter = new QuickBooksImportAdapter()
+  const cache = new Map<string, Promise<SourcePreviewBatch>>()
+  const context = { accessToken: 'token', realmId: 'realm' }
+  const [payments, customerPayments] = await Promise.all([
+    adapter.fetchResource(provider, context, 'payments', { preview: { sampleSize: 10, cache } }),
+    adapter.fetchResource(provider, context, 'customer-payments', { preview: { sampleSize: 10, cache } }),
+  ])
+  assert.deepEqual(calls, { count: 1, records: 1 })
+  assert.equal(payments.totalCount, 250_000)
+  assert.equal(customerPayments.totalCount, 250_000)
+  assert.equal(payments.rows.length, 10)
+  assert.equal(payments.sampled, true)
+})
+
+test('QuickBooks provider stops pagination at the preview record limit', async () => {
+  const requestedQueries: string[] = []
+  const provider = new QuickBooksIntegrationService({
+    clientId: 'client',
+    clientSecret: 'secret',
+    redirectUri: 'https://example.test/callback',
+    environment: 'sandbox',
+  }, async (input) => {
+    const url = new URL(String(input))
+    requestedQueries.push(url.searchParams.get('query') ?? '')
+    return new Response(JSON.stringify({
+      QueryResponse: { Invoice: Array.from({ length: 10 }, (_, index) => ({ Id: String(index + 1) })) },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  })
+  const rows = await provider.getEntityRecords({ accessToken: 'token', realmId: '123' }, 'Invoice', {
+    pageSize: 10,
+    maxRecords: 10,
+  })
+  assert.equal(rows.length, 10)
+  assert.equal(requestedQueries.length, 1)
+  assert.match(requestedQueries[0], /MAXRESULTS 10/)
+})
+
+test('attachment preview returns metadata without downloading file content', async () => {
+  let downloads = 0
+  const provider = {
+    getEntityCount: async () => 1,
+    getEntityRecords: async () => [{ Id: 'attachment-1', FileName: 'receipt.pdf' }],
+    downloadAttachment: async () => {
+      downloads += 1
+      throw new Error('Preview must not download attachments.')
+    },
+  } as unknown as AccountingProvider
+  const resource = await new QuickBooksImportAdapter().fetchResource(
+    provider,
+    { accessToken: 'token', realmId: 'realm' },
+    'attachments',
+    { companyId: 'company', preview: { sampleSize: 10, cache: new Map() } },
+  )
+  assert.equal(resource.rows.length, 1)
+  assert.equal(downloads, 0)
+})
+
+test('preview profiler reports API/query counts, repeats, per-module timing, and N+1 candidates', () => {
+  const profiler = new PreviewProfiler(3, 10)
+  profiler.stage('preview_generation', 'started', 'customers')
+  profiler.request({ kind: 'quickbooks', module: 'customers', method: 'GET', endpoint: 'quickbooks.api/query', signature: 'qbo-1', durationMs: 25, status: 200 })
+  for (let index = 0; index < 3; index += 1) {
+    profiler.request({ kind: 'supabase', module: 'customers', method: 'GET', endpoint: 'db/rest', signature: 'db-1', durationMs: 2, status: 200 })
+  }
+  profiler.result('customers', 10, 100)
+  profiler.stage('preview_generation', 'completed', 'customers')
+  const report = profiler.report()
+  assert.equal(report.quickBooksApiCalls, 1)
+  assert.equal(report.supabaseQueries, 3)
+  assert.equal(report.modules[0].rowsFetched, 10)
+  assert.equal(report.repeatedRequests[0].count, 3)
+  assert.deepEqual(report.nPlusOneCandidates, [{ module: 'customers', supabaseQueries: 3 }])
+})
+
 test('every Migration Wizard QuickBooks module has registry, adapter, provider, and preview mappings', () => {
   const catalog = new Set(MODULE_CATALOG.map((module) => module.key))
   const adapter = new QuickBooksImportAdapter()
@@ -99,11 +213,13 @@ test('every Migration Wizard QuickBooks module has registry, adapter, provider, 
   assert.deepEqual(missing, [])
 })
 
-test('preview reads checkpoints but bypasses staging mutation before the Intuit request', () => {
+test('preview session bypasses checkpoints and staging and resolves the connection once', () => {
   const source = readFileSync('src/lib/import-export/sources/source-registry.ts', 'utf8')
-  const previewBranch = source.indexOf('if (diagnostics?.preview)')
-  const stagingDelete = source.indexOf("from('quickbooks_extraction_staging').delete()")
-  assert.ok(previewBranch > source.indexOf("from('quickbooks_migration_checkpoints')"))
-  assert.ok(previewBranch < stagingDelete)
-  assert.match(source.slice(previewBranch, stagingDelete), /quickbooks_request/)
+  const start = source.indexOf('export async function withSourcePreviewSession')
+  const end = source.indexOf('export async function fetchSourceResource', start)
+  const previewSession = source.slice(start, end)
+  assert.doesNotMatch(previewSession, /quickbooks_migration_checkpoints/)
+  assert.doesNotMatch(previewSession, /quickbooks_extraction_staging/)
+  assert.equal((previewSession.match(/executeForProvider/g) ?? []).length, 1)
+  assert.match(previewSession, /preview: \{ sampleSize, cache \}/)
 })

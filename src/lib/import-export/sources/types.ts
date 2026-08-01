@@ -8,7 +8,12 @@ export interface ImportSourceResource {
 
 export interface NormalizedImportResource extends ImportSourceResource {
   rows: Record<string, string>[]
+  totalCount?: number
+  countAccuracy?: 'exact' | 'upper-bound'
+  sampled?: boolean
 }
+
+export interface SourcePreviewBatch { count: number; rows: unknown[] }
 
 export interface ImportSourceFetchOptions {
   companyId?: string
@@ -17,6 +22,10 @@ export interface ImportSourceFetchOptions {
   partitionEnd?: string
   onCheckpoint?: (checkpoint: { startPosition: number; partitionStart?: string; partitionEnd?: string; fetched: number }) => Promise<void> | void
   onBatch?: (rows:Record<string,string>[])=>Promise<void>|void
+  preview?: {
+    sampleSize: number
+    cache?: Map<string, Promise<SourcePreviewBatch>>
+  }
 }
 
 export interface ImportSourceAdapter {

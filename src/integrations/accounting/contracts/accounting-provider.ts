@@ -33,6 +33,10 @@ export interface ProviderEntityFetchOptions {
   partitionStart?: Date
   partitionEnd?: Date
   pageSize?: number
+  /** Stop after this many records. Used by previews to prevent full pagination. */
+  maxRecords?: number
+  /** Provider-owned predicate used for bounded entity variants such as projects. */
+  where?: string
   startPosition?: number
   onCheckpoint?: (checkpoint: { startPosition: number; partitionStart?: string; partitionEnd?: string; extractedCount: number }) => Promise<void>
   onPage?: (rows:unknown[],checkpoint:{startPosition:number;partitionStart?:string;partitionEnd?:string;extractedCount:number})=>Promise<void>
@@ -77,7 +81,7 @@ export interface AccountingProvider {
   getTaxRates?(context: ProviderAccessContext): Promise<unknown[]>
   getPaymentTerms(context: ProviderAccessContext): Promise<unknown[]>
   getEntityRecords?(context: ProviderAccessContext, entity: string, options?: ProviderEntityFetchOptions): Promise<unknown[]>
-  getEntityCount?(context: ProviderAccessContext, entity: string): Promise<number>
+  getEntityCount?(context: ProviderAccessContext, entity: string, options?: Pick<ProviderEntityFetchOptions, 'where'>): Promise<number>
   getPreferences?(context: ProviderAccessContext): Promise<unknown[]>
   getReports?(context: ProviderAccessContext, requests: ProviderReportRequest[]): Promise<Record<string, unknown>>
   getChangeData?(context: ProviderAccessContext, entities: string[], changedSince: Date): Promise<ProviderCdcResult>

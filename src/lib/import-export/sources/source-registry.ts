@@ -2,13 +2,17 @@ import 'server-only'
 import { Provider } from '@/integrations/accounting/contracts/types'
 import { createAccountingIntegrationRuntime } from '@/integrations/accounting/services/container'
 import { QuickBooksImportAdapter } from './quickbooks.adapter'
-import type { ImportSourceAdapter, NormalizedImportResource } from './types'
+import type { ImportSourceAdapter, NormalizedImportResource, SourcePreviewBatch } from './types'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { PreviewStageError, type PreviewStage, type PreviewStageState } from './preview-service'
 
 interface SourceFetchDiagnostics {
-  preview?: boolean
   onStage?: (stage: PreviewStage, state: PreviewStageState, module: string) => void
+}
+
+export interface SourcePreviewSession {
+  source: ImportSourceAdapter
+  fetchResource: (resourceKey: string) => Promise<NormalizedImportResource>
 }
 
 async function runStage<T>(stage: PreviewStage, module: string, diagnostics: SourceFetchDiagnostics | undefined, operation: () => Promise<T> | T): Promise<T> {
@@ -37,9 +41,6 @@ async function fetchWithCheckpoint(tenantId: string, source: ImportSourceAdapter
   })
   const checkpoint = existing.data
   const resumable=['running','failed'].includes(String(checkpoint?.status))
-  if (diagnostics?.preview) {
-    return runStage('quickbooks_request', resourceKey, diagnostics, () => source.fetchResource(provider, context, resourceKey, { companyId: tenantId }))
-  }
   if(!resumable){const cleared=await db.from('quickbooks_extraction_staging').delete().eq('company_id',tenantId).eq('realm_id',context.realmId).eq('resource_key',resourceKey);if(cleared.error)throw cleared.error}
   const write = async (progress: { startPosition:number; partitionStart?:string; partitionEnd?:string; fetched:number }) => {
     const result = await db.from('quickbooks_migration_checkpoints').upsert({
@@ -89,6 +90,52 @@ export function getImportSource(key: string): ImportSourceAdapter {
   const source = adapters.get(key)
   if (!source) throw new Error(`Unknown import source: ${key}`)
   return source
+}
+
+/**
+ * Resolves the provider and OAuth connection once for the whole preview request.
+ * Preview fetches deliberately bypass extraction checkpoints and staging because
+ * they only request an exact count and a bounded sample.
+ */
+export async function withSourcePreviewSession<T>(
+  tenantId: string,
+  sourceKey: string,
+  sampleSize: number,
+  diagnostics: SourceFetchDiagnostics | undefined,
+  operation: (session: SourcePreviewSession) => Promise<T>,
+): Promise<T> {
+  const source = await runStage('adapter_initialization', 'all', diagnostics, () => getImportSource(sourceKey))
+  const runtime = await runStage('provider_lookup', 'all', diagnostics, () => createAccountingIntegrationRuntime())
+  const providerSlug = sourceKey as Provider
+  const provider = await runStage('provider_lookup', 'all', diagnostics, () => runtime.providers.get(providerSlug))
+  const cache = new Map<string, Promise<SourcePreviewBatch>>()
+  diagnostics?.onStage?.('connection_lookup', 'started', 'all')
+  let connectionResolved = false
+  try {
+    return await runtime.connections.executeForProvider(tenantId, providerSlug, async (context) => {
+      connectionResolved = true
+      diagnostics?.onStage?.('connection_lookup', 'completed', 'all')
+      return operation({
+        source,
+        fetchResource: (resourceKey) => runStage(
+          'quickbooks_request',
+          resourceKey,
+          diagnostics,
+          () => source.fetchResource(provider, context, resourceKey, {
+            companyId: tenantId,
+            preview: { sampleSize, cache },
+          }),
+        ),
+      })
+    })
+  } catch (error) {
+    if (error instanceof PreviewStageError) throw error
+    if (!connectionResolved) diagnostics?.onStage?.('connection_lookup', 'failed', 'all')
+    const record = error !== null && typeof error === 'object' ? error as Record<string, unknown> : {}
+    const message = error instanceof Error ? error.message : typeof record.message === 'string' ? record.message : 'QuickBooks connection lookup failed.'
+    const code = typeof record.code === 'string' ? record.code : 'CONNECTION_LOOKUP_FAILED'
+    throw new PreviewStageError(connectionResolved ? 'quickbooks_request' : 'connection_lookup', code, message, { cause: error })
+  }
 }
 
 export async function fetchSourceResource(
