@@ -26,6 +26,8 @@ import { normalizeImportError } from '@/lib/import-export/import/import-error'
 import { CORRELATION_HEADER, getCorrelationId } from '@/lib/ops/correlation'
 import { withExternalRequestDiagnostics } from '@/lib/ops/external-request-diagnostics'
 import { MigrationTrace } from '@/lib/import-export/quickbooks/migration-telemetry'
+import { fetchSourceResource, getImportSource } from '@/lib/import-export/sources/source-registry'
+import { FrameworkBadRequestError } from '@/lib/import-export/errors'
 
 async function handleImport(
   request: Request,
@@ -39,12 +41,11 @@ async function handleImport(
       const authenticated = await requireAccountingAdmin()
       const { module: resolvedModule } = await params
       resolveModuleParam(resolvedModule)
-      return { user:authenticated, moduleKey:resolvedModule }
+      return { user: authenticated, moduleKey: resolvedModule }
     })
 
     const body = await request.json() as Record<string, unknown>
     const definition = getModuleDefinition(moduleKey)
-    const { mappedRows, validation, mapping } = await trace.measure('validation', () => buildMappedImportPayload(definition, body))
     const filename = parseFilenameFromBody(body)
     const fileFormat = parseFileFormatFromBody(body)
     const duplicateStrategy = (['skip', 'update', 'create'].includes(String((body as Record<string, unknown>).duplicateStrategy))
@@ -54,6 +55,44 @@ async function handleImport(
     const companyId = await resolveCompanyId()
     const existingJobId = typeof body.jobId === 'string' ? body.jobId : null
     const existingJob = existingJobId ? await getImportJob(existingJobId) : null
+    if (existingJobId && !existingJob) return Response.json({ error: 'Import job not found.' }, { status: 404 })
+    const sourceKey = typeof body.sourceKey === 'string' ? body.sourceKey : ''
+    const resourceKey = typeof body.resourceKey === 'string' ? body.resourceKey : ''
+    const sourceResource = sourceKey && resourceKey
+      ? getImportSource(sourceKey).resources.find((resource) => resource.key === resourceKey)
+      : undefined
+    if ((sourceKey || resourceKey) && (!sourceResource || sourceResource.moduleKey !== moduleKey)) {
+      throw new FrameworkBadRequestError('The selected source resource does not match the import module.')
+    }
+
+    // Source-backed background jobs deliberately persist only source identity
+    // and user choices. Preview rows and mappings are never job input.
+    if (body.background === true && !existingJobId && sourceResource) {
+      const queued = await createImportJob({
+        userId: user.id,
+        moduleKey,
+        filename,
+        fileFormat,
+        duplicateStrategy,
+        totalRows: 0,
+        mappingSnapshot: {},
+        payloadSnapshot: { sourceKey, resourceKey, filename, fileFormat, duplicateStrategy },
+      })
+      jobId = queued.id
+      await setImportJobStatus(queued.id, 'pending')
+      trace.finish({ fetched: 0 })
+      return Response.json({ jobId: queued.id, status: 'pending', totalRows: 0, batchSize: queued.batchSize ?? 250 }, { status: 202 })
+    }
+
+    let importBody = body
+    if (existingJob && sourceResource) {
+      const normalized = await trace.measure('extraction', () => fetchSourceResource(companyId, sourceKey, resourceKey))
+      const fullMapping = Object.fromEntries(definition.fields
+        .filter((field) => field.importable !== false)
+        .map((field) => [field.key, field.key]))
+      importBody = { ...body, rows: normalized.rows, mapping: fullMapping }
+    }
+    const { mappedRows, validation, mapping } = await trace.measure('validation', () => buildMappedImportPayload(definition, importBody))
     const job = existingJob ?? await createImportJob({
       userId: user.id, moduleKey, filename, fileFormat, duplicateStrategy,
       mappingSnapshot: mappingSnapshot(mapping), totalRows: mappedRows.length,
@@ -154,6 +193,9 @@ async function handleImport(
       skippedCount: finalized.skippedCount,
       failedCount: finalized.failedCount,
       totalRows: finalized.totalRows,
+      validRows: finalized.validRows,
+      invalidRows: finalized.invalidRows,
+      warningCount: finalized.warningCount,
       durationMs: finalized.durationMs,
       errors: allErrors,
     })

@@ -50,6 +50,31 @@ test('import endpoint always performs authoritative duplicate detection',()=>{
   assert.doesNotMatch(route,/parseDuplicatesFromBody\(body\)/)
 })
 
+test('sampled previews queue source-backed jobs and are never used as import payloads',()=>{
+  const wizard=file('src/components/import-export/steps/ConnectedSourceFlow.tsx')
+  const route=file('src/app/api/import-export/[module]/import/route.ts')
+  const runner=file('src/app/api/import-export/jobs/[jobId]/run/route.ts')
+  const registry=file('src/lib/import-export/sources/source-registry.ts')
+
+  assert.match(wizard,/background: true/)
+  assert.match(wizard,/sourceKey: source\.key/)
+  assert.match(wizard,/resourceKey: resource\.key/)
+  assert.match(wizard,/jobs\/\$\{jobId\}\/run/)
+  assert.doesNotMatch(wizard,/rows: resource\.rows/)
+  assert.doesNotMatch(wizard,/mapping: resource\.mapping/)
+  assert.doesNotMatch(wizard,/resource\.count > resource\.rows\.length/)
+
+  assert.match(route,/payloadSnapshot: \{ sourceKey, resourceKey, filename, fileFormat, duplicateStrategy \}/)
+  assert.match(route,/fetchSourceResource\(companyId, sourceKey, resourceKey\)/)
+  assert.match(route,/rows: normalized\.rows, mapping: fullMapping/)
+  assert.match(runner,/job\.payloadSnapshot/)
+  assert.match(registry,/fetchWithCheckpoint\(tenantId, source, provider, context, resourceKey/)
+
+  const preview={count:89,rows:Array.from({length:10})}
+  assert.equal(preview.count,89)
+  assert.equal(preview.rows.length,10)
+})
+
 test('QuickBooks transaction importer matches the deployed canonical schema',()=>{
   const transactionImporter=file('src/lib/import-export/registry/modules/transactions.module.ts')
   const invoiceRepository=file('src/lib/db/repositories/invoice.repository.supabase.ts')
