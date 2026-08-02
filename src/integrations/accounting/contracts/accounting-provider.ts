@@ -38,6 +38,10 @@ export interface ProviderEntityFetchOptions {
   /** Provider-owned predicate used for bounded entity variants such as projects. */
   where?: string
   startPosition?: number
+  /** Do not retain page payloads when the caller durably stages each page. */
+  retainRows?: boolean
+  /** Cancels pagination, checkpoint callbacks, retry backoff, and requests. */
+  signal?: AbortSignal
   onCheckpoint?: (checkpoint: { startPosition: number; partitionStart?: string; partitionEnd?: string; extractedCount: number }) => Promise<void>
   onPage?: (rows:unknown[],checkpoint:{startPosition:number;partitionStart?:string;partitionEnd?:string;extractedCount:number})=>Promise<void>
 }

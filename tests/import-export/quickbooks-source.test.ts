@@ -25,10 +25,10 @@ const provider: AccountingProvider = {
 test('QuickBooks source exposes master data and transaction resources', () => {
   assert.deepEqual(new QuickBooksImportAdapter().resources.map((item) => item.key), [
     'accounts', 'customers', 'vendors', 'items', 'tax-codes', 'payment-terms',
-    'invoices', 'bills', 'payments', 'expenses', 'journal-entries', 'sales-receipts',
+    'invoices', 'bills', 'expenses', 'journal-entries', 'sales-receipts',
     'purchase-orders', 'vendor-credits', 'estimates', 'customer-payments', 'vendor-payments',
-    'projects', 'budgets', 'exchange-rates', 'classes', 'departments', 'locations', 'employees',
-    'time-activities', 'credit-memos', 'bill-payments', 'deposits', 'transfers',
+    'projects', 'budgets', 'exchange-rates', 'classes', 'departments', 'employees',
+    'time-activities', 'credit-memos', 'deposits', 'transfers',
     'inventory-adjustments', 'attachments', 'recurring-transactions', 'tax-agencies',
     'tax-configurations', 'preferences', 'fixed-assets',
   ])
@@ -43,8 +43,28 @@ test('QuickBooks accounts normalize to the existing accounts module fields', asy
   assert.deepEqual(JSON.parse(result.rows[0]._quickbooksRaw), rows.accounts[0])
 })
 
+test('QuickBooks service lines derive unit price from amount when quantity and unit price are omitted',()=>{
+  const adapter=new QuickBooksImportAdapter()
+  const [invoice]=adapter.normalizeRecords('invoices',[{Id:'27',TotalAmt:103.55,Balance:0,Line:[{Id:'1',Amount:103.55,DetailType:'SalesItemLineDetail',SalesItemLineDetail:{ItemRef:{value:'1'}}},{Amount:103.55,DetailType:'SubTotalLineDetail',SubTotalLineDetail:{}}]}],'realm-1')
+  const lines=JSON.parse(invoice.lines) as Array<{detailType:string;quantity:string;unitPrice:string}>
+  assert.equal(lines[0].quantity,'1')
+  assert.equal(lines[0].unitPrice,'103.55')
+  assert.equal(lines[1].unitPrice,'0')
+})
+
 test('QuickBooks contacts normalize nested email and address values', async () => {
   const result = await new QuickBooksImportAdapter().fetchResource(provider, { accessToken: 'x', realmId: '1' }, 'customers')
   assert.equal(result.rows[0].email, 'team@acme.test')
   assert.equal(result.rows[0].city, 'Riyadh')
+})
+
+test('QuickBooks contacts select one valid canonical email while preserving multi-address source metadata', async () => {
+  const [normalized] = new QuickBooksImportAdapter().normalizeRecords('vendors', [{
+    Id: '45',
+    DisplayName: 'National Eye Care',
+    PrimaryEmailAddr: { Address: 'Nateyecare@intuit.com, pauliejones15@intuit.com' },
+  }], 'sandbox-realm')
+
+  assert.equal(normalized.email, 'Nateyecare@intuit.com')
+  assert.match(String(normalized._quickbooksRaw), /pauliejones15@intuit\.com/)
 })

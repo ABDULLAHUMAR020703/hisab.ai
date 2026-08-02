@@ -14,6 +14,7 @@ import { certifyVendorCredits } from './vendor-credits'
 import { certifySalesReceipts } from './sales-receipts'
 import { certifyRetainedEarnings } from './retained-earnings'
 import { CERTIFICATION_REPORTS, type AccountingCertificationReport, type CertificationParameters, type CertificationReportKey, type CertificationSection, type CertificationSectionKey, type FinancialReportSnapshot } from './types'
+import { assertQuickBooksCertificationEnabled } from './feature'
 
 function stable(value:unknown):string{if(Array.isArray(value))return `[${value.map(stable).join(',')}]`;if(value&&typeof value==='object')return `{${Object.entries(value as Record<string,unknown>).sort(([a],[b])=>a.localeCompare(b)).map(([key,item])=>`${JSON.stringify(key)}:${stable(item)}`).join(',')}}`;return JSON.stringify(value)??'null'}
 const hash=(value:unknown)=>createHash('sha256').update(stable(value)).digest('hex')
@@ -35,6 +36,7 @@ export function validateCertificationParameters(input:Partial<CertificationParam
 }
 
 export async function runQuickBooksCertification(companyId:string,userId:string,input:Partial<CertificationParameters>):Promise<AccountingCertificationReport>{
+  assertQuickBooksCertificationEnabled()
   const parameters=validateCertificationParameters(input);const db=createAdminClient();const runtime=createAccountingIntegrationRuntime();const provider=runtime.providers.get(Provider.QUICKBOOKS);const runId=randomUUID()
   const connection=await runtime.connections.executeForProvider(companyId,Provider.QUICKBOOKS,async context=>({realmId:context.realmId,context,company:await provider.getCompanyInfo(context)}))
   const quickBooksCurrency=connection.company.baseCurrency?.trim().toUpperCase()

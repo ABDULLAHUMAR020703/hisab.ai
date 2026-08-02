@@ -9,32 +9,78 @@ async function postQuickBooksJournal(id:string,companyId:string,sourceRow:Row){c
 
 const CONFIG: Record<string,{ table:string; sourceType:string; post?:(id:string,companyId:string,sourceRow:Row)=>Promise<unknown>; requiresLedger:boolean; checksInventory?:boolean; allowsCreditOnlyApplication?:boolean; manualReason?:string }> = {
   invoices:{ table:'invoices', sourceType:'INVOICE', post:postInvoiceToLedger, requiresLedger:true, checksInventory:true },
-  bills:{ table:'bills', sourceType:'BILL', post:postBillToLedger, requiresLedger:true, checksInventory:true },
-  expenses:{ table:'expenses', sourceType:'EXPENSE', post:postExpenseToLedger, requiresLedger:true },
-  'customer-payments':{ table:'payments', sourceType:'PAYMENT', post:postPaymentToLedger, requiresLedger:true },
-  'vendor-payments':{ table:'payments', sourceType:'PAYMENT', post:postPaymentToLedger, requiresLedger:true, allowsCreditOnlyApplication:true },
+  bills:{ table:'bills', sourceType:'BILL', post:(id,companyId,row)=>postBillToLedger(id,companyId,text(row.currency)), requiresLedger:true, checksInventory:true },
+  expenses:{ table:'expenses', sourceType:'EXPENSE', post:(id,companyId,row)=>postExpenseToLedger(id,companyId,text(row.currency)), requiresLedger:true },
+  'customer-payments':{ table:'payments', sourceType:'PAYMENT', post:(id,companyId,row)=>postPaymentToLedger(id,companyId,text(row.currency)), requiresLedger:true, allowsCreditOnlyApplication:true },
+  'vendor-payments':{ table:'payments', sourceType:'PAYMENT', post:(id,companyId,row)=>postPaymentToLedger(id,companyId,text(row.currency)), requiresLedger:true, allowsCreditOnlyApplication:true },
   'journal-entries':{ table:'journal_entries', sourceType:'JOURNAL', post:postQuickBooksJournal, requiresLedger:true },
   payroll:{ table:'payroll_entries', sourceType:'PAYROLL', post:postPayrollToLedger, requiresLedger:true },
   estimates:{ table:'estimates', sourceType:'ESTIMATE', requiresLedger:false },
   'purchase-orders':{ table:'purchase_orders', sourceType:'PURCHASE_ORDER', requiresLedger:false },
   'sales-receipts':{ table:'sales_receipts', sourceType:'SALES_RECEIPT', post:postSalesReceiptToLedger, requiresLedger:true, checksInventory:true },
   'vendor-credits':{ table:'vendor_credits', sourceType:'SUPPLIER_CREDIT', post:postVendorCreditToLedger, requiresLedger:true, checksInventory:true },
+  'qb-projects':{table:'cost_centers',sourceType:'PROJECT',requiresLedger:false},
+  'qb-budgets':{table:'budgets',sourceType:'BUDGET',requiresLedger:false},
+  'qb-exchange-rates':{table:'exchange_rates',sourceType:'EXCHANGE_RATE',requiresLedger:false},
+  'qb-classes':{table:'cost_centers',sourceType:'CLASS',requiresLedger:false},
+  'qb-departments':{table:'departments',sourceType:'DEPARTMENT',requiresLedger:false},
+  'qb-employees':{table:'employees',sourceType:'EMPLOYEE',requiresLedger:false},
+  'qb-time-activities':{table:'time_activities',sourceType:'TIME_ACTIVITY',requiresLedger:false},
+  'qb-credit-memos':{table:'invoices',sourceType:'INVOICE',requiresLedger:true,checksInventory:true},
+  'qb-deposits':{table:'bank_transactions',sourceType:'DEPOSIT',requiresLedger:true},
+  'qb-transfers':{table:'bank_transactions',sourceType:'BANK_TRANSFER',requiresLedger:true},
+  'qb-inventory-adjustments':{table:'stock_movements',sourceType:'INVENTORY',requiresLedger:false},
+  'qb-attachments':{table:'attachments',sourceType:'ATTACHMENT',requiresLedger:false},
+  'qb-recurring-transactions':{table:'recurring_transaction_templates',sourceType:'RECURRING',requiresLedger:false},
+  'qb-tax-agencies':{table:'tax_agencies',sourceType:'TAX_AGENCY',requiresLedger:false},
+  'qb-tax-configurations':{table:'tax_groups',sourceType:'TAX_CONFIGURATION',requiresLedger:false},
+  'qb-preferences':{table:'companies',sourceType:'PREFERENCES',requiresLedger:false},
+  'qb-fixed-assets':{table:'fixed_assets',sourceType:'FIXED_ASSET',requiresLedger:false},
 }
 
 function text(value:unknown) { return value === null || value === undefined ? '' : String(value) }
 
+function requiresLedgerFor(config: (typeof CONFIG)[string], moduleKey:string, sourceRow:Row) {
+  if (!config.requiresLedger) return false
+  // QuickBooks permits zero-value journal documents. They carry history and
+  // metadata but have no accounting movement to post.
+  if (moduleKey === 'journal-entries') {
+    const total = Number(sourceRow.total ?? sourceRow.amount ?? 0)
+    if (Number.isFinite(total) && Math.abs(total) < 0.0001) return false
+  }
+  return true
+}
+
+export function tracksQuickBooksMaterialization(moduleKey:string){return Boolean(CONFIG[moduleKey])}
+
 export async function hasPostedLedger(companyId:string,moduleKey:string,localId:string) {
   const config = CONFIG[moduleKey]
   if (!config?.requiresLedger) return false
-  const result = await createAdminClient().from('ledger_entries').select('id').eq('company_id',companyId).eq('source_type',config.sourceType).eq('source_id',localId).limit(1)
+  let query=createAdminClient().from('ledger_entries').select('id').eq('company_id',companyId).eq('source_id',localId)
+  if(moduleKey!=='sales-receipts')query=query.eq('source_type',config.sourceType)
+  const result = await query.limit(1)
   if (result.error) throw result.error
   return Boolean(result.data?.length)
 }
 
-export async function getQuickBooksMaterializationStatus(companyId:string,moduleKey:string,localId:string) {
-  const result = await createAdminClient().from('quickbooks_materialization_runs').select('status').eq('company_id',companyId).eq('module_key',moduleKey).eq('local_id',localId).maybeSingle()
+export async function getQuickBooksMaterializationStatus(companyId:string,moduleKey:string,localId:string,sourceRow?:Row) {
+  let query=createAdminClient().from('quickbooks_materialization_runs').select('status').eq('company_id',companyId).eq('module_key',moduleKey).eq('local_id',localId)
+  const realmId=text(sourceRow?._realmId),entityType=text(sourceRow?._quickbooksEntity),sourceId=text(sourceRow?._quickbooksId??sourceRow?.sourceId)
+  if(realmId&&entityType&&sourceId)query=query.eq('realm_id',realmId).eq('entity_type',entityType).eq('source_id',sourceId)
+  else query=query.order('updated_at',{ascending:false}).limit(1)
+  const result = await query.maybeSingle()
   if (result.error) throw result.error
   return result.data?.status ? String(result.data.status) : null
+}
+
+export async function assertQuickBooksAccountingCompleted(moduleKey:string,companyId:string,localId:string,sourceRow:Row) {
+  const config=CONFIG[moduleKey]
+  if(!config || !text(sourceRow._realmId)) return
+  const result=await createAdminClient().from('quickbooks_materialization_runs').select('status,ledger_entry_count,last_error,validation').eq('company_id',companyId).eq('module_key',moduleKey).eq('local_id',localId).order('updated_at',{ascending:false}).limit(1).maybeSingle()
+  if(result.error)throw result.error
+  if(result.data?.status!=='completed')throw new Error(result.data?.last_error?`QuickBooks materialization did not complete: ${result.data.last_error}`:'QuickBooks materialization did not complete.')
+  const validation=result.data?.validation&&typeof result.data.validation==='object'?result.data.validation as Row:{}
+  if(requiresLedgerFor(config,moduleKey,sourceRow)&&Number(result.data.ledger_entry_count)<2&&!Boolean(validation.creditOnlyApplication))throw new Error(`QuickBooks ${moduleKey} materialization completed without a balanced ledger posting.`)
 }
 
 export async function materializeQuickBooksAccounting(input:{ companyId:string; userId:string; moduleKey:string; localId:string; sourceRow:Row }) {
@@ -58,17 +104,31 @@ export async function materializeQuickBooksAccounting(input:{ companyId:string; 
   const started = await db.from('quickbooks_materialization_runs').upsert({ company_id:input.companyId, realm_id:realmId, entity_type:entityType, source_id:sourceId, module_key:input.moduleKey, local_table:config.table, local_id:input.localId, status:'posting', attempt_count:Number(existing.data?.attempt_count ?? 0) + 1, started_at:new Date().toISOString(), last_error:null, updated_at:new Date().toISOString() }, { onConflict:'company_id,realm_id,entity_type,source_id,module_key' })
   if (started.error) throw started.error
   try {
-    if (config.post) await config.post(input.localId,input.companyId,input.sourceRow)
-    const ledger = await db.from('ledger_entries').select('id').eq('company_id',input.companyId).eq('source_type',config.sourceType).eq('source_id',input.localId)
+    const requiresLedger=requiresLedgerFor(config,input.moduleKey,input.sourceRow)
+    let creditOnlyApplication=false
+    if(config.allowsCreditOnlyApplication){const [payment,allocations]=await Promise.all([db.from('payments').select('amount').eq('company_id',input.companyId).eq('id',input.localId).single(),db.from('payment_allocations').select('credit_amount').eq('company_id',input.companyId).eq('payment_id',input.localId)]);if(payment.error)throw payment.error;if(allocations.error)throw allocations.error;creditOnlyApplication=Number(payment.data.amount)===0&&(allocations.data??[]).reduce((sum,item)=>sum+Number(item.credit_amount),0)>0}
+    if (config.post && requiresLedger&&!creditOnlyApplication) {
+      const postingStage=await db.from('quickbooks_materialization_runs').update({validation:{sourceId,stage:'native_posting',stageStartedAt:new Date().toISOString()},updated_at:new Date().toISOString()}).eq('company_id',input.companyId).eq('realm_id',realmId).eq('entity_type',entityType).eq('source_id',sourceId).eq('module_key',input.moduleKey)
+      if(postingStage.error)throw postingStage.error
+      await config.post(input.localId,input.companyId,input.sourceRow)
+    }
+    const verificationStage=await db.from('quickbooks_materialization_runs').update({validation:{sourceId,stage:'ledger_verification',stageStartedAt:new Date().toISOString()},updated_at:new Date().toISOString()}).eq('company_id',input.companyId).eq('realm_id',realmId).eq('entity_type',entityType).eq('source_id',sourceId).eq('module_key',input.moduleKey)
+    if(verificationStage.error)throw verificationStage.error
+    const ledgerQuery=requiresLedger?db.from('ledger_entries').select('id').eq('company_id',input.companyId).eq('source_id',input.localId):null
+    if(ledgerQuery&&input.moduleKey!=='sales-receipts')ledgerQuery.eq('source_type',config.sourceType)
+    const ledger = ledgerQuery?await ledgerQuery:{data:[] as Array<{id:string}>,error:null}
     if (ledger.error) throw ledger.error
     const inventory = config.checksInventory ? await db.from('stock_movements').select('id').eq('company_id',input.companyId).eq('source_type',config.sourceType).eq('source_id',input.localId) : { data:[] as Array<{id:string}>, error:null }
     if (inventory.error) throw inventory.error
     const ledgerEntryCount = ledger.data?.length ?? 0
     const inventoryMovementCount = inventory.data?.length ?? 0
-    let creditOnlyApplication=false
-    if(config.allowsCreditOnlyApplication&&ledgerEntryCount<2){const [payment,allocations]=await Promise.all([db.from('payments').select('amount').eq('company_id',input.companyId).eq('id',input.localId).single(),db.from('payment_allocations').select('credit_amount').eq('company_id',input.companyId).eq('payment_id',input.localId)]);if(payment.error)throw payment.error;if(allocations.error)throw allocations.error;creditOnlyApplication=Number(payment.data.amount)===0&&(allocations.data??[]).reduce((sum,item)=>sum+Number(item.credit_amount),0)>0}
-    if (config.requiresLedger && ledgerEntryCount < 2&&!creditOnlyApplication) throw new Error(`Native ${input.moduleKey} posting did not produce a balanced ledger entry.`)
-    const completed = await db.from('quickbooks_materialization_runs').update({ status:'completed', ledger_entry_count:ledgerEntryCount, inventory_movement_count:inventoryMovementCount, validation:{ balancedLedger:!config.requiresLedger || ledgerEntryCount >= 2, creditOnlyApplication, inventoryChecked:Boolean(config.checksInventory), sourceId }, completed_at:new Date().toISOString(), updated_at:new Date().toISOString() }).eq('company_id',input.companyId).eq('realm_id',realmId).eq('entity_type',entityType).eq('source_id',sourceId).eq('module_key',input.moduleKey)
+    if (requiresLedger && ledgerEntryCount < 2&&!creditOnlyApplication) {
+      const document=await db.from(config.table).select('status,total,subtotal,tax_amount').eq('company_id',input.companyId).eq('id',input.localId).maybeSingle()
+      if(document.error)throw document.error
+      const snapshot=document.data as Record<string,unknown>|null
+      throw new Error(`Native ${input.moduleKey} posting did not produce a balanced ledger entry (ledgerEntries=${ledgerEntryCount}, status=${text(snapshot?.status)||'unknown'}, total=${text(snapshot?.total)||'unknown'}, subtotal=${text(snapshot?.subtotal)||'unknown'}, tax=${text(snapshot?.tax_amount)||'unknown'}).`)
+    }
+    const completed = await db.from('quickbooks_materialization_runs').update({ status:'completed', ledger_entry_count:ledgerEntryCount, inventory_movement_count:inventoryMovementCount, validation:{ balancedLedger:!requiresLedger || ledgerEntryCount >= 2 || creditOnlyApplication, zeroMovementDocument:config.requiresLedger&&!requiresLedger, creditOnlyApplication, inventoryChecked:Boolean(config.checksInventory), sourceId }, completed_at:new Date().toISOString(), updated_at:new Date().toISOString() }).eq('company_id',input.companyId).eq('realm_id',realmId).eq('entity_type',entityType).eq('source_id',sourceId).eq('module_key',input.moduleKey)
     if (completed.error) throw completed.error
     return { status:'completed' as const, ledgerEntryCount, inventoryMovementCount }
   } catch (error) {

@@ -144,8 +144,16 @@ export async function postSourceDocumentToLedger(options: {
     return
   }
 
+  const grouped=new Map<string,PostingLine>()
+  for(const line of options.lines.filter((item)=>(item.debit??0)>0||(item.credit??0)>0)){
+    const direction=(line.debit??0)>0?'debit':'credit',key=`${line.accountId}:${direction}`
+    const prior=grouped.get(key)
+    if(prior){prior.debit=(prior.debit??0)+(line.debit??0);prior.credit=(prior.credit??0)+(line.credit??0);if(prior.costCenterId!==line.costCenterId)prior.costCenterId=null}
+    else grouped.set(key,{...line})
+  }
+
   const rows = []
-  for (const line of options.lines.filter((l) => (l.debit ?? 0) > 0 || (l.credit ?? 0) > 0)) {
+  for (const line of grouped.values()) {
     const fx = await resolveFxAmounts({
       debit: line.debit,
       credit: line.credit,

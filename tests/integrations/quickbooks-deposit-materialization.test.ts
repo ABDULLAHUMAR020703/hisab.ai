@@ -11,6 +11,8 @@ test('a partial payment deposit retains only the amount deposited',()=>{const re
 
 test('processing fees remain signed allocations so the bank receives the net deposit',()=>{const result=extractQuickBooksDepositRelationships({TotalAmt:97,Line:[paymentLine(100,'PAY-1'),{Amount:-3,Description:'Card fee',DepositLineDetail:{AccountRef:{value:'FEE-ACCOUNT'}}}]});assert.equal(result.issues.length,0);assert.deepEqual(result.allocations.map(item=>item.amount),[100,-3]);assert.equal(result.allocations.reduce((sum,item)=>sum+item.amount,0),97)})
 
+test('deposit cash back is preserved as a signed account allocation',()=>{const result=extractQuickBooksDepositRelationships({TotalAmt:80,Line:[paymentLine(100,'PAY-1')],CashBack:{Amount:20,Memo:'Savings',AccountRef:{value:'SAVINGS'}}});assert.equal(result.issues.length,0);assert.deepEqual(result.allocations.map(item=>item.amount),[100,-20]);assert.equal(result.allocations[1].sourceAccountId,'SAVINGS')})
+
 test('deposit parsing fails closed for ambiguous linked transactions',()=>{const result=extractQuickBooksDepositRelationships({TotalAmt:100,Line:[{Amount:100,LinkedTxn:[{TxnType:'Payment',TxnId:'PAY-1'},{TxnType:'SalesReceipt',TxnId:'SR-1'}]}]});assert.equal(result.allocations.length,0);assert.match(result.issues.join(' '),/2 linked transactions/)})
 
 test('deposit parsing detects a source total that does not equal its lines',()=>{const result=extractQuickBooksDepositRelationships({TotalAmt:101,Line:[paymentLine(100,'PAY-1')]});assert.match(result.issues.join(' '),/does not equal line allocations/)})

@@ -11,10 +11,14 @@ export interface ExternalRequestEvent {
   signature: string
   durationMs: number
   status: number | null
+  attempt?: number
+  correlationId?: string | null
+  error?: { name: string; message: string; code: string | null; causeCode: string | null } | null
 }
 
 interface DiagnosticContext {
   module?: string | null
+  correlationId?: string | null
   onRequest: (event: ExternalRequestEvent) => void
 }
 
@@ -28,7 +32,41 @@ export function withExternalRequestDiagnostics<T>(
   return diagnostics.run({
     onRequest: context.onRequest ?? parent?.onRequest ?? (() => undefined),
     module: context.module === undefined ? parent?.module ?? null : context.module,
+    correlationId: context.correlationId === undefined ? parent?.correlationId ?? null : context.correlationId,
   }, operation)
+}
+
+function errorDetails(error: unknown): ExternalRequestEvent['error'] {
+  const current = error !== null && typeof error === 'object' ? error as Record<string, unknown> : {}
+  const cause = current.cause !== null && typeof current.cause === 'object' ? current.cause as Record<string, unknown> : {}
+  return {
+    name: error instanceof Error ? error.name : 'Error',
+    message: error instanceof Error ? error.message : String(error),
+    code: typeof current.code === 'string' ? current.code : null,
+    causeCode: typeof cause.code === 'string' ? cause.code : null,
+  }
+}
+
+function headerValue(headers: HeadersInit | undefined, key: string): string {
+  return new Headers(headers).get(key) ?? ''
+}
+
+function isRetrySafe(method: string, init?: RequestInit): boolean {
+  if (['GET', 'HEAD', 'OPTIONS', 'PUT', 'PATCH', 'DELETE'].includes(method)) return true
+  return method === 'POST' && headerValue(init?.headers, 'prefer').toLowerCase().includes('resolution=merge-duplicates')
+}
+
+function retryDelay(attempt: number): number {
+  return Math.min(250 * 2 ** (attempt - 1), 2_000)
+}
+
+async function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw signal.reason
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, ms)
+    const abort = () => { clearTimeout(timer); reject(signal?.reason) }
+    signal?.addEventListener('abort', abort, { once: true })
+  })
 }
 
 function requestDetails(input: RequestInfo | URL, init?: RequestInit) {
@@ -52,15 +90,27 @@ function requestDetails(input: RequestInfo | URL, init?: RequestInit) {
 /** Fetch wrapper used by server-side Supabase and QuickBooks clients. */
 export async function diagnosticFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const context = diagnostics.getStore()
-  if (!context) return globalThis.fetch(input, init)
   const details = requestDetails(input, init)
-  const startedAt = performance.now()
-  try {
-    const response = await globalThis.fetch(input, init)
-    context.onRequest({ ...details, module: context.module ?? null, durationMs: performance.now() - startedAt, status: response.status })
-    return response
-  } catch (error) {
-    context.onRequest({ ...details, module: context.module ?? null, durationMs: performance.now() - startedAt, status: null })
-    throw error
+  const maxAttempts = details.kind === 'supabase' && isRetrySafe(details.method, init) ? 3 : 1
+  let lastError: unknown
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const startedAt = performance.now()
+    const timeout = AbortSignal.timeout(details.kind === 'supabase' ? 30_000 : 60_000)
+    const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout
+    try {
+      const response = await globalThis.fetch(input, { ...init, signal })
+      context?.onRequest({ ...details, module: context.module ?? null, durationMs: performance.now() - startedAt, status: response.status, attempt, correlationId: context.correlationId ?? null, error: null })
+      if (attempt < maxAttempts && (response.status === 429 || response.status >= 500)) {
+        await abortableDelay(retryDelay(attempt), init?.signal ?? undefined)
+        continue
+      }
+      return response
+    } catch (error) {
+      lastError = error
+      context?.onRequest({ ...details, module: context.module ?? null, durationMs: performance.now() - startedAt, status: null, attempt, correlationId: context.correlationId ?? null, error: errorDetails(error) })
+      if (attempt >= maxAttempts || init?.signal?.aborted) throw error
+      await abortableDelay(retryDelay(attempt), init?.signal ?? undefined)
+    }
   }
+  throw lastError
 }

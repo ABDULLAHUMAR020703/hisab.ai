@@ -6,7 +6,7 @@ import { extractQuickBooksDepositRelationships } from '@/lib/import-export/quick
 export interface AccountingMaterializationIssue { sourceId:string; moduleKey:string; localId:string; kind:'posting'|'balance'|'inventory'|'tax'|'relationship'|'allocation'|'deposit'|'reconciliation'; message:string }
 export interface AccountingMaterializationValidation { passed:boolean; completed:number; failed:number; conflicts:number; manualRequired:number; balancedLedgers:number; inventoryDocuments:number; issues:AccountingMaterializationIssue[] }
 
-const LEDGER_SOURCE:Record<string,string>={invoices:'INVOICE',bills:'BILL',expenses:'EXPENSE','customer-payments':'PAYMENT','vendor-payments':'PAYMENT','journal-entries':'JOURNAL','sales-receipts':'SALES_RECEIPT','vendor-credits':'SUPPLIER_CREDIT',payroll:'PAYROLL'}
+const LEDGER_SOURCE:Record<string,string>={invoices:'INVOICE',bills:'BILL',expenses:'EXPENSE','customer-payments':'PAYMENT','vendor-payments':'PAYMENT','journal-entries':'JOURNAL','sales-receipts':'SALES_RECEIPT','vendor-credits':'SUPPLIER_CREDIT','qb-credit-memos':'INVOICE','qb-deposits':'DEPOSIT','qb-transfers':'BANK_TRANSFER',payroll:'PAYROLL'}
 
 export async function validateQuickBooksAccountingMaterialization(companyId:string):Promise<AccountingMaterializationValidation> {
   const db=createAdminClient(); const runs=await db.from('quickbooks_materialization_runs').select('*').eq('company_id',companyId)
@@ -19,10 +19,12 @@ export async function validateQuickBooksAccountingMaterialization(companyId:stri
     if(run.status!=='completed') continue
     const sourceType=LEDGER_SOURCE[String(run.module_key)]
     if(sourceType) {
-      const ledger=await db.from('ledger_entries').select('base_debit,base_credit,debit,credit,cost_center_id,account:chart_of_accounts(name)').eq('company_id',companyId).eq('source_type',sourceType).eq('source_id',run.local_id)
+      let ledgerQuery=db.from('ledger_entries').select('base_debit,base_credit,debit,credit,cost_center_id,account:chart_of_accounts(name)').eq('company_id',companyId).eq('source_id',run.local_id)
+      if(String(run.module_key)!=='sales-receipts')ledgerQuery=ledgerQuery.eq('source_type',sourceType)
+      const ledger=await ledgerQuery
       if(ledger.error) throw ledger.error
       const debit=(ledger.data??[]).reduce((sum,line)=>sum+Number(line.base_debit??line.debit??0),0); const credit=(ledger.data??[]).reduce((sum,line)=>sum+Number(line.base_credit??line.credit??0),0)
-      let creditOnlyApplication=false;if(String(run.module_key)==='vendor-payments'&&!ledger.data?.length){const [payment,allocations]=await Promise.all([db.from('payments').select('amount').eq('company_id',companyId).eq('id',run.local_id).maybeSingle(),db.from('payment_allocations').select('credit_amount').eq('company_id',companyId).eq('payment_id',run.local_id)]);if(payment.error)throw payment.error;if(allocations.error)throw allocations.error;creditOnlyApplication=Number(payment.data?.amount)===0&&(allocations.data??[]).reduce((sum,item)=>sum+Number(item.credit_amount),0)>0}
+      let creditOnlyApplication=false;if(['customer-payments','vendor-payments'].includes(String(run.module_key))&&!ledger.data?.length){const [payment,allocations]=await Promise.all([db.from('payments').select('amount').eq('company_id',companyId).eq('id',run.local_id).maybeSingle(),db.from('payment_allocations').select('credit_amount').eq('company_id',companyId).eq('payment_id',run.local_id)]);if(payment.error)throw payment.error;if(allocations.error)throw allocations.error;creditOnlyApplication=Number(payment.data?.amount)===0&&(allocations.data??[]).reduce((sum,item)=>sum+Number(item.credit_amount),0)>0}
       if((ledger.data?.length&&Math.abs(debit-credit)<=0.01)||creditOnlyApplication) balancedLedgers++
       else issues.push({...base,kind:'balance',message:`Ledger is not balanced (${debit.toFixed(4)} debit, ${credit.toFixed(4)} credit).`})
       const archive=await db.from('quickbooks_migration_records').select('source_payload').eq('company_id',companyId).eq('entity_type',run.entity_type).eq('source_id',run.source_id).maybeSingle()

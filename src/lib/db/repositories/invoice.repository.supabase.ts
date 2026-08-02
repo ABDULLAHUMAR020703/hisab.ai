@@ -369,8 +369,7 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
         total,
         balance: total,
         status: input.status ?? 'DRAFT',
-        reference: input.reference ?? null,
-        notes: input.notes ?? null,
+        notes: [input.reference ? `QuickBooks reference: ${input.reference}` : null, input.notes ?? null].filter(Boolean).join('\n') || null,
         terms: input.terms ?? null,
         is_recurring: input.isRecurring ?? false,
         recurring_day: input.recurringDay ?? null,
@@ -385,7 +384,10 @@ export const supabaseInvoiceRepository: InvoiceRepository = {
     const lineRows = await buildLineRows(processedLines, invoiceId, companyId)
     if (lineRows.length > 0) {
       const { error: lineError } = await db.from('invoice_lines').insert(lineRows)
-      if (lineError) throw lineError
+      if (lineError) {
+        await db.from('invoices').delete().eq('company_id', companyId).eq('id', invoiceId)
+        throw lineError
+      }
     }
 
     if (input.companyId) return { ...mapInvoiceRow(data), lines:lineRows.map(mapInvoiceLineRow) } as InvoiceRecord

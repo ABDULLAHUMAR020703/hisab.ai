@@ -8,6 +8,7 @@ import { readApiError } from '@/lib/api-client'
 import type { DuplicateMatch, DuplicateStrategy, ValidationResult } from '@/lib/import-export/types'
 import { DuplicateStep } from './DuplicateStep'
 import { buildMigrationReport, type MigrationReport } from '@/lib/import-export/migration-report'
+import { orderQuickBooksMigrationResources } from '@/lib/import-export/quickbooks/dependency-order'
 
 interface SourceResource { key: string; label: string; moduleKey: string }
 interface ImportSource {
@@ -46,7 +47,7 @@ interface PreviewFailure extends SourceResource {
 }
 type PreviewResource = PreviewSuccess | PreviewFailure
 interface ImportTotals { importedCount: number; updatedCount: number; skippedCount: number; failedCount: number }
-interface ImportResult extends ImportTotals { durationMs?: number }
+interface ImportResult extends ImportTotals { durationMs?: number; errors?: import('@/lib/import-export/types').ImportRowError[] }
 interface CompanyAnalysis {
   companyName: string | null
   fiscalYear: string | null
@@ -167,7 +168,7 @@ export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }:
       if (incomplete) {
         throw new Error(`${incomplete.label} contains ${incomplete.count.toLocaleString()} records, but preview loaded only ${incomplete.rows.length}. Start this migration through the background extraction workflow so no records are omitted.`)
       }
-      for (const resource of previews.filter(isPreviewSuccess)) {
+      for (const resource of orderQuickBooksMigrationResources(previews.filter(isPreviewSuccess))) {
         const response = await fetch(`/api/import-export/${resource.moduleKey}/import`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -177,13 +178,12 @@ export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }:
             filename: `${source.label} - ${resource.label}`,
             fileFormat: 'csv',
             duplicateStrategy: strategy,
-            duplicates: resource.duplicates,
           }),
         })
         if (!response.ok) throw new Error(`${resource.label}: ${await readApiError(response)}`)
         const result = await response.json() as ImportResult
         for (const key of Object.keys(summary) as Array<keyof ImportTotals>) summary[key] += result[key]
-        moduleReports.push({ key: resource.key, label: resource.label, sourceCount: resource.count, validCount: resource.validation.validRowNumbers.length, warningCount: resource.validation.warningCount, validationErrors: resource.validation.errorCount, importedCount: result.importedCount, updatedCount: result.updatedCount, skippedCount: result.skippedCount, failedCount: result.failedCount, durationMs: result.durationMs ?? 0 })
+        moduleReports.push({ key: resource.key, label: resource.label, sourceCount: resource.count, validCount: resource.validation.validRowNumbers.length, warningCount: resource.validation.warningCount, validationErrors: resource.validation.errorCount, importedCount: result.importedCount, updatedCount: result.updatedCount, skippedCount: result.skippedCount, failedCount: result.failedCount, durationMs: result.durationMs ?? 0, errors:result.errors })
       }
       setTotals(summary)
       setReport(buildMigrationReport({ source: source.label, companyName: source.companyName, currency: source.baseCurrency, durationMs: Date.now() - startedAt, modules: moduleReports }))

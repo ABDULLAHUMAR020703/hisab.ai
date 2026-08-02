@@ -1,5 +1,6 @@
 import 'server-only'
 import { createMasterRecord, listMasterRecords, updateMasterRecord } from '@/lib/master-data/repository'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { parseBooleanField, parseNumberField, parseOptionalString } from '../../parse-helpers'
 import type { DuplicateMatch, MappedRow, ModuleDefinition } from '../../types'
 import { PAYMENT_TERM_FIELDS } from './payment-terms.fields'
@@ -22,7 +23,9 @@ function parse(mapped: Record<string, unknown>) {
 }
 
 async function existingByName(companyId: string) {
-  const rows = await listMasterRecords('payment_terms', companyId) as PaymentTermRow[]
+  const result = await createAdminClient().from('payment_terms').select('*').eq('company_id',companyId)
+  if (result.error) throw result.error
+  const rows = (result.data ?? []) as PaymentTermRow[]
   return new Map(rows.map((row) => [row.name.toLowerCase(), row]))
 }
 

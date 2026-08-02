@@ -8,6 +8,8 @@ import {
   materializeQuickBooksCustomFields,
   parseQuickBooksRaw,
   recordQuickBooksWarning,
+  resolveQuickBooksCustomerContext,
+  resolveQuickBooksInventoryItemId,
   resolveQuickBooksLocalId,
 } from '../../quickbooks/migration-store'
 import type { FieldDefinition, ModuleDefinition } from '../../types'
@@ -198,7 +200,7 @@ async function materializeTimeActivity(row: Row, companyId: string, userId: stri
   const employee = employeeSource ? await resolveQuickBooksLocalId(companyId,realmId,employeeSource,['Employee']) : null
   const vendor = vendorSource ? await resolveQuickBooksLocalId(companyId,realmId,vendorSource,['Vendor']) : null
   if (!employee && !vendor) return null
-  const customer = customerSource ? await resolveQuickBooksLocalId(companyId,realmId,customerSource,['Customer']) : null
+  const customer = customerSource ? await resolveQuickBooksLocalId(companyId,realmId,customerSource,['Customer'],['customers']) : null
   const project = customerSource ? await resolveQuickBooksLocalId(companyId,realmId,customerSource,['Customer'],['cost_centers']) : null
   const item = itemSource ? await resolveQuickBooksLocalId(companyId,realmId,itemSource,['Item']) : null
   const hours = Math.max(0.0001, number(raw.Hours) + number(raw.Minutes) / 60)
@@ -240,6 +242,18 @@ async function materializeTaxCode(row:Row,companyId:string,_userId:string,realmI
   return {id:groupId,table:'tax_groups'}
 }
 
+async function materializeTaxAgency(row:Row,companyId:string,_userId:string,realmId:string){
+  const raw=parseQuickBooksRaw(row),sourceId=string(raw.Id??row.sourceId),name=string(raw.DisplayName??raw.Name??row.name,`QuickBooks Tax Agency ${sourceId}`)
+  const accountRef=(raw.TaxLiabilityAccountRef??raw.LiabilityAccountRef??raw.AccountRef) as Row|undefined
+  let liability=accountRef?.value?await resolveQuickBooksLocalId(companyId,realmId,string(accountRef.value),['Account'],['chart_of_accounts']):null
+  if(!liability){const fallback=await createAdminClient().from('chart_of_accounts').select('id').eq('company_id',companyId).or('name.ilike.%tax%payable%,name.ilike.%vat%payable%,sub_type.ilike.%tax%payable%').is('deleted_at',null).limit(1).maybeSingle();if(fallback.error)throw fallback.error;if(fallback.data)liability={id:String(fallback.data.id),table:'chart_of_accounts'}}
+  if(!liability)return null
+  const code=string(row.code,`QB-${sourceId}`),values={name,registration_number:string(raw.TaxRegistrationNumber??raw.TaxIdentifier)||null,liability_account_id:liability.id,payment_terms_days:number(raw.PaymentTermsDays,0),is_active:bool(raw.Active,true),deleted_at:bool(row._deleted,false)?new Date().toISOString():null}
+  const existing=await createAdminClient().from('tax_agencies').select('id').eq('company_id',companyId).eq('code',code).maybeSingle();if(existing.error)throw existing.error
+  if(existing.data){const updated=await createAdminClient().from('tax_agencies').update(values).eq('company_id',companyId).eq('id',existing.data.id);if(updated.error)throw updated.error;return{id:String(existing.data.id),table:'tax_agencies'}}
+  const created=await createAdminClient().from('tax_agencies').insert({company_id:companyId,code,...values}).select('id').single();if(created.error)throw created.error;return{id:String(created.data.id),table:'tax_agencies'}
+}
+
 async function materializeInventoryAdjustment(row:Row,companyId:string,userId:string,realmId:string) {
   const raw=parseQuickBooksRaw(row); const sourceId=string(raw.Id??row.sourceId)
   const archived=await findArchivedRecord(companyId,realmId,'InventoryAdjustment',sourceId)
@@ -250,7 +264,7 @@ async function materializeInventoryAdjustment(row:Row,companyId:string,userId:st
   const lines=Array.isArray(raw.Line)?raw.Line as Row[]:[]
   let firstId:string|null=null
   for(const line of lines) {
-    const detail=(line.InventoryAdjustmentLineDetail??line.ItemBasedExpenseLineDetail??{}) as Row
+    const detail=(line.ItemAdjustmentLineDetail??line.InventoryAdjustmentLineDetail??line.ItemBasedExpenseLineDetail??{}) as Row
     const itemRef=(detail.ItemRef??{}) as Row
     const itemSourceId=string(itemRef.value)
     const item=itemSourceId?await resolveQuickBooksLocalId(companyId,realmId,itemSourceId,['Item'],['inventory_items']):null
@@ -282,18 +296,24 @@ async function materializeCreditMemo(row:Row,companyId:string,userId:string,real
   const linked=[...(Array.isArray(raw.LinkedTxn)?raw.LinkedTxn as Row[]:[]),...(Array.isArray(raw.Line)?(raw.Line as Row[]).flatMap(line=>Array.isArray(line.LinkedTxn)?line.LinkedTxn as Row[]:[]):[])]
   const invoiceLink=linked.find(link=>string(link.TxnType).toLowerCase()==='invoice')
   const sourceInvoice=invoiceLink?await resolveQuickBooksLocalId(companyId,realmId,string(invoiceLink.TxnId),['Invoice'],['invoices']):null
-  if(!sourceInvoice) return null
+  const customerRef=(raw.CustomerRef??{}) as Row,customer=customerRef.value?await resolveQuickBooksCustomerContext(companyId,realmId,string(customerRef.value)):null
+  if(!sourceInvoice&&!customer)throw new Error(`QuickBooks customer ${string(customerRef.value)} must be migrated before Credit Memo ${sourceId}.`)
   const nativeLines=[]
   for(const line of Array.isArray(raw.Line)?raw.Line as Row[]:[]) {
-    const detail=(line.SalesItemLineDetail??{}) as Row; const itemRef=(detail.ItemRef??{}) as Row; const accountRef=(detail.AccountRef??{}) as Row; const classRef=(detail.ClassRef??{}) as Row
-    const item=itemRef.value?await resolveQuickBooksLocalId(companyId,realmId,string(itemRef.value),['Item'],['inventory_items']):null
+    if(string(line.DetailType)==='SubTotalLineDetail')continue
+    const detail=(line.SalesItemLineDetail??{}) as Row; const itemRef=(detail.ItemRef??{}) as Row; const accountRef=(detail.AccountRef??detail.ItemAccountRef??{}) as Row; const classRef=(detail.ClassRef??{}) as Row
+    const item=itemRef.value?await resolveQuickBooksInventoryItemId(companyId,realmId,string(itemRef.value)):null
     const account=accountRef.value?await resolveQuickBooksLocalId(companyId,realmId,string(accountRef.value),['Account'],['chart_of_accounts']):null
     const costCenter=classRef.value?await resolveQuickBooksLocalId(companyId,realmId,string(classRef.value),['Class'],['cost_centers']):null
     const quantity=Math.max(0.0001,number(detail.Qty,1)); const amount=number(line.Amount); const unitPrice=number(detail.UnitPrice,amount/quantity)
     nativeLines.push({description:string(line.Description,'Imported QuickBooks credit memo line'),quantity,unitPrice,taxRate:0,accountId:account?.id??null,costCenterId:costCenter?.id??null,inventoryItemId:item?.id??null})
   }
   if(!nativeLines.length) return null
-  const created=await getInvoiceRepository().createAdjustment({companyId,documentNo:string(raw.DocNumber,`QB-CM-${sourceId}`),legacyId:sourceId,status:'SENT',sourceInvoiceId:sourceInvoice.id,adjustmentType:'CREDIT_NOTE',date:new Date(string(raw.TxnDate??row.date)||Date.now()),dueDate:new Date(string(raw.TxnDate??row.date)||Date.now()),lines:nativeLines,notes:string(raw.PrivateNote??row.description)||null,createdById:userId})
+  const date=new Date(string(raw.TxnDate??row.date)||Date.now()),currency=string((raw.CurrencyRef as Row|undefined)?.value,'SAR')
+  const created=sourceInvoice
+    ?await getInvoiceRepository().createAdjustment({companyId,documentNo:string(raw.DocNumber,`QB-CM-${sourceId}`),legacyId:sourceId,status:'SENT',sourceInvoiceId:sourceInvoice.id,adjustmentType:'CREDIT_NOTE',date,dueDate:date,lines:nativeLines,notes:string(raw.PrivateNote??row.description)||null,createdById:userId})
+    :await getInvoiceRepository().create({companyId,documentNo:string(raw.DocNumber,`QB-CM-${sourceId}`),legacyId:sourceId,status:'SENT',customerId:customer!.customerId,date,dueDate:date,currency,lines:nativeLines,notes:string(raw.PrivateNote??row.description)||null,createdById:userId})
+  if(!sourceInvoice){const total=number(raw.TotalAmt),balance=number(raw.RemainingCredit??raw.Balance,total),updated=await createAdminClient().from('invoices').update({invoice_type:'CREDIT_NOTE',balance,amount_paid:Math.max(0,total-balance)}).eq('company_id',companyId).eq('id',created.id);if(updated.error)throw updated.error}
   await postInvoiceToLedger(created.id,companyId)
   return {id:created.id,table:'invoices'}
 }
@@ -307,8 +327,8 @@ async function materializeBillPayment(row:Row,companyId:string,_userId:string,re
   const existing=await db.from('payments').select('id,amount').eq('company_id',companyId).eq('legacy_id',sourceId).is('deleted_at',null).limit(1).maybeSingle();if(existing.error)throw existing.error
   if(existing.data&&Math.abs(Number(existing.data.amount)-relationships.paymentAmount)>0.0001)throw new Error(`Posted QuickBooks bill payment ${sourceId} changed amount; resolve the synchronization conflict.`)
   let paymentId=existing.data?String(existing.data.id):''
-  if(!paymentId){const created=await db.from('payments').insert({company_id:companyId,legacy_id:sourceId,payment_no:string(raw.DocNumber,`QB-BP-${sourceId}`),date:new Date(string(raw.TxnDate)||Date.now()).toISOString(),amount:relationships.paymentAmount,currency,exchange_rate:exchangeRate,base_amount:number(raw.HomeTotalAmt,relationships.paymentAmount*exchangeRate),method:string((raw.PayType??raw.PaymentType),'BANK_TRANSFER'),reference:string(raw.PrivateNote??raw.DocNumber)||null,vendor_id:vendor.id}).select('id').single();if(created.error)throw created.error;paymentId=String(created.data.id)}
-  await replacePaymentAllocations(companyId,paymentId,resolved);await postPaymentToLedger(paymentId,companyId);return {id:paymentId,table:'payments'}
+  if(!paymentId){const created=await db.from('payments').insert({company_id:companyId,legacy_id:sourceId,payment_no:string(raw.DocNumber,`QB-BP-${sourceId}`),date:new Date(string(raw.TxnDate)||Date.now()).toISOString(),amount:relationships.paymentAmount,exchange_rate:exchangeRate,base_amount:number(raw.HomeTotalAmt,relationships.paymentAmount*exchangeRate),method:string((raw.PayType??raw.PaymentType),'BANK_TRANSFER'),reference:string(raw.PrivateNote??raw.DocNumber)||null,vendor_id:vendor.id}).select('id').single();if(created.error)throw created.error;paymentId=String(created.data.id)}
+  await replacePaymentAllocations(companyId,paymentId,resolved);await postPaymentToLedger(paymentId,companyId,currency);return {id:paymentId,table:'payments'}
 }
 
 async function materializeDeposit(row:Row,companyId:string,userId:string,realmId:string) {
@@ -323,16 +343,21 @@ async function materializeDeposit(row:Row,companyId:string,userId:string,realmId
   if(!bankId){const sourceAccount=await db.from('quickbooks_migration_records').select('source_payload').eq('company_id',companyId).eq('realm_id',realmId).eq('entity_type','Account').eq('source_id',string(depositRef.value)).maybeSingle();if(sourceAccount.error)throw sourceAccount.error;const accountPayload=(sourceAccount.data?.source_payload??{}) as Row,accountType=string(accountPayload.AccountType);if(!['Bank','Other Current Asset'].includes(accountType))throw new Error(`QuickBooks deposit destination ${string(depositRef.value)} is not a supported bank or current-asset account.`);const bankCurrency=string((accountPayload.CurrencyRef as Row|undefined)?.value)||string((raw.CurrencyRef as Row|undefined)?.value,'SAR'),created=await db.from('bank_accounts').insert({company_id:companyId,account_id:coa.id,name:string(accountPayload.Name??accountPayload.FullyQualifiedName,`QuickBooks bank ${depositRef.value}`),account_number:string(accountPayload.AcctNum)||null,bank_name:'QuickBooks',currency:bankCurrency,opening_balance:0,current_balance:0,account_type:accountType==='Bank'?'BANK':'CURRENT_ASSET',is_active:accountPayload.Active!==false}).select('id').single();if(created.error)throw created.error;bankId=String(created.data.id)}
   const currency=string((raw.CurrencyRef as Row|undefined)?.value,'SAR').toUpperCase(),exchangeRate=number(raw.ExchangeRate,1),offsetLines:Parameters<typeof createBankDeposit>[0]['offsetLines']=[],allocations:NonNullable<Parameters<typeof createBankDeposit>[0]['allocations']>=[]
   for(const allocation of relationships.allocations) {
-    const paymentLink=allocation.sourceTransactionType.toLowerCase()==='payment'&&allocation.sourceTransactionId?await resolveQuickBooksLocalId(companyId,realmId,allocation.sourceTransactionId,['Payment'],['payments']):null
+    const transactionType=allocation.sourceTransactionType.toLowerCase()
+    const paymentLink=transactionType==='payment'&&allocation.sourceTransactionId?await resolveQuickBooksLocalId(companyId,realmId,allocation.sourceTransactionId,['Payment'],['payments']):null
     if(allocation.sourceTransactionType.toLowerCase()==='payment'&&!paymentLink)throw new Error(`QuickBooks payment ${allocation.sourceTransactionId} must be migrated before deposit ${sourceId}.`)
-    const payment=paymentLink?await createAdminClient().from('payments').select('deposit_account_id,currency,exchange_rate').eq('company_id',companyId).eq('id',paymentLink.id).maybeSingle():null
+    const salesReceiptLink=transactionType==='salesreceipt'&&allocation.sourceTransactionId?await resolveQuickBooksLocalId(companyId,realmId,allocation.sourceTransactionId,['SalesReceipt'],['sales_receipts']):null
+    if(transactionType==='salesreceipt'&&!salesReceiptLink)throw new Error(`QuickBooks Sales Receipt ${allocation.sourceTransactionId} must be migrated before deposit ${sourceId}.`)
+    const payment=paymentLink?await createAdminClient().from('payments').select('deposit_account_id,exchange_rate').eq('company_id',companyId).eq('id',paymentLink.id).maybeSingle():null
     if(payment?.error)throw payment.error
+    const salesReceipt=salesReceiptLink?await createAdminClient().from('sales_receipts').select('deposit_account_id,exchange_rate').eq('company_id',companyId).eq('id',salesReceiptLink.id).maybeSingle():null
+    if(salesReceipt?.error)throw salesReceipt.error
     const accountLink=allocation.sourceAccountId?await resolveQuickBooksLocalId(companyId,realmId,allocation.sourceAccountId,['Account'],['chart_of_accounts']):null
-    const accountId=String(accountLink?.id??payment?.data?.deposit_account_id??'')
+    const accountId=String(accountLink?.id??payment?.data?.deposit_account_id??salesReceipt?.data?.deposit_account_id??'')
     if(!accountId)throw new Error(`Deposit ${sourceId} line ${allocation.sourceLineKey} has no migrated source or Undeposited Funds account.`)
     const amount=Math.abs(allocation.amount),description=allocation.description||`QuickBooks deposit ${sourceId} source`
     offsetLines.push(allocation.amount>0?{accountId,credit:amount,description,exchangeRateOverride:exchangeRate}:{accountId,debit:amount,description,exchangeRateOverride:exchangeRate})
-    allocations.push({paymentId:paymentLink?.id??null,accountId,amount:allocation.amount,currency:String(payment?.data?.currency??currency),exchangeRate:Number(payment?.data?.exchange_rate??exchangeRate),sourceDepositId:sourceId,sourceLineKey:allocation.sourceLineKey,sourceTransactionType:allocation.sourceTransactionType,sourceTransactionId:allocation.sourceTransactionId,sourceAccountId:allocation.sourceAccountId,sourceEntityId:allocation.sourceEntityId,metadata:{...allocation.metadata,description:allocation.description}})
+    allocations.push({paymentId:paymentLink?.id??null,accountId,amount:allocation.amount,currency,exchangeRate:Number(payment?.data?.exchange_rate??salesReceipt?.data?.exchange_rate??exchangeRate),sourceDepositId:sourceId,sourceLineKey:allocation.sourceLineKey,sourceTransactionType:allocation.sourceTransactionType,sourceTransactionId:allocation.sourceTransactionId,sourceAccountId:allocation.sourceAccountId,sourceEntityId:allocation.sourceEntityId,metadata:{...allocation.metadata,description:allocation.description,localSalesReceiptId:salesReceiptLink?.id??null}})
   }
   const payloadHash=createHash('sha256').update(stable(raw)).digest('hex')
   const transaction=await createBankDeposit({companyId,userId,sourceId,bankAccountId:bankId,date:new Date(string(raw.TxnDate??row.date)||Date.now()),amount:relationships.total,reference:string(raw.DocNumber)||null,description:string(raw.PrivateNote,`QuickBooks deposit ${sourceId}`),offsetLines,currency,exchangeRate,allocations,externalAccountSourceId:string(depositRef.value)||null,sourcePayloadHash:payloadHash})
@@ -355,7 +380,7 @@ const configs: ExtendedConfig[] = [
   { key:'qb-inventory-adjustments', displayName:'QuickBooks Inventory Adjustments', entityType:'InventoryAdjustment', materialize:materializeInventoryAdjustment },
   { key:'qb-attachments', displayName:'QuickBooks Attachments', entityType:'Attachable', materialize:materializeAttachment },
   { key:'qb-recurring-transactions', displayName:'QuickBooks Recurring Transactions', entityType:'RecurringTransaction', materialize:materializeRecurring },
-  { key:'qb-tax-agencies', displayName:'QuickBooks Tax Agencies', entityType:'TaxAgency' },
+  { key:'qb-tax-agencies', displayName:'QuickBooks Tax Agencies', entityType:'TaxAgency', materialize:materializeTaxAgency },
   { key:'qb-tax-configurations', displayName:'QuickBooks Tax Configuration', entityType:'TaxCode', materialize:materializeTaxCode },
   { key:'qb-preferences', displayName:'QuickBooks Company Preferences', entityType:'Preferences', materialize:materializePreferences },
   { key:'qb-fixed-assets', displayName:'QuickBooks Fixed Assets', entityType:'Item', materialize:materializeFixedAsset },
@@ -368,8 +393,8 @@ function moduleFor(config: ExtendedConfig): ModuleDefinition {
     async findDuplicate(row, ctx) {
       const realmId = string(row._realmId); const sourceId = string(row.sourceId ?? row._quickbooksId)
       if (!realmId || !sourceId) return null
-      const archived = await findArchivedRecord(ctx.companyId, realmId, config.entityType, sourceId)
-      return archived ? { id: String(archived.local_id ?? archived.id), matchedOn:['sourceId'] } : null
+      const linked=await resolveQuickBooksLocalId(ctx.companyId,realmId,sourceId,[config.entityType])
+      return linked ? { id: linked.id, matchedOn:['sourceId'] } : null
     },
     async createRecord(row, ctx) {
       const realmId = string(row._realmId); const sourceId = string(row.sourceId ?? row._quickbooksId)

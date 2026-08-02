@@ -20,8 +20,9 @@ export interface ImportSourceFetchOptions {
   resumeStartPosition?: number
   partitionStart?: string
   partitionEnd?: string
+  signal?: AbortSignal
   onCheckpoint?: (checkpoint: { startPosition: number; partitionStart?: string; partitionEnd?: string; fetched: number }) => Promise<void> | void
-  onBatch?: (rows:Record<string,string>[])=>Promise<void>|void
+  onBatch?: (rows:Record<string,string>[], checkpoint: { startPosition:number; partitionStart?:string; partitionEnd?:string; fetched:number })=>Promise<void>|void
   preview?: {
     sampleSize: number
     cache?: Map<string, Promise<SourcePreviewBatch>>

@@ -72,6 +72,8 @@ export interface ModuleDefinition {
   findDuplicate: (record: Record<string, unknown>, ctx: ImportContext) => Promise<{ id: string; matchedOn: string[] } | null>
   createRecord: (record: Record<string, unknown>, ctx: ImportContext) => Promise<{ id: string }>
   updateRecord: (id: string, record: Record<string, unknown>, ctx: ImportContext) => Promise<void>
+  /** Compensates a failed create before it can be reported as imported. */
+  rollbackCreatedRecord?: (id: string, ctx: ImportContext) => Promise<void>
   exportRecords: (filters: Record<string, string>, ctx: ImportContext) => Promise<unknown[]>
   mapExportRow: (record: unknown) => Record<string, string | number | boolean | null>
   parseImportRow?: (mapped: Record<string, unknown>) => Record<string, unknown>
@@ -141,6 +143,7 @@ export interface ImportRowError {
   errorCode: string
   message: string
   rawRow?: Record<string, unknown>
+  details?: import('./import/import-error').ImportErrorDetails
 }
 
 export interface ImportJobRecord {

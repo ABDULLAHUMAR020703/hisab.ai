@@ -110,7 +110,7 @@ test('independent module previews use bounded concurrency and retain request ord
   assert.deepEqual(result.map((item) => item.key), resources.map((resource) => resource.key))
 })
 
-test('QuickBooks preview fetches only a count and bounded sample and shares duplicate entity requests', async () => {
+test('QuickBooks preview exposes one bounded customer-payment path', async () => {
   const calls = { count: 0, records: 0 }
   const provider = {
     getEntityCount: async (_context: unknown, entity: string) => {
@@ -129,15 +129,11 @@ test('QuickBooks preview fetches only a count and bounded sample and shares dupl
   const adapter = new QuickBooksImportAdapter()
   const cache = new Map<string, Promise<SourcePreviewBatch>>()
   const context = { accessToken: 'token', realmId: 'realm' }
-  const [payments, customerPayments] = await Promise.all([
-    adapter.fetchResource(provider, context, 'payments', { preview: { sampleSize: 10, cache } }),
-    adapter.fetchResource(provider, context, 'customer-payments', { preview: { sampleSize: 10, cache } }),
-  ])
+  const customerPayments = await adapter.fetchResource(provider, context, 'customer-payments', { preview: { sampleSize: 10, cache } })
   assert.deepEqual(calls, { count: 1, records: 1 })
-  assert.equal(payments.totalCount, 250_000)
   assert.equal(customerPayments.totalCount, 250_000)
-  assert.equal(payments.rows.length, 10)
-  assert.equal(payments.sampled, true)
+  assert.equal(customerPayments.rows.length, 10)
+  assert.equal(customerPayments.sampled, true)
 })
 
 test('QuickBooks provider stops pagination at the preview record limit', async () => {

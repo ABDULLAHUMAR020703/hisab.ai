@@ -5,10 +5,19 @@ import { getAppUser } from '@/lib/supabase/auth-users'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { TenantAccessError } from '@/lib/tenant-error'
+import { AsyncLocalStorage } from 'node:async_hooks'
 
 export { TenantAccessError } from '@/lib/tenant-error'
 
 export const COMPANY_COOKIE = 'hisab_company_id'
+
+const backgroundTenantContext = new AsyncLocalStorage<{ companyId:string }>()
+
+/** Runs trusted background migration work with an already-authorized tenant. */
+export function withCompanyContext<T>(companyId:string,operation:()=>T):T{
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(companyId))throw new TenantAccessError('A valid company context is required')
+  return backgroundTenantContext.run({companyId},operation)
+}
 
 async function validateCompanyAccess(userId: string, companyId: string): Promise<boolean> {
   const admin = createAdminClient()
@@ -26,6 +35,9 @@ async function validateCompanyAccess(userId: string, companyId: string): Promise
 
 /** Resolve the authenticated user's active company. Never falls back to a shared/default tenant. */
 export async function resolveCompanyId(_client?: SupabaseClient): Promise<string> {
+  void _client
+  const background=backgroundTenantContext.getStore()
+  if(background?.companyId)return background.companyId
   const supabase = await createClient()
   const { data, error } = await supabase.auth.getUser()
 

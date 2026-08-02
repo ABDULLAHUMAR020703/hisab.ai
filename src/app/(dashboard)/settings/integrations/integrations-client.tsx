@@ -3,7 +3,7 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
-import { AlertCircle, BadgeCheck, CheckCircle2, Clock3, Download, Link2, RefreshCw, ShieldCheck, Unplug } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Clock3, Download, Link2, RefreshCw, ShieldCheck, Unplug } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { ImportWizard } from '@/components/import-export/ImportWizard'
@@ -48,7 +48,7 @@ async function apiError(response: Response): Promise<string> {
   return body?.error?.message ?? 'The integration request could not be completed.'
 }
 
-export function IntegrationsClient({ oauthFeedback }: { oauthFeedback?: OAuthFeedback }) {
+export function IntegrationsClient({ oauthFeedback, certificationEnabled }: { oauthFeedback?: OAuthFeedback; certificationEnabled: boolean }) {
   const [items, setItems] = useState<IntegrationItem[]>([])
   const [loading, setLoading] = useState(true)
   const [busyProvider, setBusyProvider] = useState<string | null>(null)
@@ -216,7 +216,7 @@ export function IntegrationsClient({ oauthFeedback }: { oauthFeedback?: OAuthFee
                   canDisconnect ? (
                     <div className="flex gap-2">
                       {item.status === 'CONNECTED' && <Link href="/settings/integrations/quickbooks-validation" className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"><ShieldCheck size={14} /> Validate</Link>}
-                      {item.status === 'CONNECTED' && <Link href="/settings/integrations/quickbooks-certification" className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"><BadgeCheck size={14} /> Certify</Link>}
+                      {certificationEnabled && item.status === 'CONNECTED' && <Link href="/settings/integrations/quickbooks-certification" className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50">Certify</Link>}
                       {item.status === 'CONNECTED' && <Button onClick={() => setShowImport(true)}><Download size={14} /> Migrate</Button>}
                       <Button variant="outline" loading={busyProvider === item.provider} onClick={() => void mutate(item.provider, 'disconnect')}>
                         <Unplug size={14} /> Disconnect

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { AccountingProvider, ProviderAccessContext } from '@/integrations/accounting/contracts/accounting-provider'
 import { extractQuickBooksPaymentRelationships } from '../quickbooks/payment-relationships'
 import type { ImportSourceAdapter, ImportSourceFetchOptions, ImportSourceResource, NormalizedImportResource } from './types'
@@ -13,6 +14,15 @@ function value(value: unknown): string {
   return typeof value === 'boolean' ? String(value) : String(value).trim()
 }
 
+function primaryEmailAddress(valueToNormalize: unknown): string {
+  const addresses = value(valueToNormalize)
+    .split(/[;,]/)
+    .map((addressValue) => addressValue.trim())
+    .filter(Boolean)
+
+  return addresses.find((addressValue) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addressValue)) ?? ''
+}
+
 function address(record: JsonRecord): JsonRecord {
   return object(record.BillAddr ?? record.ShipAddr)
 }
@@ -21,7 +31,10 @@ function contact(record: JsonRecord) {
   const location = address(record)
   return {
     name: value(record.DisplayName ?? record.CompanyName ?? record.FullyQualifiedName),
-    email: value(object(record.PrimaryEmailAddr).Address),
+    // QuickBooks permits multiple comma/semicolon-separated addresses in its
+    // single PrimaryEmailAddr value. Hisab's canonical contact field stores
+    // one address; the untouched source value remains in _quickbooksRaw.
+    email: primaryEmailAddress(object(record.PrimaryEmailAddr).Address),
     phone: value(object(record.PrimaryPhone).FreeFormNumber),
     address: [location.Line1, location.Line2].map(value).filter(Boolean).join(', '),
     city: value(location.City),
@@ -41,7 +54,6 @@ const RESOURCES: ImportSourceResource[] = [
   { key: 'payment-terms', label: 'Payment Terms', moduleKey: 'payment-terms' },
   { key: 'invoices', label: 'Invoices', moduleKey: 'invoices' },
   { key: 'bills', label: 'Bills', moduleKey: 'bills' },
-  { key: 'payments', label: 'Payments', moduleKey: 'customer-payments' },
   { key: 'expenses', label: 'Expenses', moduleKey: 'expenses' },
   { key: 'journal-entries', label: 'Journal Entries', moduleKey: 'journal-entries' },
   { key: 'sales-receipts', label: 'Sales Receipts', moduleKey: 'sales-receipts' },
@@ -55,11 +67,9 @@ const RESOURCES: ImportSourceResource[] = [
   { key: 'exchange-rates', label: 'Exchange Rates', moduleKey: 'qb-exchange-rates' },
   { key: 'classes', label: 'Classes', moduleKey: 'qb-classes' },
   { key: 'departments', label: 'Departments', moduleKey: 'qb-departments' },
-  { key: 'locations', label: 'Locations', moduleKey: 'qb-locations' },
   { key: 'employees', label: 'Employees', moduleKey: 'qb-employees' },
   { key: 'time-activities', label: 'Time Activities', moduleKey: 'qb-time-activities' },
   { key: 'credit-memos', label: 'Credit Memos', moduleKey: 'qb-credit-memos' },
-  { key: 'bill-payments', label: 'Bill Payments', moduleKey: 'qb-bill-payments' },
   { key: 'deposits', label: 'Deposits', moduleKey: 'qb-deposits' },
   { key: 'transfers', label: 'Transfers', moduleKey: 'qb-transfers' },
   { key: 'inventory-adjustments', label: 'Inventory Adjustments', moduleKey: 'qb-inventory-adjustments' },
@@ -73,22 +83,22 @@ const RESOURCES: ImportSourceResource[] = [
 
 export const QUICKBOOKS_ENTITY_BY_RESOURCE: Record<string, string> = {
   accounts:'Account', customers:'Customer', vendors:'Vendor', items:'Item', 'tax-codes':'TaxRate', 'payment-terms':'Term',
-  invoices:'Invoice', bills:'Bill', payments:'Payment', expenses:'Purchase', 'journal-entries':'JournalEntry', 'sales-receipts':'SalesReceipt',
+  invoices:'Invoice', bills:'Bill', expenses:'Purchase', 'journal-entries':'JournalEntry', 'sales-receipts':'SalesReceipt',
   'purchase-orders':'PurchaseOrder', 'vendor-credits':'VendorCredit', estimates:'Estimate', 'customer-payments':'Payment', 'vendor-payments':'BillPayment',
-  projects: 'Customer', budgets: 'Budget', 'exchange-rates': 'ExchangeRate', classes: 'Class', departments: 'Department', locations: 'Department', employees: 'Employee',
-  'time-activities': 'TimeActivity', 'credit-memos': 'CreditMemo', 'bill-payments': 'BillPayment', deposits: 'Deposit', transfers: 'Transfer',
+  projects: 'Customer', budgets: 'Budget', 'exchange-rates': 'ExchangeRate', classes: 'Class', departments: 'Department', employees: 'Employee',
+  'time-activities': 'TimeActivity', 'credit-memos': 'CreditMemo', deposits: 'Deposit', transfers: 'Transfer',
   'inventory-adjustments': 'InventoryAdjustment', attachments: 'Attachable', 'recurring-transactions': 'RecurringTransaction', 'tax-agencies': 'TaxAgency',
-  'tax-configurations': 'TaxCode', 'fixed-assets': 'Item',
+  'tax-configurations': 'TaxCode', preferences:'Preferences', 'fixed-assets': 'Item',
 }
 
 const PARTITIONED_RESOURCES = new Set([
-  'invoices','bills','payments','expenses','journal-entries','sales-receipts','purchase-orders','vendor-credits','estimates','customer-payments','vendor-payments',
-  'credit-memos','bill-payments','deposits','transfers','inventory-adjustments',
+  'invoices','bills','expenses','journal-entries','sales-receipts','purchase-orders','vendor-credits','estimates','customer-payments','vendor-payments',
+  'credit-memos','deposits','transfers','inventory-adjustments',
 ])
 
 const SPECIAL_PREVIEW_RESOURCES = new Set([
   'accounts', 'customers', 'vendors', 'items', 'tax-codes', 'payment-terms',
-  'invoices', 'bills', 'payments', 'expenses', 'journal-entries', 'sales-receipts',
+  'invoices', 'bills', 'expenses', 'journal-entries', 'sales-receipts',
   'purchase-orders', 'vendor-credits', 'estimates', 'customer-payments', 'vendor-payments',
   'preferences',
 ])
@@ -115,8 +125,10 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
           startPosition:options?.resumeStartPosition,
           partitionStart:options?.partitionStart?new Date(options.partitionStart):undefined,
           partitionEnd:options?.partitionEnd?new Date(options.partitionEnd):undefined,
+          retainRows:!options?.onBatch,
+          signal:options?.signal,
           onCheckpoint:options?.onCheckpoint?async checkpoint=>options.onCheckpoint!({...checkpoint,fetched:checkpoint.extractedCount}):undefined,
-          onPage:options?.onBatch?async page=>options.onBatch!(this.normalizeRecords(resourceKey,page,context.realmId)):undefined,
+          onPage:options?.onBatch?async(page,checkpoint)=>options.onBatch!(this.normalizeRecords(resourceKey,filterResourceRows(resourceKey,page),context.realmId),{...checkpoint,fetched:checkpoint.extractedCount}):undefined,
         })
       : fallback()
 
@@ -130,6 +142,7 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
       const entity = QUICKBOOKS_ENTITY_BY_RESOURCE[resourceKey]
       if (!entity || !provider.getEntityRecords) return { ...resource, rows: [], totalCount: 0, countAccuracy: 'exact', sampled: true }
       const where = resourceKey === 'projects' ? 'Job = true'
+        : resourceKey === 'customers' ? 'Job = false'
         : resourceKey === 'fixed-assets' ? "Type = 'FixedAsset'"
           : undefined
       const cacheKey = `${entity}:${where ?? 'all'}:${sampleSize}:inactive`
@@ -142,9 +155,7 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
         options.preview.cache?.set(cacheKey, pending)
       }
       const preview = await pending
-      let sourceRows = preview.rows
-      if (resourceKey === 'projects') sourceRows = sourceRows.filter(row => Boolean(object(row).Job) || Boolean(object(row).ParentRef))
-      if (resourceKey === 'fixed-assets') sourceRows = sourceRows.filter(row => value(object(row).Type).toLowerCase() === 'fixedasset')
+      const sourceRows = filterResourceRows(resourceKey, preview.rows)
       const rows = this.normalizeRecords(resourceKey, sourceRows.slice(0, sampleSize), context.realmId)
       return { ...resource, rows, totalCount: preview.count, countAccuracy: 'exact', sampled: true }
     }
@@ -163,7 +174,6 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
       case 'payment-terms': sourceRows = await provider.getPaymentTerms(context); break
       case 'invoices': sourceRows = await fetchEntity('Invoice',()=>provider.getInvoices(context)); break
       case 'bills': sourceRows = await fetchEntity('Bill',()=>provider.getBills(context)); break
-      case 'payments': sourceRows = await fetchEntity('Payment',()=>provider.getPayments(context)); break
       case 'expenses': sourceRows = await fetchEntity('Purchase',()=>provider.getExpenses?.(context)??Promise.resolve([])); break
       case 'journal-entries': sourceRows = await fetchEntity('JournalEntry',()=>provider.getJournalEntries?.(context)??Promise.resolve([])); break
       case 'sales-receipts': sourceRows = await fetchEntity('SalesReceipt',()=>provider.getSalesReceipts?.(context)??Promise.resolve([])); break
@@ -180,8 +190,7 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
       }
     }
 
-    if (resourceKey === 'projects') sourceRows = sourceRows.filter(row => Boolean(object(row).Job) || Boolean(object(row).ParentRef))
-    if (resourceKey === 'fixed-assets') sourceRows = sourceRows.filter(row => value(object(row).Type).toLowerCase() === 'fixedasset')
+    sourceRows = filterResourceRows(resourceKey, sourceRows)
 
     const rows = this.normalizeRecords(resourceKey, sourceRows, context.realmId)
     if (resourceKey === 'attachments' && provider.downloadAttachment && options?.companyId) {
@@ -208,16 +217,19 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
   normalizeRecords(resourceKey: string, sourceRows: unknown[], realmId: string): Record<string, string>[] {
     const rows: Record<string, string>[] = sourceRows.map((row) => {
       const source = object(row)
-      const syntheticId = resourceKey === 'preferences' ? 'Preferences' : value(source.Id)
+      const syntheticId = stableQuickBooksSourceId(resourceKey, source)
       return {
         ...this.normalize(resourceKey, source),
-        sourceId: value(source.Id) || (resourceKey === 'preferences' ? 'Preferences' : this.normalize(resourceKey, source).sourceId),
+        sourceId: syntheticId,
         _quickbooksId: syntheticId,
         _quickbooksEntity: QUICKBOOKS_ENTITY_BY_RESOURCE[resourceKey] ?? resourceKey,
         _realmId: realmId,
         _syncToken: value(source.SyncToken),
         _quickbooksRaw: JSON.stringify(source),
         _quickbooksMeta: JSON.stringify(object(source.MetaData)),
+        _quickbooksSyncToken: value(source.SyncToken),
+        _quickbooksRelationships: JSON.stringify(Array.isArray(source.LinkedTxn) ? source.LinkedTxn : []),
+        _quickbooksCustomFields: JSON.stringify(Array.isArray(source.CustomField) ? source.CustomField : []),
         _linkedTransactions: JSON.stringify(Array.isArray(source.LinkedTxn) ? source.LinkedTxn : []),
         _customFields: JSON.stringify(Array.isArray(source.CustomField) ? source.CustomField : []),
         _active: value(source.Active ?? true),
@@ -257,8 +269,8 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
         name: value(row.Name),
         itemCode: value(row.Sku) || `QB-${value(row.Id)}`,
         description: value(row.Description ?? row.PurchaseDesc),
-        category: value(row.Type) === 'Service' ? 'Services' : 'Products',
-        unit: value(row.Type) === 'Service' ? 'SVC' : 'PCS',
+        category: value(row.Type) === 'Inventory' ? 'Products' : 'Services',
+        unit: value(row.Type) === 'Inventory' ? 'PCS' : 'SVC',
         costPrice: value(row.PurchaseCost ?? 0),
         salePrice: value(row.UnitPrice ?? 0),
         quantity: value(row.QtyOnHand ?? 0),
@@ -274,7 +286,6 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
       }
       case 'invoices':
       case 'bills':
-      case 'payments':
       case 'expenses':
       case 'journal-entries':
       case 'sales-receipts':
@@ -294,12 +305,47 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
   }
 }
 
+function filterResourceRows(resourceKey: string, sourceRows: unknown[]): unknown[] {
+  if (!['projects','customers','fixed-assets','items'].includes(resourceKey)) return sourceRows
+  return sourceRows.filter(item => {
+    const row = object(item)
+    const parentId = value(object(row.ParentRef).value)
+    const isJob = row.Job === true || value(row.Job).toLowerCase() === 'true'
+    if (resourceKey === 'projects') return isJob || Boolean(parentId)
+    if (resourceKey === 'customers') return !isJob && !parentId
+    const isFixedAsset = value(row.Type).toLowerCase() === 'fixedasset'
+    return resourceKey === 'fixed-assets' ? isFixedAsset : !isFixedAsset
+  })
+}
+
+function stableJson(valueToSerialize: unknown): string {
+  if (Array.isArray(valueToSerialize)) return `[${valueToSerialize.map(stableJson).join(',')}]`
+  if (valueToSerialize && typeof valueToSerialize === 'object') {
+    return `{${Object.entries(valueToSerialize as JsonRecord).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(',')}}`
+  }
+  return JSON.stringify(valueToSerialize) ?? 'null'
+}
+
+export function stableQuickBooksSourceId(resourceKey: string, source: JsonRecord): string {
+  const nativeId = value(source.Id)
+  if (nativeId) return nativeId
+  if (resourceKey === 'preferences') return 'Preferences'
+  if (resourceKey === 'exchange-rates') {
+    const from = value(source.SourceCurrencyCode ?? object(source.SourceCurrencyRef).value ?? source.FromCurrency).toUpperCase()
+    const to = value(source.TargetCurrencyCode ?? object(source.TargetCurrencyRef).value ?? source.ToCurrency).toUpperCase()
+    const date = value(source.AsOfDate ?? source.EffectiveDate ?? source.Date).slice(0, 10)
+    if (from && to && date) return `ExchangeRate:${from}:${to}:${date}`
+  }
+  const digest = createHash('sha256').update(`${resourceKey}:${stableJson(source)}`).digest('hex')
+  return `${resourceKey}:${digest}`
+}
+
 function normalizeExtended(resourceKey: string, row: JsonRecord): Record<string, string> {
   const meta = object(row.MetaData)
   const currency = object(row.CurrencyRef)
   const parent = object(row.ParentRef)
   const entity = object(row.EntityRef)
-  const account = object(row.AccountRef ?? row.AdjustmentAccountRef)
+  const account = object(row.AccountRef ?? row.AdjustmentAccountRef ?? row.AdjustAccountRef)
   return {
     sourceId: value(row.Id),
     name: value(row.DisplayName ?? row.Name ?? row.DocNumber ?? `${resourceKey}-${value(row.Id)}`),
@@ -331,16 +377,21 @@ function normalizeTransaction(resourceKey: string, row: JsonRecord): Record<stri
   const linked = linkedCandidates.length ? object(linkedCandidates[0]) : {}
   const lines = transactionLines.map((line) => {
     const valueLine = object(line)
-    const detail = object(valueLine.SalesItemLineDetail ?? valueLine.PurchaseItemLineDetail ?? valueLine.ItemBasedExpenseLineDetail ?? valueLine.AccountBasedExpenseLineDetail ?? valueLine.JournalEntryLineDetail)
+    const detailType = value(valueLine.DetailType)
+    const detail = object(valueLine.SalesItemLineDetail ?? valueLine.PurchaseItemLineDetail ?? valueLine.ItemBasedExpenseLineDetail ?? valueLine.AccountBasedExpenseLineDetail ?? valueLine.JournalEntryLineDetail ?? valueLine.DiscountLineDetail)
     const item = object(detail.ItemRef)
-    const account = object(detail.AccountRef ?? valueLine.AccountRef)
+    const account = object(detail.AccountRef ?? detail.DiscountAccountRef ?? valueLine.AccountRef)
+    const quantity = Number(detail.Qty ?? 1)
+    const rawAmount = Number(valueLine.Amount ?? 0)
+    const amount = detailType === 'DiscountLineDetail' ? -Math.abs(rawAmount) : rawAmount
+    const unitPrice = detail.UnitPrice ?? (detailType === 'SubTotalLineDetail' ? 0 : quantity ? amount / quantity : amount)
     return {
       sourceLineId: value(valueLine.Id),
-      detailType: value(valueLine.DetailType),
+      detailType,
       description: value(valueLine.Description),
-      quantity: value(detail.Qty ?? 1),
-      unitPrice: value(detail.UnitPrice ?? 0),
-      amount: value(valueLine.Amount ?? 0),
+      quantity: value(quantity),
+      unitPrice: value(unitPrice),
+      amount: value(amount),
       taxRate: value(object(valueLine.TaxCodeRef).value ?? 0),
       itemCode: value(item.name ?? item.value),
       itemSourceId: value(item.value),
@@ -355,7 +406,7 @@ function normalizeTransaction(resourceKey: string, row: JsonRecord): Record<stri
   const journalTotal = resourceKey === 'journal-entries' ? lines.reduce((sum,line)=>sum+Number(line.debit||0),0) : 0
   const total = value(row.TotalAmt ?? row.Amount ?? journalTotal)
   const transactionTax = value(object(row.TxnTaxDetail).TotalTax ?? 0)
-  const paymentKind = resourceKey === 'customer-payments' || resourceKey === 'payments' ? 'CUSTOMER' : resourceKey === 'vendor-payments' ? 'VENDOR' : null
+  const paymentKind = resourceKey === 'customer-payments' ? 'CUSTOMER' : resourceKey === 'vendor-payments' ? 'VENDOR' : null
   const paymentRelationships = paymentKind ? extractQuickBooksPaymentRelationships(row,paymentKind) : null
   return {
     transactionNo: value(row.DocNumber) || `QB-${value(row.Id)}`,

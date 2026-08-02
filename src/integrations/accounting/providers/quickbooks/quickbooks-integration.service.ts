@@ -13,10 +13,13 @@ import { Provider, type CompanyInfo, type ProviderTokenSet } from '../../contrac
 import { ProviderAuthenticationException, ProviderRequestException } from '../../utils/exceptions'
 import { quickBooksEndpoints, type QuickBooksConfig } from './quickbooks-config'
 import { diagnosticFetch } from '@/lib/ops/external-request-diagnostics'
+import { createHash } from 'node:crypto'
 
 type JsonRecord = Record<string, unknown>
 const QUERY_PAGE_SIZE = 1000
 const MINOR_VERSION = '75'
+const REQUEST_TIMEOUT_MS = 60_000
+const MAX_REQUEST_ATTEMPTS = 5
 const INACTIVE_ENTITIES = new Set(['Account', 'Class', 'Customer', 'Department', 'Employee', 'Item', 'PaymentMethod', 'TaxCode', 'Term', 'Vendor'])
 const TRANSACTION_DATE_ENTITIES = new Set(['Bill', 'BillPayment', 'CreditMemo', 'Deposit', 'Estimate', 'InventoryAdjustment', 'Invoice', 'JournalEntry', 'Payment', 'Purchase', 'PurchaseOrder', 'RefundReceipt', 'SalesReceipt', 'Transfer', 'VendorCredit'])
 
@@ -34,6 +37,29 @@ function fiscalYearValue(value: unknown): string | null {
   const month = Number(raw)
   const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
   return Number.isInteger(month) && month >= 1 && month <= 12 ? months[month - 1] : raw
+}
+
+interface QueryPageResult {
+  rows: unknown[]
+  count: number
+}
+
+async function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw signal.reason
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, ms)
+    const abort = () => { clearTimeout(timer); reject(signal?.reason) }
+    signal?.addEventListener('abort', abort, { once: true })
+  })
+}
+
+function networkFailure(error: unknown): string {
+  const current = error !== null && typeof error === 'object' ? error as Record<string, unknown> : {}
+  const cause = current.cause !== null && typeof current.cause === 'object' ? current.cause as Record<string, unknown> : {}
+  const name = error instanceof Error ? error.name : 'Error'
+  const message = error instanceof Error ? error.message : String(error)
+  const code = typeof current.code === 'string' ? current.code : typeof cause.code === 'string' ? cause.code : null
+  return `${name}: ${message}${code ? ` (${code})` : ''}`
 }
 
 export class QuickBooksIntegrationService implements AccountingProvider {
@@ -222,49 +248,79 @@ export class QuickBooksIntegrationService implements AccountingProvider {
 
   private async queryAll(context: ProviderAccessContext, entity: string, options: ProviderEntityFetchOptions = {}): Promise<unknown[]> {
     if (options.partitioned && TRANSACTION_DATE_ENTITIES.has(entity)) return this.queryPartitioned(context, entity, options)
-    return this.queryPages(context, entity, options, options.where)
+    return (await this.queryPages(context, entity, options, options.where)).rows
   }
 
   private async queryPartitioned(context: ProviderAccessContext, entity: string, options: ProviderEntityFetchOptions): Promise<unknown[]> {
-    const first = options.partitionStart ?? new Date('1900-01-01T00:00:00.000Z')
+    const first = options.partitionStart ?? await this.findEarliestTransactionDate(context, entity, options.signal)
+    if (!first) return []
     const last = options.partitionEnd ?? new Date(Date.UTC(this.now().getUTCFullYear() + 1, 0, 1))
     const rows: unknown[] = []
+    let extractedCount = 0
     let resumePosition = options.startPosition ?? 1
     for (let start = new Date(first); start < last;) {
+      if (options.signal?.aborted) throw options.signal.reason
       const end = new Date(Math.min(Date.UTC(start.getUTCFullYear() + 10, start.getUTCMonth(), start.getUTCDate()), last.getTime()))
       const where = `TxnDate >= '${start.toISOString().slice(0, 10)}' AND TxnDate < '${end.toISOString().slice(0, 10)}'`
-      rows.push(...await this.queryPages(context, entity, { ...options, partitioned: false, startPosition: resumePosition }, where, rows.length, start, end))
+      const remaining = options.maxRecords === undefined ? undefined : Math.max(0, options.maxRecords - extractedCount)
+      if (remaining === 0) break
+      const pageResult = await this.queryPages(context, entity, { ...options, partitioned: false, startPosition: resumePosition, maxRecords: remaining }, where, extractedCount, start, end)
+      if (options.retainRows !== false) rows.push(...pageResult.rows)
+      extractedCount += pageResult.count
       resumePosition = 1
       start = end
     }
     return rows
   }
 
-  private async queryPages(context: ProviderAccessContext, entity: string, options: ProviderEntityFetchOptions, where?: string, offset = 0, partitionStart?: Date, partitionEnd?: Date): Promise<unknown[]> {
+  private async findEarliestTransactionDate(context: ProviderAccessContext, entity: string, signal?: AbortSignal): Promise<Date | null> {
+    const query = `SELECT * FROM ${entity} ORDERBY TxnDate ASC STARTPOSITION 1 MAXRESULTS 1`
+    const url = new URL(`${this.endpoints.api}/v3/company/${encodeURIComponent(context.realmId)}/query`)
+    url.searchParams.set('query', query)
+    url.searchParams.set('minorversion', MINOR_VERSION)
+    const body = await this.authorizedJson(url.toString(), context.accessToken, signal)
+    const response = record(body.QueryResponse)
+    const first = Array.isArray(response[entity]) ? response[entity][0] : response[entity]
+    const date = textValue(record(first).TxnDate)
+    if (!date) return null
+    const parsed = new Date(`${date}T00:00:00.000Z`)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+  }
+
+  private async queryPages(context: ProviderAccessContext, entity: string, options: ProviderEntityFetchOptions, where?: string, offset = 0, partitionStart?: Date, partitionEnd?: Date): Promise<QueryPageResult> {
     const configuredPageSize = Math.min(QUERY_PAGE_SIZE, Math.max(1, options.pageSize ?? QUERY_PAGE_SIZE))
     const maxRecords = options.maxRecords === undefined ? Number.POSITIVE_INFINITY : Math.max(0, options.maxRecords)
     const rows: unknown[] = []
+    let fetchedCount = 0
     const inactive = options.includeInactive && INACTIVE_ENTITIES.has(entity) ? 'Active IN (true, false)' : ''
     const predicate = [where, inactive].filter(Boolean).join(' AND ')
-    for (let start = options.startPosition ?? 1; rows.length < maxRecords;) {
-      const pageSize = Math.min(configuredPageSize, maxRecords - rows.length)
+    let previousPageSignature:string|null=null
+    for (let start = options.startPosition ?? 1; fetchedCount < maxRecords;) {
+      if (options.signal?.aborted) throw options.signal.reason
+      const pageSize = Math.min(configuredPageSize, maxRecords - fetchedCount)
       const query = `SELECT * FROM ${entity}${predicate ? ` WHERE ${predicate}` : ''} STARTPOSITION ${start} MAXRESULTS ${pageSize}`
       const url = new URL(`${this.endpoints.api}/v3/company/${encodeURIComponent(context.realmId)}/query`)
       url.searchParams.set('query', query)
       url.searchParams.set('minorversion', MINOR_VERSION)
-      const body = await this.authorizedJson(url.toString(), context.accessToken)
+      const body = await this.authorizedJson(url.toString(), context.accessToken, options.signal)
       const response = record(body.QueryResponse)
       const page = Array.isArray(response[entity])
         ? response[entity] as unknown[]
         : response[entity] ? [response[entity]] : []
-      rows.push(...page)
-      const checkpoint={ startPosition: start + page.length, partitionStart: partitionStart?.toISOString(), partitionEnd: partitionEnd?.toISOString(), extractedCount: offset + rows.length }
+      const returnedStart=Number(response.startPosition)
+      if(Number.isFinite(returnedStart)&&returnedStart>0&&returnedStart!==start)throw new ProviderRequestException(`QuickBooks pagination did not advance for ${entity}: requested ${start}, received ${returnedStart}.`)
+      const pageSignature=createHash('sha256').update(JSON.stringify([page.length,page[0]??null,page.at(-1)??null])).digest('hex')
+      if(page.length&&pageSignature===previousPageSignature)throw new ProviderRequestException(`QuickBooks pagination repeated a page for ${entity} at STARTPOSITION ${start}.`)
+      previousPageSignature=pageSignature
+      if (options.retainRows !== false) rows.push(...page)
+      fetchedCount += page.length
+      const checkpoint={ startPosition: start + page.length, partitionStart: partitionStart?.toISOString(), partitionEnd: partitionEnd?.toISOString(), extractedCount: offset + fetchedCount }
       if(options.onPage)await options.onPage(page,checkpoint)
       if (options.onCheckpoint) await options.onCheckpoint(checkpoint)
-      if (page.length < pageSize || rows.length >= maxRecords) break
+      if (page.length < pageSize || fetchedCount >= maxRecords) break
       start += page.length
     }
-    return rows
+    return { rows, count: fetchedCount }
   }
 
   private async requestTokens(body: URLSearchParams): Promise<ProviderTokenSet> {
@@ -302,31 +358,43 @@ export class QuickBooksIntegrationService implements AccountingProvider {
     }
   }
 
-  private async authorizedJson(url: string, accessToken: string): Promise<JsonRecord> {
-    return record(await (await this.authorizedResponse(url, accessToken)).json())
+  private async authorizedJson(url: string, accessToken: string, signal?: AbortSignal): Promise<JsonRecord> {
+    return record(await (await this.authorizedResponse(url, accessToken, {}, signal)).json())
   }
 
-  private async authorizedResponse(url: string, accessToken: string, extraHeaders: Record<string, string> = {}): Promise<Response> {
+  private async authorizedResponse(url: string, accessToken: string, extraHeaders: Record<string, string> = {}, signal?: AbortSignal): Promise<Response> {
     let lastError: unknown
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const response = await this.fetchImpl(url, {
-        headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        ...extraHeaders,
-      },
-        signal: AbortSignal.timeout(60_000),
-      })
-      if (response.status === 401) throw new ProviderAuthenticationException()
-      if (response.ok) return response
-      if (response.status !== 429 && response.status < 500) throw new ProviderRequestException(`QuickBooks data request failed (${response.status}).`)
-      lastError = new ProviderRequestException(`QuickBooks data request failed (${response.status}).`)
-      const retryAfter = Number(response.headers.get('retry-after'))
-      const delay = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 60_000) : Math.min(1000 * 2 ** attempt, 15_000)
-      await new Promise(resolve => setTimeout(resolve, delay))
+    for (let attempt = 0; attempt < MAX_REQUEST_ATTEMPTS; attempt++) {
+      if (signal?.aborted) throw signal.reason
+      try {
+        const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+        const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout
+        const response = await this.fetchImpl(url, {
+          headers: {
+            Accept: 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+            ...extraHeaders,
+          },
+          signal: requestSignal,
+        })
+        if (response.status === 401) throw new ProviderAuthenticationException()
+        if (response.ok) return response
+        if (response.status !== 429 && response.status < 500) throw new ProviderRequestException(`QuickBooks data request failed (${response.status}).`)
+        lastError = new ProviderRequestException(`QuickBooks data request failed (${response.status}).`)
+        const retryAfter = Number(response.headers.get('retry-after'))
+        const delay = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 60_000) : Math.min(1000 * 2 ** attempt, 15_000)
+        await abortableDelay(delay, signal)
+      } catch (error) {
+        if (error instanceof ProviderAuthenticationException) throw error
+        if (error instanceof ProviderRequestException && error.message.includes('failed (') && !/\((429|5\d\d)\)/.test(error.message)) throw error
+        if (signal?.aborted) throw signal.reason
+        lastError = error
+        if (attempt < MAX_REQUEST_ATTEMPTS - 1) await abortableDelay(Math.min(1000 * 2 ** attempt, 15_000), signal)
+      }
     }
-    throw lastError ?? new ProviderRequestException('QuickBooks data request failed.')
+    const detail = lastError ? networkFailure(lastError) : 'unknown transport failure'
+    throw new ProviderRequestException(`QuickBooks data request failed after ${MAX_REQUEST_ATTEMPTS} attempts: ${detail}`, 502, { cause:lastError })
   }
 
   private basicAuthorization(): string {

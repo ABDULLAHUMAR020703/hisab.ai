@@ -223,7 +223,7 @@ export async function saveImportJobErrors(
       field_key: error.fieldKey ?? null,
       error_code: error.errorCode,
       message: error.message,
-      raw_row: error.rawRow ?? null,
+      raw_row: error.rawRow ?? (error.details ? { _importError:error.details } : null),
     }))
 
     const { error } = await db.from('import_job_errors').insert(payload)
@@ -243,13 +243,17 @@ export async function getImportJobErrors(jobId: string): Promise<ImportRowError[
 
   if (error) throw error
 
-  return (data ?? []).map((row) => ({
-    rowNumber: Number(row.row_number),
-    fieldKey: row.field_key ? String(row.field_key) : undefined,
-    errorCode: String(row.error_code),
-    message: String(row.message),
-    rawRow: (row.raw_row as Record<string, unknown> | null) ?? undefined,
-  }))
+  return (data ?? []).map((row) => {
+    const rawRow=(row.raw_row as Record<string, unknown>|null)??undefined
+    return {
+      rowNumber: Number(row.row_number),
+      fieldKey: row.field_key ? String(row.field_key) : undefined,
+      errorCode: String(row.error_code),
+      message: String(row.message),
+      rawRow,
+      details: rawRow?._importError && typeof rawRow._importError==='object' ? rawRow._importError as ImportRowError['details'] : undefined,
+    }
+  })
 }
 
 export async function isJobCancelled(jobId: string): Promise<boolean> {

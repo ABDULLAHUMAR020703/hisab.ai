@@ -3,6 +3,12 @@ import { createHash } from 'node:crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
 
 type Row = Record<string, unknown>
+const QUICKBOOKS_MAPPING_VERSION='2026-08-02-operational-v4'
+
+function sourcePayloadHash(raw:Row,entityType:string){
+  const mappingVersion=entityType==='Item'?`${QUICKBOOKS_MAPPING_VERSION}:`:''
+  return createHash('sha256').update(`${mappingVersion}${JSON.stringify(raw)}`).digest('hex')
+}
 
 export function parseQuickBooksRaw(row: Row): Row {
   if (typeof row._quickbooksRaw === 'string') {
@@ -28,7 +34,6 @@ export async function archiveQuickBooksRecord(input: { companyId: string; realmI
   const sourceId = String(raw.Id ?? input.row._quickbooksId ?? input.row.sourceId ?? '')
   if (!sourceId) throw new Error(`QuickBooks ${input.entityType} record is missing Id.`)
   const metadata = raw.MetaData && typeof raw.MetaData === 'object' ? raw.MetaData as Row : {}
-  const payload = JSON.stringify(raw)
   const record = {
     company_id: input.companyId,
     realm_id: input.realmId,
@@ -40,15 +45,14 @@ export async function archiveQuickBooksRecord(input: { companyId: string; realmI
     is_active: raw.Active === undefined ? null : Boolean(raw.Active),
     is_deleted: String(raw.status ?? '').toLowerCase() === 'deleted',
     source_payload: raw,
-    payload_hash: createHash('sha256').update(payload).digest('hex'),
+    payload_hash: sourcePayloadHash(raw,input.entityType),
     relationships: collectRelationships(raw),
     custom_fields: Array.isArray(raw.CustomField) ? raw.CustomField : [],
     currency_code: raw.CurrencyRef && typeof raw.CurrencyRef === 'object' ? String((raw.CurrencyRef as Row).value ?? '') || null : null,
     exchange_rate: raw.ExchangeRate === undefined ? null : Number(raw.ExchangeRate),
-    local_table: input.localTable ?? null,
-    local_id: input.localId ?? null,
-    extraction_partition: input.partition ?? null,
-    imported_at: input.localId ? new Date().toISOString() : null,
+    ...(input.localTable !== undefined ? { local_table:input.localTable } : {}),
+    ...(input.localId !== undefined ? { local_id:input.localId, imported_at:new Date().toISOString() } : {}),
+    ...(input.partition !== undefined ? { extraction_partition:input.partition } : {}),
     updated_at: new Date().toISOString(),
   }
   const { data, error } = await createAdminClient().from('quickbooks_migration_records').upsert(record, { onConflict: 'company_id,realm_id,entity_type,source_id' }).select('*').single()
@@ -65,11 +69,33 @@ export async function archiveQuickBooksRecord(input: { companyId: string; realmI
   return data
 }
 
+export async function isQuickBooksRecordUnchanged(companyId:string,row:Row):Promise<boolean>{
+  const realmId=String(row._realmId??''),entityType=String(row._quickbooksEntity??''),sourceId=String(row._quickbooksId??row.sourceId??'')
+  if(!realmId||!entityType||!sourceId)return false
+  const raw=parseQuickBooksRaw(row),payloadHash=sourcePayloadHash(raw,entityType)
+  const existing=await createAdminClient().from('quickbooks_migration_records').select('payload_hash,local_id,imported_at').eq('company_id',companyId).eq('realm_id',realmId).eq('entity_type',entityType).eq('source_id',sourceId).maybeSingle()
+  if(existing.error)throw existing.error
+  return Boolean(existing.data?.local_id&&existing.data.imported_at&&existing.data.payload_hash===payloadHash)
+}
+
 export async function linkArchivedQuickBooksRecord(input: { companyId: string; realmId: string; entityType: string; sourceId: string; localTable: string; localId: string }) {
   const { error } = await createAdminClient().from('quickbooks_migration_records').update({ local_table: input.localTable, local_id: input.localId, imported_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('company_id', input.companyId).eq('realm_id', input.realmId).eq('entity_type', input.entityType).eq('source_id', input.sourceId)
   if (error) throw error
   const linked = await createAdminClient().from('quickbooks_migration_local_links').upsert({ company_id:input.companyId, realm_id:input.realmId, entity_type:input.entityType, source_id:input.sourceId, local_table:input.localTable, local_id:input.localId, updated_at:new Date().toISOString() }, { onConflict:'company_id,realm_id,entity_type,source_id,local_table,local_id' })
   if (linked.error) throw linked.error
+}
+
+export async function assertQuickBooksRecordLinked(companyId:string,row:Row,expectedLocalId:string){
+  const realmId=String(row._realmId??''),entityType=String(row._quickbooksEntity??''),sourceId=String(row._quickbooksId??row.sourceId??'')
+  if(!realmId||!entityType||!sourceId)return
+  const db=createAdminClient()
+  const record=await db.from('quickbooks_migration_records').select('local_id,local_table,imported_at').eq('company_id',companyId).eq('realm_id',realmId).eq('entity_type',entityType).eq('source_id',sourceId).maybeSingle()
+  if(record.error)throw record.error
+  if(!record.data?.local_id||!record.data.local_table||!record.data.imported_at)throw new Error(`QuickBooks ${entityType} ${sourceId} was preserved but did not complete native materialization.`)
+  if(String(record.data.local_id)!==expectedLocalId)throw new Error(`QuickBooks ${entityType} ${sourceId} linked to an unexpected native record.`)
+  const link=await db.from('quickbooks_migration_local_links').select('id').eq('company_id',companyId).eq('realm_id',realmId).eq('entity_type',entityType).eq('source_id',sourceId).eq('local_table',record.data.local_table).eq('local_id',expectedLocalId).maybeSingle()
+  if(link.error)throw link.error
+  if(!link.data)throw new Error(`QuickBooks ${entityType} ${sourceId} has no durable native migration link.`)
 }
 
 export async function recordQuickBooksWarning(input: { companyId: string; realmId: string; resourceKey: string; sourceId?: string; code: string; message: string; details?: Row }) {
@@ -84,18 +110,38 @@ export async function findArchivedRecord(companyId: string, realmId: string, ent
 }
 
 export async function resolveQuickBooksLocalId(companyId: string, realmId: string, sourceId: string, entityTypes?: string[], localTables?: string[]) {
-  let linkQuery = createAdminClient().from('quickbooks_migration_local_links').select('local_id,local_table').eq('company_id',companyId).eq('realm_id',realmId).eq('source_id',sourceId).limit(1)
-  if (entityTypes?.length) linkQuery = linkQuery.in('entity_type',entityTypes)
-  if (localTables?.length) linkQuery = linkQuery.in('local_table',localTables)
-  const linked = await linkQuery.maybeSingle()
-  if (linked.error) throw linked.error
-  if (linked.data) return { id:String(linked.data.local_id), table:String(linked.data.local_table) }
   let query = createAdminClient().from('quickbooks_migration_records').select('local_id,local_table').eq('company_id', companyId).eq('realm_id', realmId).eq('source_id', sourceId).not('local_id', 'is', null).limit(1)
   if (entityTypes?.length) query = query.in('entity_type', entityTypes)
   if (localTables?.length) query = query.in('local_table', localTables)
   const { data, error } = await query.maybeSingle()
   if (error) throw error
-  return data ? { id: String(data.local_id), table: String(data.local_table) } : null
+  if(data)return { id: String(data.local_id), table: String(data.local_table) }
+  let linkQuery = createAdminClient().from('quickbooks_migration_local_links').select('local_id,local_table').eq('company_id',companyId).eq('realm_id',realmId).eq('source_id',sourceId).order('updated_at',{ascending:false}).limit(1)
+  if (entityTypes?.length) linkQuery = linkQuery.in('entity_type',entityTypes)
+  if (localTables?.length) linkQuery = linkQuery.in('local_table',localTables)
+  const linked = await linkQuery.maybeSingle()
+  if (linked.error) throw linked.error
+  return linked.data ? { id:String(linked.data.local_id), table:String(linked.data.local_table) } : null
+}
+
+export async function resolveQuickBooksCustomerContext(companyId:string,realmId:string,sourceId:string) {
+  const direct=await resolveQuickBooksLocalId(companyId,realmId,sourceId,['Customer'],['customers'])
+  const project=await resolveQuickBooksLocalId(companyId,realmId,sourceId,['Customer'],['cost_centers'])
+  if(direct)return {customerId:direct.id,projectId:project?.id??null}
+  const archived=await createAdminClient().from('quickbooks_migration_records').select('source_payload').eq('company_id',companyId).eq('realm_id',realmId).eq('entity_type','Customer').eq('source_id',sourceId).maybeSingle()
+  if(archived.error)throw archived.error
+  const payload=(archived.data?.source_payload??{}) as Row
+  const parent=payload.ParentRef&&typeof payload.ParentRef==='object'?String((payload.ParentRef as Row).value??''):''
+  const customer=parent?await resolveQuickBooksLocalId(companyId,realmId,parent,['Customer'],['customers']):null
+  return customer?{customerId:customer.id,projectId:project?.id??null}:null
+}
+
+export async function resolveQuickBooksInventoryItemId(companyId:string,realmId:string,sourceId:string) {
+  const archived=await createAdminClient().from('quickbooks_migration_records').select('source_payload').eq('company_id',companyId).eq('realm_id',realmId).eq('entity_type','Item').eq('source_id',sourceId).maybeSingle()
+  if(archived.error)throw archived.error
+  const payload=(archived.data?.source_payload??{}) as Row
+  if(String(payload.Type??'').toLowerCase()!=='inventory')return null
+  return resolveQuickBooksLocalId(companyId,realmId,sourceId,['Item'],['inventory_items'])
 }
 
 export async function materializeQuickBooksCustomFields(input: { companyId:string; entityType:string; entityId:string; row:Row }) {

@@ -20,7 +20,6 @@ const LABELS: Partial<Record<QuickBooksValidationModule, string>> = {
   'payment-terms': 'Payment Terms',
   invoices: 'Invoices',
   bills: 'Bills',
-  payments: 'Payments',
   'journal-entries': 'Journal Entries',
   expenses: 'Expenses',
 }

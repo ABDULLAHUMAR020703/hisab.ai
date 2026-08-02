@@ -41,6 +41,10 @@ QuickBooks OAuth credentials are configured in the Intuit Developer dashboard. U
 shown above. Replace the URI with the deployed application callback URL in production;
 never commit real client credentials.
 
+QuickBooks Accounting Certification is temporarily frozen for production and
+defaults to disabled. See [the certification feature-freeze documentation](QUICKBOOKS_CERTIFICATION_FEATURE_FREEZE.md)
+for the single flag used to enable it for local development or later releases.
+
 After connecting QuickBooks under **Settings > Integrations**, choose **Import** to run
 the existing Import Wizard against QuickBooks Online. Phase 3 supports read-only
 provider imports for Chart of Accounts, Customers, Vendors, Products & Services,

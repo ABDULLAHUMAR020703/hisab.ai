@@ -1,6 +1,6 @@
 export class AccountingIntegrationException extends Error {
-  constructor(message: string, readonly statusCode: number, readonly code: string) {
-    super(message)
+  constructor(message: string, readonly statusCode: number, readonly code: string, options?: { cause?: unknown }) {
+    super(message, options)
     this.name = new.target.name
   }
 }
@@ -66,7 +66,7 @@ export class ProviderAuthenticationException extends AccountingIntegrationExcept
 }
 
 export class ProviderRequestException extends AccountingIntegrationException {
-  constructor(message = 'The accounting provider request failed.', statusCode = 502) {
-    super(message, statusCode, 'PROVIDER_REQUEST_FAILED')
+  constructor(message = 'The accounting provider request failed.', statusCode = 502, options?: { cause?: unknown }) {
+    super(message, statusCode, 'PROVIDER_REQUEST_FAILED', options)
   }
 }

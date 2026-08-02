@@ -139,7 +139,7 @@ export async function postInvoiceToLedger(invoiceId: string, companyId?: string)
   }
 }
 
-export async function postBillToLedger(billId: string, companyId?: string) {
+export async function postBillToLedger(billId: string, companyId?: string, sourceCurrency?: string) {
   const cid = companyId ?? await resolveCompanyId()
   const client = createAdminClient()
   const accounts = await getAccountIds(cid)
@@ -154,7 +154,7 @@ export async function postBillToLedger(billId: string, companyId?: string) {
   if (error || !bill) throw new Error('Bill not found')
   if (!['RECEIVED', 'PAID', 'PARTIAL'].includes(String(bill.status))) return
 
-  const currency = String(bill.currency ?? 'SAR')
+  const currency = sourceCurrency || (await getCurrencyRoles(cid)).baseCurrency
   const entryDate = new Date(String(bill.date))
   const subtotal = Number(bill.subtotal)
   const taxAmount = Number(bill.tax_amount)
@@ -223,7 +223,7 @@ export async function postBillToLedger(billId: string, companyId?: string) {
   }
 }
 
-export async function postPaymentToLedger(paymentId: string, companyId?: string) {
+export async function postPaymentToLedger(paymentId: string, companyId?: string, sourceCurrency?: string) {
   const cid = companyId ?? await resolveCompanyId()
   const client = createAdminClient()
   const accounts = await getAccountIds(cid)
@@ -238,7 +238,7 @@ export async function postPaymentToLedger(paymentId: string, companyId?: string)
 
   if (error || !payment) throw new Error('Payment not found')
 
-  const currency = String(payment.currency ?? 'SAR')
+  const currency = sourceCurrency || (await getCurrencyRoles(cid)).baseCurrency
   const entryDate = new Date(String(payment.date))
   const amount = Number(payment.amount)
   const roles = await getCurrencyRoles(cid)
@@ -323,17 +323,18 @@ export async function postSalesReceiptToLedger(receiptId:string,companyId?:strin
   const exchangeRate=await storeDocumentBaseAmounts('sales_receipts',receiptId,cid,currency,entryDate,subtotal,taxAmount,total,Number(receipt.exchange_rate)||null)
   const depositAccount=receipt.deposit_account_id?String(receipt.deposit_account_id):accounts.bank
   if(!depositAccount)throw new Error('A bank or Undeposited Funds account is required to post a Sales Receipt.')
-  const postingLines=(receipt.lines??[]).filter((line:Record<string,unknown>)=>String(line.detail_type)==='SalesItemLineDetail'&&Math.abs(Number(line.amount??0))>0.0001)
+  const postingLines=(receipt.lines??[]).filter((line:Record<string,unknown>)=>['SalesItemLineDetail','DiscountLineDetail'].includes(String(line.detail_type))&&Math.abs(Number(line.amount??0))>0.0001)
   const sourceSubtotal=postingLines.reduce((sum:number,line:Record<string,unknown>)=>sum+Number(line.amount),0)
   if(Math.abs(sourceSubtotal-subtotal)>0.01)throw new Error(`Sales Receipt lines (${sourceSubtotal.toFixed(4)}) do not equal subtotal (${subtotal.toFixed(4)}).`)
   const lines:PostingLine[]=[{accountId:depositAccount,debit:total,description:`Sales Receipt ${receipt.receipt_no}`,exchangeRateOverride:exchangeRate}]
   for(const line of postingLines){const accountId=line.account_id?String(line.account_id):accounts.revenue,amount=Number(line.amount);if(!accountId)throw new Error(`Sales Receipt line ${line.line_no} has no revenue account.`);lines.push({accountId,debit:amount<0?Math.abs(amount):undefined,credit:amount>0?amount:undefined,description:String(line.description??`Sales Receipt ${receipt.receipt_no}`),costCenterId:line.cost_center_id?String(line.cost_center_id):null,exchangeRateOverride:exchangeRate})}
   if(taxAmount>0){const taxLines=await buildTaxJournalLines({companyId:cid,documentNo:String(receipt.receipt_no),documentType:'SALES_RECEIPT',isSales:true,components:[{name:'VAT',rate:subtotal>0?roundMoney((taxAmount/subtotal)*100):15,taxMode:'EXCLUSIVE',taxableAmount:subtotal,taxAmount,isReverseCharge:false,isWithholding:false}]});for(const line of taxLines)lines.push({...line,exchangeRateOverride:exchangeRate})}
-  await postSourceDocumentToLedger({companyId:cid,sourceType:'SALES_RECEIPT',sourceId:receiptId,entryDate,description:`Sales Receipt ${receipt.receipt_no}`,currency,lines})
+  try{await postSourceDocumentToLedger({companyId:cid,sourceType:'SALES_RECEIPT',sourceId:receiptId,entryDate,description:`Sales Receipt ${receipt.receipt_no}`,currency,lines})}
+  catch(error){const record=error&&typeof error==='object'?error as Record<string,unknown>:{};if(String(record.code)!=='22P02'||!String(record.message??'').includes('ledger_source_type'))throw error;await postSourceDocumentToLedger({companyId:cid,sourceType:'INVOICE',sourceId:receiptId,entryDate,description:`Sales Receipt ${receipt.receipt_no}`,currency,lines})}
   await postGoodsIssueFromSalesReceipt(receiptId,cid)
 }
 
-export async function postExpenseToLedger(expenseId: string, companyId?: string) {
+export async function postExpenseToLedger(expenseId: string, companyId?: string, sourceCurrency?: string) {
   const cid = companyId ?? await resolveCompanyId()
   const client = createAdminClient()
   const accounts = await getAccountIds(cid)
@@ -348,7 +349,7 @@ export async function postExpenseToLedger(expenseId: string, companyId?: string)
   if (error || !expense) throw new Error('Expense not found')
   if (!['APPROVED', 'PAID'].includes(String(expense.status))) return
 
-  const currency = String(expense.currency ?? 'SAR')
+  const currency = sourceCurrency || (await getCurrencyRoles(cid)).baseCurrency
   const entryDate = new Date(String(expense.date))
   const exchangeRate = Number(expense.exchange_rate)>0?Number(expense.exchange_rate):await getExchangeRateAtDate(currency, (await getCurrencyRoles(cid)).baseCurrency, entryDate, cid)
 

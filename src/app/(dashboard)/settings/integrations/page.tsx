@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ArrowLeft, Blocks } from 'lucide-react'
 import { PageHeader } from '@/components/ui/page-header'
+import { isQuickBooksCertificationEnabled } from '@/lib/quickbooks-certification/feature'
 import { IntegrationsClient } from './integrations-client'
 
 export default async function IntegrationsPage({
@@ -33,7 +34,7 @@ export default async function IntegrationsPage({
           <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600">QuickBooks Online supports secure connection, guided import, and exact-source validation. Additional providers are staged for future releases.</p>
         </div>
       </div>
-      <IntegrationsClient oauthFeedback={oauthFeedback} />
+      <IntegrationsClient oauthFeedback={oauthFeedback} certificationEnabled={isQuickBooksCertificationEnabled()} />
     </div>
   )
 }

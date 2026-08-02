@@ -473,6 +473,56 @@ describe('QuickBooks provider', () => {
     assert.equal(checkpoints.length, 3)
   })
 
+  it('discovers the first transaction date instead of scanning empty decades from 1900', async () => {
+    const queries: string[] = []
+    const fetchImpl: typeof fetch = async input => {
+      const query = new URL(String(input)).searchParams.get('query') ?? ''
+      queries.push(query)
+      if (query.includes('ORDERBY TxnDate ASC')) return Response.json({ QueryResponse:{ Invoice:[{ Id:'1', TxnDate:'2024-01-15' }] } })
+      return Response.json({ QueryResponse:{} })
+    }
+    const providerService = new QuickBooksIntegrationService(config, fetchImpl, () => NOW)
+    await providerService.getEntityRecords({ accessToken:'access', realmId:'123456' }, 'Invoice', { partitioned:true })
+    assert.equal(queries.length,2)
+    assert.match(queries[1],/TxnDate >= '2024-01-15'/)
+    assert.doesNotMatch(queries.join('\n'),/1900-01-01/)
+  })
+
+  it('does not retain pages that have been durably staged by the caller', async () => {
+    const staged: unknown[] = []
+    const fetchImpl: typeof fetch = async input => {
+      const query = new URL(String(input)).searchParams.get('query') ?? ''
+      const position = Number(query.match(/STARTPOSITION (\d+)/)?.[1] ?? 1)
+      return Response.json({ QueryResponse:{ Invoice:position === 1 ? [{ Id:'1' },{ Id:'2' }] : [] } })
+    }
+    const providerService = new QuickBooksIntegrationService(config, fetchImpl, () => NOW)
+    const rows = await providerService.getEntityRecords({ accessToken:'access', realmId:'123456' }, 'Invoice', {
+      pageSize:2,
+      retainRows:false,
+      onPage:async page => { staged.push(...page) },
+    })
+    assert.equal(rows.length,0)
+    assert.equal(staged.length,2)
+  })
+
+  it('retries rejected network fetches with a bounded policy and preserves recovery', async () => {
+    let attempts=0
+    const fetchImpl: typeof fetch = async () => {
+      attempts += 1
+      if(attempts===1)throw new TypeError('fetch failed',{cause:Object.assign(new Error('connect timeout'),{code:'UND_ERR_CONNECT_TIMEOUT'})})
+      return Response.json({ QueryResponse:{ Customer:[] } })
+    }
+    const providerService = new QuickBooksIntegrationService(config, fetchImpl, () => NOW)
+    await providerService.getCustomers({ accessToken:'access', realmId:'123456' })
+    assert.equal(attempts,2)
+  })
+
+  it('fails safely when QuickBooks repeats a full pagination page', async () => {
+    const fetchImpl:typeof fetch=async()=>Response.json({QueryResponse:{startPosition:1,Customer:Array.from({length:2},(_,index)=>({Id:String(index+1)}))}})
+    const providerService=new QuickBooksIntegrationService(config,fetchImpl,()=>NOW)
+    await assert.rejects(()=>providerService.getEntityRecords!({accessToken:'access',realmId:'123456'},'Customer',{pageSize:2}),/pagination did not advance/)
+  })
+
   it('fetches CDC changes with a 30-day safety window', async () => {
     let requestUrl = ''
     const fetchImpl: typeof fetch = async input => {
