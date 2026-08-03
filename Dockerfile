@@ -3,11 +3,19 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json* ./
+# Temporary dependency diagnostics: keep this until the Coolify build confirms
+# the lockfile contains every optional @emnapi package needed by sharp/Tailwind.
+RUN echo '--- package.json ---' && cat package.json && \
+    echo '--- @emnapi/sharp lock entries ---' && \
+    node -e "const l=require('./package-lock.json'); for(const [k,v] of Object.entries(l.packages||{})){if(k.includes('@emnapi')||k.includes('sharp-wasm32')) console.log(k, JSON.stringify({version:v.version,resolved:v.resolved,dependencies:v.dependencies,optionalDependencies:v.optionalDependencies}, null, 2));}"
 RUN npm ci --omit=dev
 
 FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package.json package-lock.json* ./
+RUN echo '--- package.json ---' && cat package.json && \
+    echo '--- @emnapi/sharp lock entries ---' && \
+    node -e "const l=require('./package-lock.json'); for(const [k,v] of Object.entries(l.packages||{})){if(k.includes('@emnapi')||k.includes('sharp-wasm32')) console.log(k, JSON.stringify({version:v.version,resolved:v.resolved,dependencies:v.dependencies,optionalDependencies:v.optionalDependencies}, null, 2));}"
 RUN npm ci
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
