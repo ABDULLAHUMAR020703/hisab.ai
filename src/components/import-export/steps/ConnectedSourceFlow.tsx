@@ -153,6 +153,11 @@ export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }:
     onClose()
   }
 
+  function toggleAllModules() {
+    const moduleKeys = source?.resources.map((resource) => resource.key) ?? []
+    setSelected((current) => moduleKeys.length > 0 && moduleKeys.every((key) => current.includes(key)) ? [] : moduleKeys)
+  }
+
   async function preview() {
     if (!source || selected.length === 0) return
     setLoading(true)
@@ -249,6 +254,8 @@ export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }:
   const successfulPreviews = previews.filter(isPreviewSuccess)
   const duplicateCount = successfulPreviews.reduce((sum, item) => sum + item.duplicates.length, 0)
   const sourceRecordCount = successfulPreviews.reduce((sum, item) => sum + item.count, 0)
+  const moduleKeys = source?.resources.map((resource) => resource.key) ?? []
+  const allModulesSelected = moduleKeys.length > 0 && moduleKeys.every((key) => selected.includes(key))
 
   const footer = step === 'report' ? (
     <Button onClick={close}>Close</Button>
@@ -287,7 +294,7 @@ export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }:
           </div>
         )}
 
-        {step === 'modules' && source && <div className="space-y-4"><div><h3 className="font-semibold text-slate-900">Select modules</h3><p className="mt-1 text-sm text-slate-500">Choose the records to fetch, validate, and migrate from {source.companyName ?? source.label}.</p></div><div className="grid gap-3 md:grid-cols-2">{source.resources.map((resource) => <label key={resource.key} className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 p-4 hover:bg-slate-50"><input type="checkbox" checked={selected.includes(resource.key)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, resource.key] : current.filter((key) => key !== resource.key))} className="h-4 w-4 rounded border-slate-300 text-indigo-600" /><Database size={18} className="text-indigo-500" /><span className="text-sm font-medium text-slate-700">{resource.label}</span></label>)}</div></div>}
+        {step === 'modules' && source && <div className="space-y-4"><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-900">Select modules</h3><p className="mt-1 text-sm text-slate-500">Choose the records to fetch, validate, and migrate from {source.companyName ?? source.label}.</p></div><Button type="button" variant="outline" size="sm" onClick={toggleAllModules}>{allModulesSelected ? 'Unselect all' : 'Select all'}</Button></div><div className="grid gap-3 md:grid-cols-2">{source.resources.map((resource) => <label key={resource.key} className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 p-4 hover:bg-slate-50"><input type="checkbox" checked={selected.includes(resource.key)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, resource.key] : current.filter((key) => key !== resource.key))} className="h-4 w-4 rounded border-slate-300 text-indigo-600" /><Database size={18} className="text-indigo-500" /><span className="text-sm font-medium text-slate-700">{resource.label}</span></label>)}</div></div>}
 
         {step === 'validation' && <div className="space-y-5"><div className="flex items-start gap-3 rounded-xl border border-emerald-100 bg-emerald-50 p-4"><FileCheck2 size={20} className="mt-0.5 text-emerald-600" /><div><h3 className="font-semibold text-emerald-900">Preview complete</h3><p className="mt-1 text-sm text-emerald-800">Counts come from QuickBooks; field validation uses the displayed sample. Full duplicate detection runs during import.</p></div></div>{previews.map(renderPreviewResource)}</div>}
 

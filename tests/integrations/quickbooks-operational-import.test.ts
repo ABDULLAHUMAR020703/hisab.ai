@@ -100,6 +100,13 @@ test('QuickBooks import execution is a checkpointed state machine, not one long-
   assert.match(wizard,/estimatedRemaining/)
 })
 
+test('Migration Wizard module selection provides a select-all toggle',()=>{
+  const wizard=file('src/components/import-export/steps/ConnectedSourceFlow.tsx')
+  assert.match(wizard,/function toggleAllModules\(\)/)
+  assert.match(wizard,/allModulesSelected \? 'Unselect all' : 'Select all'/)
+  assert.match(wizard,/onClick=\{toggleAllModules\}/)
+})
+
 test('QuickBooks transaction importer matches the deployed canonical schema',()=>{
   const transactionImporter=file('src/lib/import-export/registry/modules/transactions.module.ts')
   const invoiceRepository=file('src/lib/db/repositories/invoice.repository.supabase.ts')
