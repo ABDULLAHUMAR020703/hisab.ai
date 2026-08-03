@@ -1,6 +1,7 @@
 import { requireAuth } from '@/lib/auth'
 import { getImportJob } from '@/lib/import-export/jobs/import-job.service'
 import { apiError } from '@/lib/import-export/api-helpers'
+import { logger } from '@/lib/ops/logger'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -24,6 +25,15 @@ export async function GET(
     const elapsedMs = startedAt ? Math.max(0, Date.now() - new Date(startedAt).getTime()) : (job.durationMs ?? 0)
     const remaining = job.status === 'completed' ? 0 : (totalRows > processedRows ? totalRows - processedRows : null)
     const secondsRemaining = remaining !== null && (snapshot.averageThroughput ?? 0) > 0 ? remaining / Number(snapshot.averageThroughput) : null
+    logger.info('quickbooks.import_job.progress.read', {
+      importJobId: job.id,
+      companyId: job.companyId,
+      status: job.status,
+      processedRows,
+      totalRows,
+      activityEventCount: job.activityEvents?.length ?? 0,
+      hasProgressSnapshot: Object.keys(snapshot).length > 0,
+    })
     return Response.json({
       id: job.id,
       status: job.status,

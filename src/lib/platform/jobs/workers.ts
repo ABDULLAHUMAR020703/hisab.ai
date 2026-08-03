@@ -1,5 +1,6 @@
 import 'server-only'
 import { completeJob, failJob, updateJobProgress } from './queue'
+import { logger } from '@/lib/ops/logger'
 
 type JobHandler = (payload: Record<string, unknown>, jobId: string) => Promise<Record<string, unknown> | void>
 
@@ -21,10 +22,29 @@ export async function processJob(job: Record<string, unknown>) {
   }
 
   try {
+    logger.info('quickbooks.worker.job.claimed', {
+      platformJobId: jobId,
+      jobType,
+      importJobId: payload.importJobId == null ? undefined : String(payload.importJobId),
+      companyId: payload.companyId == null ? undefined : String(payload.companyId),
+    })
     await updateJobProgress(jobId, 10, 'Starting')
     const result = await handler(payload, jobId)
+    logger.info('quickbooks.worker.job.handler_completed', {
+      platformJobId: jobId,
+      jobType,
+      importJobId: payload.importJobId == null ? undefined : String(payload.importJobId),
+      companyId: payload.companyId == null ? undefined : String(payload.companyId),
+    })
     await completeJob(jobId, (result ?? {}) as Record<string, unknown>)
   } catch (err) {
+    logger.error('quickbooks.worker.job.failed', {
+      platformJobId: jobId,
+      jobType,
+      importJobId: payload.importJobId == null ? undefined : String(payload.importJobId),
+      companyId: payload.companyId == null ? undefined : String(payload.companyId),
+      error: err instanceof Error ? { message: err.message, stack: err.stack } : { message: String(err) },
+    })
     await failJob(jobId, err instanceof Error ? err.message : String(err))
   }
 }
@@ -96,6 +116,7 @@ registerJobHandler('QUICKBOOKS_IMPORT_STEP', async (payload) => {
   const companyId = String(payload.companyId ?? '')
   const userId = String(payload.userId ?? '')
   if (!importJobId || !companyId || !userId) throw new Error('QuickBooks import continuation payload is incomplete.')
+  logger.info('quickbooks.worker.import_step.dispatch', { platformJobId: null, importJobId, companyId, userId })
   const { runImportJobStep } = await import('@/app/api/import-export/[module]/import/route')
   const response = await runImportJobStep(importJobId, companyId, userId)
   if (!response.ok) throw new Error(`QuickBooks import continuation failed with HTTP ${response.status}.`)

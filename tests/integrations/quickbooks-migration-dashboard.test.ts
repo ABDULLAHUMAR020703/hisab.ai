@@ -22,6 +22,23 @@ test('migration jobs persist durable observability snapshots and activity events
   assert.match(trace, /databaseWrites/)
 })
 
+test('worker progress is bound to the queued import job and failures are observable', () => {
+  const service = read('src/lib/import-export/jobs/import-job.service.ts')
+  const worker = read('src/lib/platform/jobs/workers.ts')
+  const runRoute = read('src/app/api/import-export/jobs/[jobId]/run/route.ts')
+  const importRoute = read('src/app/api/import-export/[module]/import/route.ts')
+
+  assert.match(runRoute, /importJobId: job\.id/)
+  assert.match(worker, /runImportJobStep\(importJobId, companyId, userId\)/)
+  assert.match(importRoute, /getImportJob\(jobId, companyId\)/)
+  assert.match(importRoute, /setImportJobStatus\(job\.id, 'processing'\)/)
+  assert.match(importRoute, /updateImportJobProgress\([\s\S]*companyId\)/)
+  assert.match(service, /progress\.persist_attempt/)
+  assert.match(service, /progress\.persisted/)
+  assert.match(service, /IMPORT_JOB_NOT_FOUND/)
+  assert.doesNotMatch(importRoute, /progressWrite = progressWrite\.then\([\s\S]*catch\(\(\) => undefined\)/)
+})
+
 test('migration wizard renders the live enterprise dashboard instead of spinner-only progress', () => {
   const wizard = read('src/components/import-export/steps/ConnectedSourceFlow.tsx')
   assert.match(wizard, /MigrationDashboard/)

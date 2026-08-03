@@ -276,15 +276,19 @@ export async function POST(
 /** Executes one bounded migration unit from the durable platform queue. */
 export async function runImportJobStep(jobId: string, companyId: string, userId: string) {
   return withCompanyContext(companyId, async () => {
-    const job = await getImportJob(jobId)
+    const job = await getImportJob(jobId, companyId)
     if (!job) return Response.json({ error: 'Import job not found.' }, { status: 404 })
-    let progressWrite = Promise.resolve()
+    if (job.companyId !== companyId) {
+      throw new Error(`Import job tenant mismatch: job ${job.id} belongs to ${job.companyId}, worker supplied ${companyId}.`)
+    }
+    await setImportJobStatus(job.id, 'processing')
+    let progressWrite: Promise<void> = Promise.resolve()
     const trace = new MigrationTrace(job.moduleKey, undefined, {
       onEvent: (event, snapshot) => {
         progressWrite = progressWrite.then(() => updateImportJobProgress(job.id, job.processedRows, undefined, job.totalRows || snapshot.estimatedTotalRecords, {
           progressSnapshot: snapshot as MigrationProgressSnapshot,
           activityEvent: event as MigrationActivityEvent,
-        })).catch(() => undefined)
+        }, companyId))
       },
     })
     const response = await withExternalRequestDiagnostics(
