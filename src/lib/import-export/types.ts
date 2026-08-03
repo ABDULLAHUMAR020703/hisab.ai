@@ -178,6 +178,38 @@ export interface ImportJobRecord {
   pausedAt?: string | null
   lastHeartbeatAt?: string | null
   payloadSnapshot?: Record<string, unknown> | null
+  progressSnapshot?: MigrationProgressSnapshot | null
+  activityEvents?: MigrationActivityEvent[]
+}
+
+export interface MigrationActivityEvent {
+  id: string
+  at: string
+  type: string
+  message: string
+  module?: string | null
+  stage?: string | null
+  batch?: number | null
+  records?: number | null
+}
+
+export interface MigrationProgressSnapshot {
+  currentModule?: string | null
+  currentStage?: string | null
+  currentBatch?: number | null
+  totalBatches?: number | null
+  currentRecord?: string | null
+  estimatedTotalRecords?: number | null
+  processedRecords?: number
+  throughput?: number | null
+  averageThroughput?: number | null
+  apiRequests?: number
+  databaseQueries?: number
+  databaseWrites?: number
+  retryCount?: number
+  memoryBytes?: number | null
+  startedAt?: string | null
+  stages?: Record<string, { status: 'pending' | 'running' | 'completed' | 'failed'; durationMs?: number; progress?: number }>
 }
 
 export interface MappingTemplateRecord {

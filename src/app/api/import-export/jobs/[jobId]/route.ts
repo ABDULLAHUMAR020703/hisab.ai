@@ -14,11 +14,18 @@ export async function GET(
       return Response.json({ error: 'Job not found' }, { status: 404 })
     }
 
+    const snapshot = job.progressSnapshot ?? {}
+    const processedRows = snapshot.processedRecords ?? job.processedRows
+    const totalRows = snapshot.estimatedTotalRecords ?? job.totalRows
+    const startedAt = snapshot.startedAt ?? job.startedAt
+    const elapsedMs = startedAt ? Math.max(0, Date.now() - new Date(startedAt).getTime()) : (job.durationMs ?? 0)
+    const remaining = job.status === 'completed' ? 0 : (totalRows > processedRows ? totalRows - processedRows : null)
+    const secondsRemaining = remaining !== null && (snapshot.averageThroughput ?? 0) > 0 ? remaining / Number(snapshot.averageThroughput) : null
     return Response.json({
       id: job.id,
       status: job.status,
-      totalRows: job.totalRows,
-      processedRows: job.processedRows,
+      totalRows,
+      processedRows,
       importedCount: job.importedCount,
       updatedCount: job.updatedCount,
       skippedCount: job.skippedCount,
@@ -32,9 +39,20 @@ export async function GET(
       batchCursor: job.batchCursor,
       retryCount: job.retryCount,
       pausedAt: job.pausedAt,
-      progressPercent: job.totalRows ? Math.round((job.processedRows / job.totalRows) * 10000) / 100 : 0,
-      currentBatch: Math.floor(job.processedRows / Math.max(1, job.batchSize ?? 250)) + 1,
-      estimatedRemaining: job.status === 'completed' ? 0 : (job.totalRows > job.processedRows ? job.totalRows - job.processedRows : null),
+      progressSnapshot: snapshot,
+      activityEvents: job.activityEvents ?? [],
+      currentModule: snapshot.currentModule ?? job.moduleKey,
+      currentStage: snapshot.currentStage ?? null,
+      currentRecord: snapshot.currentRecord ?? null,
+      progressPercent: totalRows ? Math.min(100, Math.round((processedRows / totalRows) * 10000) / 100) : 0,
+      currentBatch: snapshot.currentBatch ?? (Math.floor(processedRows / Math.max(1, job.batchSize ?? 250)) + 1),
+      totalBatches: snapshot.totalBatches ?? (totalRows ? Math.ceil(totalRows / Math.max(1, job.batchSize ?? 250)) : null),
+      estimatedRemaining: remaining,
+      elapsedMs,
+      throughput: snapshot.throughput ?? null,
+      averageThroughput: snapshot.averageThroughput ?? null,
+      estimatedRemainingSeconds: secondsRemaining,
+      estimatedCompletionAt: secondsRemaining === null ? null : new Date(Date.now() + secondsRemaining * 1000).toISOString(),
     })
   } catch (error) {
     return apiError(error)

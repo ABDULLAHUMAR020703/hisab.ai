@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { resolveCompanyId } from '@/lib/tenant'
 import { requireAccountingAdmin } from '@/lib/product-parity/permissions'
 import { detectDuplicates } from '@/lib/import-export/duplicate/duplicate-detector'
@@ -30,6 +31,7 @@ import { fetchSourceResourcePage, getImportSource } from '@/lib/import-export/so
 import { FrameworkBadRequestError } from '@/lib/import-export/errors'
 import { enqueueJob } from '@/lib/platform/jobs/queue'
 import { withCompanyContext } from '@/lib/tenant'
+import type { MigrationActivityEvent, MigrationProgressSnapshot } from '@/lib/import-export/types'
 
 async function handleImport(
   request: Request,
@@ -134,12 +136,16 @@ async function handleImport(
       duplicateMatches,
       ctx: { companyId, userId: user.id },
       onProgress: async (processed, _total, counts) => {
+        trace?.setTotals(processed, _total)
         await updateImportJobProgress(job.id, processed, counts?{
           importedCount:base.importedCount+counts.importedCount,
           updatedCount:base.updatedCount+counts.updatedCount,
           skippedCount:base.skippedCount+counts.skippedCount,
           failedCount:base.failedCount+counts.failedCount,
-        }:undefined, sourcePage?.checkpoint.fetched)
+        }:undefined, sourcePage?.checkpoint.fetched, {
+          progressSnapshot: trace?.snapshot() as MigrationProgressSnapshot,
+          activityEvent: { id: randomUUID(), at: new Date().toISOString(), type: 'batch_completed', message: `Processed ${processed.toLocaleString()} records`, module: definition.key, stage: 'materialization', batch: Math.ceil(processed / Math.max(1, sourcePage ? 100 : job.batchSize ?? 250)), records: processed },
+        })
       },
       isCancelled: () => isJobCancelled(job.id),
       isPaused: () => isJobPaused(job.id),
@@ -272,16 +278,29 @@ export async function runImportJobStep(jobId: string, companyId: string, userId:
   return withCompanyContext(companyId, async () => {
     const job = await getImportJob(jobId)
     if (!job) return Response.json({ error: 'Import job not found.' }, { status: 404 })
-    const trace = new MigrationTrace(job.moduleKey)
-    return handleImport(
-      new Request('http://internal/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...(job.payloadSnapshot ?? {}), jobId }),
-      }),
-      { params: Promise.resolve({ module: job.moduleKey }) },
-      trace,
-      { id: userId },
+    let progressWrite = Promise.resolve()
+    const trace = new MigrationTrace(job.moduleKey, undefined, {
+      onEvent: (event, snapshot) => {
+        progressWrite = progressWrite.then(() => updateImportJobProgress(job.id, job.processedRows, undefined, job.totalRows || snapshot.estimatedTotalRecords, {
+          progressSnapshot: snapshot as MigrationProgressSnapshot,
+          activityEvent: event as MigrationActivityEvent,
+        })).catch(() => undefined)
+      },
+    })
+    const response = await withExternalRequestDiagnostics(
+      { correlationId: trace.correlationId, module: job.moduleKey, onRequest: trace.request },
+      () => handleImport(
+        new Request('http://internal/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...(job.payloadSnapshot ?? {}), jobId }),
+        }),
+        { params: Promise.resolve({ module: job.moduleKey }) },
+        trace,
+        { id: userId },
+      ),
     )
+    await progressWrite
+    return response
   })
 }

@@ -6,6 +6,8 @@ import type {
   ImportJobRecord,
   ImportJobStatus,
   ImportRowError,
+  MigrationActivityEvent,
+  MigrationProgressSnapshot,
 } from '../types'
 
 function mapJobRow(row: Record<string, unknown>): ImportJobRecord {
@@ -41,6 +43,8 @@ function mapJobRow(row: Record<string, unknown>): ImportJobRecord {
     pausedAt: row.paused_at ? String(row.paused_at) : null,
     lastHeartbeatAt: row.last_heartbeat_at ? String(row.last_heartbeat_at) : null,
     payloadSnapshot: (row.payload_snapshot as Record<string, unknown> | null) ?? null,
+    progressSnapshot: (row.progress_snapshot as MigrationProgressSnapshot | null) ?? null,
+    activityEvents: Array.isArray(row.activity_events) ? row.activity_events as MigrationActivityEvent[] : [],
   }
 }
 
@@ -102,13 +106,22 @@ export async function updateImportJobProgress(
   processedRows: number,
   counts?: { importedCount?: number; updatedCount?: number; skippedCount?: number; failedCount?: number; validRows?: number; invalidRows?: number; warningCount?: number },
   totalRows?: number,
+  observability?: { progressSnapshot?: MigrationProgressSnapshot; activityEvent?: MigrationActivityEvent },
 ): Promise<void> {
   const db = supabaseDb()
   const companyId = await resolveCompanyId()
   const countPatch = counts ? { imported_count: counts.importedCount, updated_count: counts.updatedCount, skipped_count: counts.skippedCount, failed_count: counts.failedCount, ...(counts.validRows === undefined ? {} : { valid_rows: counts.validRows }), ...(counts.invalidRows === undefined ? {} : { invalid_rows: counts.invalidRows }), ...(counts.warningCount === undefined ? {} : { warning_count: counts.warningCount }) } : {}
+  const patch: Record<string, unknown> = { processed_rows: processedRows, batch_cursor: processedRows, ...(totalRows === undefined ? {} : { total_rows: totalRows }), last_heartbeat_at: new Date().toISOString(), ...countPatch }
+  if (observability?.progressSnapshot) patch.progress_snapshot = observability.progressSnapshot
+  if (observability?.activityEvent) {
+    const current = await db.from('import_jobs').select('activity_events').eq('id', jobId).eq('company_id', companyId).maybeSingle()
+    if (current.error) throw current.error
+    const events = Array.isArray(current.data?.activity_events) ? current.data.activity_events as MigrationActivityEvent[] : []
+    patch.activity_events = [...events, observability.activityEvent].slice(-100)
+  }
   const { error } = await db
     .from('import_jobs')
-    .update({ processed_rows: processedRows, batch_cursor: processedRows, ...(totalRows === undefined ? {} : { total_rows: totalRows }), last_heartbeat_at: new Date().toISOString(), ...countPatch })
+    .update(patch)
     .eq('id', jobId)
     .eq('company_id', companyId)
 
