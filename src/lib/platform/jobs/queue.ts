@@ -33,7 +33,7 @@ export async function enqueueJob(input: EnqueueJobInput) {
   return data
 }
 
-export async function claimNextJob() {
+export async function claimNextJob(jobType?: string) {
   const client = createAdminClient()
   const now = new Date().toISOString()
 
@@ -43,7 +43,7 @@ export async function claimNextJob() {
   await client.from('job_queue').update({ status: 'PENDING', updated_at: now })
     .eq('status', 'RUNNING').lt('updated_at', stale)
 
-  const { data: jobs } = await client
+  let query = client
     .from('job_queue')
     .select('*')
     .eq('status', 'PENDING')
@@ -51,6 +51,8 @@ export async function claimNextJob() {
     .order('priority', { ascending: false })
     .order('scheduled_at')
     .limit(1)
+  if (jobType) query = query.eq('job_type', jobType)
+  const { data: jobs } = await query
 
   const job = jobs?.[0]
   if (!job) return null

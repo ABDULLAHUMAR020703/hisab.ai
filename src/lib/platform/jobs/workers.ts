@@ -29,11 +29,11 @@ export async function processJob(job: Record<string, unknown>) {
   }
 }
 
-export async function processJobBatch(limit = 5) {
+export async function processJobBatch(limit = 5, jobType?: string) {
   const { claimNextJob } = await import('./queue')
   const processed: string[] = []
   for (let i = 0; i < limit; i++) {
-    const job = await claimNextJob()
+    const job = await claimNextJob(jobType)
     if (!job) break
     await processJob(job)
     processed.push(String(job.id))

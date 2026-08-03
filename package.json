@@ -26,6 +26,7 @@
     "zatca:verify": "npx tsx -r dotenv/config -r ./scripts/zatca/setup-server-only.cjs scripts/zatca/zatca-phase7-verify.mjs",
     "db:test-customer-vendor-write": "npx tsx -r dotenv/config -r ./scripts/zatca/setup-server-only.cjs scripts/db/test-customer-vendor-write.ts",
     "start": "next start",
+    "worker": "tsx -r dotenv/config -r ./scripts/zatca/setup-server-only.cjs worker/index.ts",
     "lint": "eslint"
   },
   "dependencies": {
