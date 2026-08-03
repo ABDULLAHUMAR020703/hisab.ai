@@ -1,6 +1,7 @@
 import 'server-only'
 import { resolveCompanyId, supabaseDb } from '@/lib/db/repository-utils'
 import { logger } from '@/lib/ops/logger'
+import { assertImportJobSchemaCompatibility } from '@/lib/platform/schema-compatibility'
 import type {
   DuplicateStrategy,
   FileFormat,
@@ -90,6 +91,7 @@ export async function createImportJob(input: {
 }
 
 export async function getImportJob(jobId: string, companyIdOverride?: string): Promise<ImportJobRecord | null> {
+  await assertImportJobSchemaCompatibility()
   const db = supabaseDb()
   const companyId = companyIdOverride ?? await resolveCompanyId()
   const { data, error } = await db

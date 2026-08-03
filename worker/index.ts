@@ -1,4 +1,5 @@
 import { processJobBatch } from '@/lib/platform/jobs/workers'
+import { assertImportJobSchemaCompatibility } from '@/lib/platform/schema-compatibility'
 
 const pollIntervalMs = Math.max(250, Number(process.env.IMPORT_WORKER_POLL_MS ?? 2000))
 let stopping = false
@@ -16,6 +17,7 @@ process.once('SIGTERM', () => requestShutdown('SIGTERM'))
 process.once('SIGINT', () => requestShutdown('SIGINT'))
 
 async function run() {
+  await assertImportJobSchemaCompatibility()
   console.log(JSON.stringify({ event: 'quickbooks_worker_started', pollIntervalMs }))
   while (!stopping) {
     const result = await processJobBatch(1, 'QUICKBOOKS_IMPORT_STEP')

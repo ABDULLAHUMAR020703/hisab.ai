@@ -1,6 +1,10 @@
 import 'server-only'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { logger } from '@/lib/ops/logger'
 import type { JobPriority, JobStatus } from '../types'
+
+const HEARTBEAT_INTERVAL_MS = Math.max(5_000, Number(process.env.JOB_QUEUE_HEARTBEAT_MS ?? 30_000))
+const STALE_JOB_TIMEOUT_MS = Math.max(HEARTBEAT_INTERVAL_MS * 3, Number(process.env.JOB_QUEUE_STALE_MS ?? 5 * 60_000))
 
 export interface EnqueueJobInput {
   jobType: string
@@ -39,9 +43,11 @@ export async function claimNextJob(jobType?: string) {
 
   // A timed-out or redeployed worker must become claimable again. Migration
   // progress is durable in its checkpoint tables, so replay is safe.
-  const stale = new Date(Date.now() - 2 * 60 * 1000).toISOString()
-  await client.from('job_queue').update({ status: 'PENDING', updated_at: now })
+  const stale = new Date(Date.now() - STALE_JOB_TIMEOUT_MS).toISOString()
+  const { data: recovered } = await client.from('job_queue').update({ status: 'PENDING', started_at: null, updated_at: now, last_error: 'Recovered abandoned RUNNING job after heartbeat timeout.' })
     .eq('status', 'RUNNING').lt('updated_at', stale)
+    .select('id')
+  if (recovered?.length) logger.warn('platform.jobs.stale_recovered', { count: recovered.length, jobIds: recovered.map((row) => row.id), staleBefore: stale })
 
   let query = client
     .from('job_queue')
@@ -74,13 +80,32 @@ export async function claimNextJob(jobType?: string) {
   return claimed
 }
 
-export async function completeJob(jobId: string, result?: Record<string, unknown>) {
+/** Refreshes ownership while a worker is executing a job. The attempt guard
+ * prevents a stale worker from writing after another worker has reclaimed it. */
+export async function heartbeatJob(jobId: string, attempt: number): Promise<boolean> {
+  const client = createAdminClient()
+  const { data, error } = await client
+    .from('job_queue')
+    .update({ updated_at: new Date().toISOString() })
+    .eq('id', jobId)
+    .eq('status', 'RUNNING')
+    .eq('attempts', attempt)
+    .select('id')
+    .maybeSingle()
+  if (error) throw error
+  if (!data) logger.warn('platform.jobs.ownership_lost', { jobId, attempt })
+  return Boolean(data)
+}
+
+export { HEARTBEAT_INTERVAL_MS, STALE_JOB_TIMEOUT_MS }
+
+export async function completeJob(jobId: string, result?: Record<string, unknown>, attempt?: number) {
   const client = createAdminClient()
   const { data: job } = await client.from('job_queue').select('*').eq('id', jobId).single()
   if (!job) return
 
   const completedAt = new Date().toISOString()
-  await client
+  let completion = client
     .from('job_queue')
     .update({
       status: 'COMPLETED',
@@ -89,6 +114,9 @@ export async function completeJob(jobId: string, result?: Record<string, unknown
       updated_at: completedAt,
     })
     .eq('id', jobId)
+  if (attempt !== undefined) completion = completion.eq('status', 'RUNNING').eq('attempts', attempt)
+  const { data: completed } = await completion.select('id').maybeSingle()
+  if (!completed) return
 
   await client.from('job_history').insert({
     company_id: job.company_id,
@@ -111,7 +139,7 @@ export async function completeJob(jobId: string, result?: Record<string, unknown
   }
 }
 
-export async function failJob(jobId: string, errorMessage: string) {
+export async function failJob(jobId: string, errorMessage: string, attempt?: number) {
   const client = createAdminClient()
   const { data: job } = await client.from('job_queue').select('*').eq('id', jobId).single()
   if (!job) return
@@ -120,7 +148,9 @@ export async function failJob(jobId: string, errorMessage: string) {
   const maxAttempts = Number(job.max_attempts)
 
   if (attempts >= maxAttempts) {
-    await client.from('job_queue').update({ status: 'DEAD', last_error: errorMessage, updated_at: new Date().toISOString() }).eq('id', jobId)
+    let terminal = client.from('job_queue').update({ status: 'FAILED', last_error: errorMessage, updated_at: new Date().toISOString() }).eq('id', jobId)
+    if (attempt !== undefined) terminal = terminal.eq('status', 'RUNNING').eq('attempts', attempt)
+    await terminal
     await client.from('dead_letter_queue').insert({
       company_id: job.company_id,
       job_id: jobId,
@@ -130,12 +160,14 @@ export async function failJob(jobId: string, errorMessage: string) {
     })
   } else {
     const delayMs = Math.pow(2, attempts) * 1000
-    await client.from('job_queue').update({
+    let retry = client.from('job_queue').update({
       status: 'PENDING',
       last_error: errorMessage,
       scheduled_at: new Date(Date.now() + delayMs).toISOString(),
       updated_at: new Date().toISOString(),
     }).eq('id', jobId)
+    if (attempt !== undefined) retry = retry.eq('status', 'RUNNING').eq('attempts', attempt)
+    await retry
   }
 
   await client.from('job_history').insert({

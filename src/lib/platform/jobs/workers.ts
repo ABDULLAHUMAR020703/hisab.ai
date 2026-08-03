@@ -1,5 +1,5 @@
 import 'server-only'
-import { completeJob, failJob, updateJobProgress } from './queue'
+import { completeJob, failJob, heartbeatJob, updateJobProgress, HEARTBEAT_INTERVAL_MS } from './queue'
 import { logger } from '@/lib/ops/logger'
 
 type JobHandler = (payload: Record<string, unknown>, jobId: string) => Promise<Record<string, unknown> | void>
@@ -13,11 +13,12 @@ export function registerJobHandler(jobType: string, handler: JobHandler) {
 export async function processJob(job: Record<string, unknown>) {
   const jobId = String(job.id)
   const jobType = String(job.job_type)
+  const attempt = Number(job.attempts ?? 0)
   const payload = (job.payload ?? {}) as Record<string, unknown>
   const handler = handlers.get(jobType)
 
   if (!handler) {
-    await failJob(jobId, `No handler registered for job type: ${jobType}`)
+    await failJob(jobId, `No handler registered for job type: ${jobType}`, attempt)
     return
   }
 
@@ -29,14 +30,29 @@ export async function processJob(job: Record<string, unknown>) {
       companyId: payload.companyId == null ? undefined : String(payload.companyId),
     })
     await updateJobProgress(jobId, 10, 'Starting')
-    const result = await handler(payload, jobId)
-    logger.info('quickbooks.worker.job.handler_completed', {
-      platformJobId: jobId,
-      jobType,
-      importJobId: payload.importJobId == null ? undefined : String(payload.importJobId),
-      companyId: payload.companyId == null ? undefined : String(payload.companyId),
-    })
-    await completeJob(jobId, (result ?? {}) as Record<string, unknown>)
+    let heartbeatFailure: Error | null = null
+    const heartbeat = async () => {
+      try {
+        const owned = await heartbeatJob(jobId, attempt)
+        if (!owned) heartbeatFailure = new Error(`Queue ownership lost for job ${jobId} attempt ${attempt}.`)
+      } catch (error) {
+        heartbeatFailure = error instanceof Error ? error : new Error(String(error))
+      }
+    }
+    const heartbeatTimer = setInterval(() => { void heartbeat() }, HEARTBEAT_INTERVAL_MS)
+    try {
+      const result = await handler(payload, jobId)
+      if (heartbeatFailure) throw heartbeatFailure
+      logger.info('quickbooks.worker.job.handler_completed', {
+        platformJobId: jobId,
+        jobType,
+        importJobId: payload.importJobId == null ? undefined : String(payload.importJobId),
+        companyId: payload.companyId == null ? undefined : String(payload.companyId),
+      })
+      await completeJob(jobId, (result ?? {}) as Record<string, unknown>, attempt)
+    } finally {
+      clearInterval(heartbeatTimer)
+    }
   } catch (err) {
     logger.error('quickbooks.worker.job.failed', {
       platformJobId: jobId,
@@ -45,7 +61,7 @@ export async function processJob(job: Record<string, unknown>) {
       companyId: payload.companyId == null ? undefined : String(payload.companyId),
       error: err instanceof Error ? { message: err.message, stack: err.stack } : { message: String(err) },
     })
-    await failJob(jobId, err instanceof Error ? err.message : String(err))
+    await failJob(jobId, err instanceof Error ? err.message : String(err), attempt)
   }
 }
 
