@@ -64,6 +64,27 @@ function networkFailure(error: unknown): string {
   return `${name}: ${message}${code ? ` (${code})` : ''}`
 }
 
+function quickBooksResponseDetails(body: string): { intuitErrors: unknown[]; detail: string } {
+  try {
+    const parsed = JSON.parse(body) as JsonRecord
+    const fault = record(parsed.Fault)
+    const errors = Array.isArray(fault.Error) ? fault.Error : Array.isArray(parsed.Error) ? parsed.Error : []
+    const intuitErrors = errors.length ? errors : [parsed]
+    return { intuitErrors, detail: JSON.stringify(parsed) }
+  } catch {
+    return { intuitErrors: [], detail: body.slice(0, 4_000) }
+  }
+}
+
+/** Returns the HTTP status from a QuickBooks request failure, including retried failures. */
+export function quickBooksErrorStatus(error: unknown): number | null {
+  const current = error !== null && typeof error === 'object' ? error as Record<string, unknown> : {}
+  const cause = current.cause
+  if (typeof current.quickBooksStatus === 'number') return current.quickBooksStatus
+  if (cause && cause !== current) return quickBooksErrorStatus(cause)
+  return null
+}
+
 export class QuickBooksIntegrationService implements AccountingProvider {
   readonly slug = Provider.QUICKBOOKS
   private readonly endpoints
@@ -395,8 +416,24 @@ export class QuickBooksIntegrationService implements AccountingProvider {
         })
         if (response.status === 401) throw new ProviderAuthenticationException()
         if (response.ok) return response
-        if (response.status !== 429 && response.status < 500) throw new ProviderRequestException(`QuickBooks data request failed (${response.status}).`)
-        lastError = new ProviderRequestException(`QuickBooks data request failed (${response.status}).`)
+        const responseBody = await response.text()
+        const responseDetails = quickBooksResponseDetails(responseBody)
+        // Fixed Assets validation uses the Item Query endpoint. Keep the complete
+        // URL/query and Intuit response visible so unsupported Sandbox editions
+        // can be distinguished from authentication or transport failures.
+        console.error('[quickbooks] request failed', JSON.stringify({
+          url,
+          status: response.status,
+          responseBody: responseDetails.detail,
+          intuitErrors: responseDetails.intuitErrors,
+        }))
+        const failure = new ProviderRequestException(
+          `QuickBooks data request failed (${response.status}). ${responseDetails.detail}`,
+          response.status,
+          { cause: { quickBooksStatus: response.status, url, responseBody: responseDetails.detail, intuitErrors: responseDetails.intuitErrors } },
+        )
+        if (response.status !== 429 && response.status < 500) throw failure
+        lastError = failure
         const retryAfter = Number(response.headers.get('retry-after'))
         const delay = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 60_000) : Math.min(1000 * 2 ** attempt, 15_000)
         await abortableDelay(delay, signal)

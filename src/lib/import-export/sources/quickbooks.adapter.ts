@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { AccountingProvider, ProviderAccessContext } from '@/integrations/accounting/contracts/accounting-provider'
+import { quickBooksErrorStatus } from '@/integrations/accounting/providers/quickbooks/quickbooks-integration.service'
 import { extractQuickBooksPaymentRelationships } from '../quickbooks/payment-relationships'
 import type { ImportSourceAdapter, ImportSourceFetchOptions, ImportSourceResource, NormalizedImportResource } from './types'
 
@@ -154,7 +155,14 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
         pending = Promise.all([
           provider.getEntityCount ? provider.getEntityCount(context, entity, { where }) : Promise.resolve<number | null>(null),
           provider.getEntityRecords(context, entity, { includeInactive:true, pageSize:sampleSize, maxRecords:sampleSize, where }),
-        ]).then(([count, rows]) => ({ count: count ?? rows.length, rows }))
+        ]).then(([count, rows]) => ({ count: count ?? rows.length, rows })).catch((error) => {
+          const status = quickBooksErrorStatus(error)
+          if (resourceKey === 'fixed-assets' && status !== null && [400, 404, 405, 501].includes(status)) {
+            console.warn('[quickbooks] Fixed Assets are unavailable for this company or edition; treating preview as zero records', JSON.stringify({ resourceKey, entity, where, status }))
+            return { count: 0, rows: [] }
+          }
+          throw error
+        })
         options.preview.cache?.set(cacheKey, pending)
       }
       const preview = await pending

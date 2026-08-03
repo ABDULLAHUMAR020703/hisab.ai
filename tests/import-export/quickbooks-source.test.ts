@@ -68,3 +68,36 @@ test('QuickBooks contacts select one valid canonical email while preserving mult
   assert.equal(normalized.email, 'Nateyecare@intuit.com')
   assert.match(String(normalized._quickbooksRaw), /pauliejones15@intuit\.com/)
 })
+
+test('Fixed Assets preview treats an unavailable Sandbox Item query as zero records', async () => {
+  const requests: Array<{ entity: string; options: unknown }> = []
+  const fixedAssetProvider: AccountingProvider = {
+    ...provider,
+    async getEntityCount(_context, entity, options) {
+      requests.push({ entity, options: options ?? {} })
+      throw Object.assign(new Error('QuickBooks data request failed (400).'), {
+        statusCode: 400,
+        cause: { quickBooksStatus: 400, responseBody: '{"Fault":"FixedAsset is not supported"}' },
+      })
+    },
+    async getEntityRecords(_context, entity, options) {
+      requests.push({ entity, options: options ?? {} })
+      throw Object.assign(new Error('QuickBooks data request failed (400).'), {
+        statusCode: 400,
+        cause: { quickBooksStatus: 400, responseBody: '{"Fault":"FixedAsset is not supported"}' },
+      })
+    },
+  }
+
+  const result = await new QuickBooksImportAdapter().fetchResource(
+    fixedAssetProvider,
+    { accessToken: 'x', realmId: 'sandbox-realm' },
+    'fixed-assets',
+    { preview: { sampleSize: 10, cache: new Map() } },
+  )
+
+  assert.equal(result.totalCount, 0)
+  assert.deepEqual(result.rows, [])
+  assert.deepEqual(requests.map((request) => request.entity), ['Item', 'Item'])
+  assert.equal((requests[0].options as { where?: string }).where, "Type = 'FixedAsset'")
+})
