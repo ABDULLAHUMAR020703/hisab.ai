@@ -32,6 +32,8 @@ test('queue ownership heartbeats prevent starvation and recover abandoned jobs',
   assert.match(queue, /status', 'RUNNING'/)
   assert.match(queue, /attempts', attempt/)
   assert.match(queue, /Recovered abandoned RUNNING job after heartbeat timeout/)
+  assert.match(queue, /status: 'PENDING', started_at: null, scheduled_at: now, updated_at: now/)
+  assert.match(queue, /ORDER BY|order\('scheduled_at'/i)
   assert.match(queue, /status: 'FAILED'/)
   assert.match(workers, /setInterval\(\(\) => \{ void heartbeat\(\) \}, HEARTBEAT_INTERVAL_MS\)/)
   assert.match(workers, /clearInterval\(heartbeatTimer\)/)

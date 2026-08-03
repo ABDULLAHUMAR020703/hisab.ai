@@ -44,7 +44,7 @@ export async function claimNextJob(jobType?: string) {
   // A timed-out or redeployed worker must become claimable again. Migration
   // progress is durable in its checkpoint tables, so replay is safe.
   const stale = new Date(Date.now() - STALE_JOB_TIMEOUT_MS).toISOString()
-  const { data: recovered } = await client.from('job_queue').update({ status: 'PENDING', started_at: null, updated_at: now, last_error: 'Recovered abandoned RUNNING job after heartbeat timeout.' })
+  const { data: recovered } = await client.from('job_queue').update({ status: 'PENDING', started_at: null, scheduled_at: now, updated_at: now, last_error: 'Recovered abandoned RUNNING job after heartbeat timeout.' })
     .eq('status', 'RUNNING').lt('updated_at', stale)
     .select('id')
   if (recovered?.length) logger.warn('platform.jobs.stale_recovered', { count: recovered.length, jobIds: recovered.map((row) => row.id), staleBefore: stale })
