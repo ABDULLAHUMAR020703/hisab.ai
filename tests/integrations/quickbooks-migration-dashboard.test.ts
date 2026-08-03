@@ -35,7 +35,10 @@ test('worker progress is bound to the queued import job and failures are observa
   assert.match(importRoute, /updateImportJobProgress\([\s\S]*companyId\)/)
   assert.match(service, /progress\.persist_attempt/)
   assert.match(service, /progress\.persisted/)
+  assert.match(service, /updatePayload: patch/)
   assert.match(service, /IMPORT_JOB_NOT_FOUND/)
+  assert.match(runRoute, /platformJobId: queued\.id/)
+  assert.match(read('src/app/api/import-export/jobs/[jobId]/route.ts'), /progress\.response/)
   assert.doesNotMatch(importRoute, /progressWrite = progressWrite\.then\([\s\S]*catch\(\(\) => undefined\)/)
 })
 

@@ -12,8 +12,8 @@ export async function POST(_request: Request, { params }: { params: Promise<{ jo
     if (!job.payloadSnapshot) return Response.json({ error: 'Job payload is unavailable.' }, { status: 409 })
     const companyId = await resolveCompanyId()
     await setImportJobStatus(jobId, 'pending')
-    logger.info('quickbooks.worker.import_step.enqueued', { platformJobId: null, importJobId: job.id, companyId, userId: user.id, module: job.moduleKey })
-    await enqueueJob({ jobType: 'QUICKBOOKS_IMPORT_STEP', companyId, payload: { importJobId: job.id, moduleKey: job.moduleKey, companyId, userId: user.id } })
-    return Response.json({ jobId: job.id, status: 'pending', totalRows: job.totalRows, processedRows: job.processedRows }, { status: 202 })
+    const queued = await enqueueJob({ jobType: 'QUICKBOOKS_IMPORT_STEP', companyId, payload: { importJobId: job.id, moduleKey: job.moduleKey, companyId, userId: user.id } })
+    logger.info('quickbooks.worker.import_step.enqueued', { platformJobId: String(queued.id), importJobId: job.id, companyId, userId: user.id, module: job.moduleKey })
+    return Response.json({ jobId: job.id, platformJobId: queued.id, status: 'pending', totalRows: job.totalRows, processedRows: job.processedRows }, { status: 202 })
   } catch (error) { return apiError(error) }
 }

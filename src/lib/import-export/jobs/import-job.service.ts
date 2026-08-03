@@ -85,6 +85,7 @@ export async function createImportJob(input: {
     .single()
 
   if (error) throw error
+  logger.info('quickbooks.import_job.created', { importJobId: String(data.id), companyId, userId: input.userId, status: data.status, module: input.moduleKey })
   return mapJobRow(data)
 }
 
@@ -128,6 +129,7 @@ export async function updateImportJobProgress(
     totalRows,
     hasProgressSnapshot: Boolean(observability?.progressSnapshot),
     hasActivityEvent: Boolean(observability?.activityEvent),
+    updatePayload: patch,
   })
   const { data: persisted, error } = await db
     .from('import_jobs')

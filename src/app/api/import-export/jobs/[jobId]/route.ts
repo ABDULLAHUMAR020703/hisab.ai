@@ -34,7 +34,7 @@ export async function GET(
       activityEventCount: job.activityEvents?.length ?? 0,
       hasProgressSnapshot: Object.keys(snapshot).length > 0,
     })
-    return Response.json({
+    const responsePayload = {
       id: job.id,
       status: job.status,
       totalRows,
@@ -66,7 +66,9 @@ export async function GET(
       averageThroughput: snapshot.averageThroughput ?? null,
       estimatedRemainingSeconds: secondsRemaining,
       estimatedCompletionAt: secondsRemaining === null ? null : new Date(Date.now() + secondsRemaining * 1000).toISOString(),
-    }, { headers: { 'Cache-Control': 'no-store, max-age=0, must-revalidate' } })
+    }
+    logger.info('quickbooks.import_job.progress.response', { importJobId: job.id, companyId: job.companyId, responseJson: responsePayload })
+    return Response.json(responsePayload, { headers: { 'Cache-Control': 'no-store, max-age=0, must-revalidate' } })
   } catch (error) {
     return apiError(error)
   }
