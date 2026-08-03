@@ -137,7 +137,19 @@ export interface ImportProcessorResult {
   skippedCount: number
   failedCount: number
   errors: ImportRowError[]
+  skippedRecords: SkippedRecordDiagnostic[]
   paused?: boolean
+}
+
+export type SkipReason = 'duplicate' | 'inactive' | 'filtered' | 'validation_failed' | 'unsupported_type' | 'other'
+
+export interface SkippedRecordDiagnostic {
+  rowNumber: number
+  sourceId?: string
+  recordName?: string
+  reason: SkipReason
+  duplicateKey?: string
+  existingRecordId?: string
 }
 
 export interface ImportRowError {
@@ -183,6 +195,7 @@ export interface ImportJobRecord {
   payloadSnapshot?: Record<string, unknown> | null
   progressSnapshot?: MigrationProgressSnapshot | null
   activityEvents?: MigrationActivityEvent[]
+  skipSummary?: Record<string, number> | null
 }
 
 export interface MigrationActivityEvent {

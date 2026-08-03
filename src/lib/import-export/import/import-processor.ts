@@ -7,6 +7,7 @@ import type {
   ImportContext,
   ImportProcessorResult,
   ImportRowError,
+  SkippedRecordDiagnostic,
   MappedRow,
   ModuleDefinition,
   ValidationResult,
@@ -65,6 +66,14 @@ export async function processImport(
   let skippedCount = 0
   let failedCount = 0
   let paused = false
+  const skippedRecords: SkippedRecordDiagnostic[] = []
+
+  const diagnostic = (row: MappedRow, reason: SkippedRecordDiagnostic['reason'], duplicate?: DuplicateMatch): SkippedRecordDiagnostic => {
+    const mapped = row.mapped as Record<string, unknown>
+    const sourceId = [mapped._quickbooksId, mapped.Id, mapped.id, mapped.docNumber, mapped.accountNo, mapped.sku].find((value) => value !== undefined && value !== null && String(value).trim() !== '')
+    const recordName = [mapped.name, mapped.displayName, mapped.customerName, mapped.vendorName, mapped.docNumber].find((value) => value !== undefined && value !== null && String(value).trim() !== '')
+    return { rowNumber: row.rowNumber, sourceId: sourceId === undefined ? undefined : String(sourceId), recordName: recordName === undefined ? undefined : String(recordName), reason, duplicateKey: duplicate?.matchedOn?.join(', '), existingRecordId: duplicate?.existingId }
+  }
 
   const duplicateMatches = input.duplicateMatches ?? []
   const duplicateMap = duplicateMatchesToMap(duplicateMatches)
@@ -110,6 +119,7 @@ export async function processImport(
           await measure('source_link_archive',()=>archive(row.mapped, duplicate.existingId))
           await measure('source_link_verification',()=>assertQuickBooksRecordLinked(input.ctx.companyId,row.mapped,duplicate.existingId))
           skippedCount+=1
+          skippedRecords.push(diagnostic(row, 'duplicate', duplicate))
           continue
         }
         recordStage='source_archive'
@@ -129,12 +139,14 @@ export async function processImport(
           recordStage='source_link_verification'
           await measure('source_link_archive',()=>archive(row.mapped, duplicate?.existingId))
           skippedCount += 1
+          skippedRecords.push(diagnostic(row, 'duplicate', duplicate))
           continue
         }
 
         if (action === 'update') {
           if (!duplicate) {
             skippedCount += 1
+            skippedRecords.push(diagnostic(row, 'other'))
             errors.push({
               rowNumber: row.rowNumber,
               errorCode: 'DUPLICATE_NOT_FOUND',
@@ -196,5 +208,5 @@ export async function processImport(
     if (input.maxBatches && batchesProcessed >= input.maxBatches) break
   }
 
-  return { importedCount, updatedCount, skippedCount, failedCount, errors, paused }
+  return { importedCount, updatedCount, skippedCount, failedCount, errors, skippedRecords, paused }
 }

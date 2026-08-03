@@ -54,6 +54,7 @@ export async function GET(
       pausedAt: job.pausedAt,
       progressSnapshot: snapshot,
       activityEvents: job.activityEvents ?? [],
+      skipSummary: job.skipSummary ?? {},
       currentModule: snapshot.currentModule ?? job.moduleKey,
       currentStage: snapshot.currentStage ?? null,
       currentRecord: snapshot.currentRecord ?? null,

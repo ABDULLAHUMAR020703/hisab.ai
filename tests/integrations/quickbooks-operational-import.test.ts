@@ -200,6 +200,18 @@ test('transaction duplicate detection batches source IDs and document numbers',(
   assert.doesNotMatch(source,/for \(const row of rows\) \{ const d=await this\.findDuplicate/)
 })
 
+test('skipped records preserve reason, source identity, duplicate key, and existing record ID',()=>{
+ const processor=file('src/lib/import-export/import/import-processor.ts')
+ const service=file('src/lib/import-export/jobs/import-job.service.ts')
+ const migration=file('supabase/migrations/064_import_job_skip_diagnostics.sql')
+ const route=file('src/app/api/import-export/jobs/[jobId]/skips/route.ts')
+ assert.match(processor,/skippedRecords\.push\(diagnostic\(row, 'duplicate', duplicate\)\)/)
+ assert.match(processor,/duplicateKey: duplicate\?\.matchedOn\?\.join\(', '\)/)
+ assert.match(service,/upsert\(payload, \{ onConflict: 'job_id,row_number' \}\)/)
+ assert.match(migration,/CREATE TABLE IF NOT EXISTS public\.import_job_skips/)
+ assert.match(route,/QuickBooks ID.*Record name.*Skip reason/)
+})
+
 test('record failures preserve the exact pipeline stage',()=>{
   const processor=readFileSync('src/lib/import-export/import/import-processor.ts','utf8')
   assert.match(processor,/recordStage='native_create'/)

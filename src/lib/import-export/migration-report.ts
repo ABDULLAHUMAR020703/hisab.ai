@@ -1,4 +1,4 @@
-import type { ImportRowError } from './types'
+import type { ImportRowError, SkippedRecordDiagnostic } from './types'
 
 export interface MigrationReportModule {
   key: string
@@ -13,6 +13,8 @@ export interface MigrationReportModule {
   failedCount: number
   durationMs: number
   errors?: ImportRowError[]
+  skipSummary?: Record<string, number>
+  skippedRecords?: SkippedRecordDiagnostic[]
 }
 
 export interface MigrationReport {
@@ -49,6 +51,8 @@ export function migrationReportToCsv(report: MigrationReport): string {
   rows.push(['TOTAL', report.totals.sourceCount, report.totals.validCount, report.totals.warnings, report.totals.failures, report.totals.imported, report.totals.updated, report.totals.skipped, report.totals.failures, report.durationMs])
   rows.push(['Validation score', `${report.validationScore}%`, '', '', '', '', '', '', '', ''])
   rows.push(['Integrity score', `${report.integrityScore}%`, '', '', '', '', '', '', '', ''])
+  for (const moduleReport of report.modules) for (const [reason, count] of Object.entries(moduleReport.skipSummary ?? {})) rows.push([`${moduleReport.label} skip reason`, reason, count, '', '', '', '', '', '', ''])
+  for (const moduleReport of report.modules) for (const skipped of moduleReport.skippedRecords ?? []) rows.push([`${moduleReport.label} skipped record`, skipped.sourceId ?? '', skipped.recordName ?? '', skipped.reason, skipped.existingRecordId ?? '', skipped.duplicateKey ?? '', '', '', '', ''])
   for(const moduleReport of report.modules)for(const error of moduleReport.errors??[])rows.push([`${moduleReport.label} error`,error.rowNumber,error.details?.status??'',error.errorCode,error.message,error.details?.dependency??'',error.details?.constraint??'',error.details?.table??'',error.details?.column??'',''])
   return rows.map((row) => row.map((value) => { const text = String(value ?? ''); return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text }).join(',')).join('\r\n')
 }

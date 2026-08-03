@@ -10,6 +10,7 @@ import type {
   ImportRowError,
   MigrationActivityEvent,
   MigrationProgressSnapshot,
+  SkippedRecordDiagnostic,
 } from '../types'
 
 function mapJobRow(row: Record<string, unknown>): ImportJobRecord {
@@ -47,6 +48,7 @@ function mapJobRow(row: Record<string, unknown>): ImportJobRecord {
     payloadSnapshot: (row.payload_snapshot as Record<string, unknown> | null) ?? null,
     progressSnapshot: (row.progress_snapshot as MigrationProgressSnapshot | null) ?? null,
     activityEvents: Array.isArray(row.activity_events) ? row.activity_events as MigrationActivityEvent[] : [],
+    skipSummary: (row.skip_summary as Record<string, number> | null) ?? null,
   }
 }
 
@@ -205,6 +207,7 @@ export async function finalizeImportJob(
     warningCount?: number
     validationSummary?: Record<string, number>
     errorSummary?: Record<string, number>
+    skipSummary?: Record<string, number>
     startedAt?: string | null
   },
 ): Promise<ImportJobRecord> {
@@ -231,6 +234,7 @@ export async function finalizeImportJob(
       warning_count: input.warningCount ?? null,
       validation_summary: input.validationSummary ?? null,
       error_summary: input.errorSummary ?? null,
+      skip_summary: input.skipSummary ?? {},
       completed_at: completedAt.toISOString(),
       duration_ms: durationMs,
     })
@@ -242,6 +246,23 @@ export async function finalizeImportJob(
   if (error) throw error
   logger.info('quickbooks.import_job.finalize.persisted', { importJobId: jobId, companyId, status: data.status, processedRows: data.processed_rows, importedCount: data.imported_count, failedCount: data.failed_count })
   return mapJobRow(data)
+}
+
+export async function saveImportJobSkips(jobId: string, skips: SkippedRecordDiagnostic[]): Promise<void> {
+  if (skips.length === 0) return
+  const db = supabaseDb()
+  const companyId = await resolveCompanyId()
+  const payload = skips.map((skip) => ({ company_id: companyId, job_id: jobId, row_number: skip.rowNumber, source_id: skip.sourceId ?? null, record_name: skip.recordName ?? null, skip_reason: skip.reason, duplicate_key: skip.duplicateKey ?? null, existing_record_id: skip.existingRecordId ?? null }))
+  const { error } = await db.from('import_job_skips').upsert(payload, { onConflict: 'job_id,row_number' })
+  if (error) throw error
+}
+
+export async function getImportJobSkips(jobId: string): Promise<SkippedRecordDiagnostic[]> {
+  const db = supabaseDb()
+  const companyId = await resolveCompanyId()
+  const { data, error } = await db.from('import_job_skips').select('row_number,source_id,record_name,skip_reason,duplicate_key,existing_record_id').eq('job_id', jobId).eq('company_id', companyId).order('row_number', { ascending: true })
+  if (error) throw error
+  return (data ?? []).map((row) => ({ rowNumber: Number(row.row_number), sourceId: row.source_id ? String(row.source_id) : undefined, recordName: row.record_name ? String(row.record_name) : undefined, reason: String(row.skip_reason) as SkippedRecordDiagnostic['reason'], duplicateKey: row.duplicate_key ? String(row.duplicate_key) : undefined, existingRecordId: row.existing_record_id ? String(row.existing_record_id) : undefined }))
 }
 
 export async function cancelImportJob(jobId: string): Promise<ImportJobRecord | null> {

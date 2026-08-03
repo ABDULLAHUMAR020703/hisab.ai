@@ -11,6 +11,7 @@ import {
   setImportJobStatus,
   saveImportJobErrors,
   updateImportJobProgress,
+  saveImportJobSkips,
 } from '@/lib/import-export/jobs/import-job.service'
 import { mappingSnapshot } from '@/lib/import-export/mapping/auto-mapper'
 import { processImport } from '@/lib/import-export/import/import-processor'
@@ -30,7 +31,7 @@ import { fetchSourceResourcePage, getImportSource } from '@/lib/import-export/so
 import { FrameworkBadRequestError } from '@/lib/import-export/errors'
 import { enqueueJob } from '@/lib/platform/jobs/queue'
 import { withCompanyContext } from '@/lib/tenant'
-import type { MigrationActivityEvent, MigrationProgressSnapshot } from '@/lib/import-export/types'
+import type { MigrationActivityEvent, MigrationProgressSnapshot, SkippedRecordDiagnostic } from '@/lib/import-export/types'
 
 async function handleImport(
   request: Request,
@@ -116,6 +117,14 @@ async function handleImport(
       }))
 
     const validRows = mappedRows.filter((row) => validation.validRowNumbers.includes(row.rowNumber))
+    const validationSkips: SkippedRecordDiagnostic[] = mappedRows
+      .filter((row) => !validation.validRowNumbers.includes(row.rowNumber))
+      .map((row) => {
+        const mapped = row.mapped as Record<string, unknown>
+        const sourceId = [mapped._quickbooksId, mapped.Id, mapped.id, mapped.docNumber, mapped.accountNo, mapped.sku].find((value) => value !== undefined && value !== null && String(value).trim() !== '')
+        const recordName = [mapped.name, mapped.displayName, mapped.customerName, mapped.vendorName, mapped.docNumber].find((value) => value !== undefined && value !== null && String(value).trim() !== '')
+        return { rowNumber: row.rowNumber, sourceId: sourceId === undefined ? undefined : String(sourceId), recordName: recordName === undefined ? undefined : String(recordName), reason: 'validation_failed' as const }
+      })
     // Client/preview duplicate results are advisory only. Import always checks
     // the authoritative tenant data immediately before applying a strategy.
     const duplicateMatches = await trace.measure('duplicate_detection', () => detectDuplicates(definition, validRows, { companyId, userId: user.id, performance: trace }))
@@ -156,6 +165,13 @@ async function handleImport(
     }))
 
     const allErrors = [...validationErrors, ...result.errors]
+    const skippedRecords = [...validationSkips, ...result.skippedRecords]
+    await saveImportJobSkips(job.id, skippedRecords)
+    const skipSummary = skippedRecords.reduce<Record<string, number>>((summary, item) => {
+      const label = item.reason === 'duplicate' ? 'Duplicate (already exists)' : item.reason === 'validation_failed' ? 'Validation failed' : item.reason === 'inactive' ? 'Inactive records' : item.reason === 'filtered' ? 'Filtered by module' : item.reason === 'unsupported_type' ? 'Unsupported type' : 'Other'
+      summary[label] = (summary[label] ?? 0) + 1
+      return summary
+    }, { 'Duplicate (already exists)': 0, 'Inactive records': 0, 'Filtered by module': 0, 'Validation failed': 0, 'Unsupported type': 0, Other: 0 })
     await saveImportJobErrors(job.id, allErrors)
     const aggregate = { importedCount: base.importedCount + result.importedCount, updatedCount: base.updatedCount + result.updatedCount, skippedCount: base.skippedCount + result.skippedCount, failedCount: base.failedCount + result.failedCount }
     const invalidRowCount = validation.invalidRowNumbers.length
@@ -208,6 +224,7 @@ async function handleImport(
         acc[item.errorCode] = (acc[item.errorCode] ?? 0) + 1
         return acc
       }, {}),
+      skipSummary,
       startedAt: job.startedAt,
     }))
 
