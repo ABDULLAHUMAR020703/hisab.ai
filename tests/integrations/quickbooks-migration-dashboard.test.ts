@@ -42,6 +42,17 @@ test('worker progress is bound to the queued import job and failures are observa
   assert.doesNotMatch(importRoute, /progressWrite = progressWrite\.then\([\s\S]*catch\(\(\) => undefined\)/)
 })
 
+test('completed import responses enforce processed-row consistency', () => {
+  const service = read('src/lib/import-export/jobs/import-job.service.ts')
+  const api = read('src/app/api/import-export/jobs/[jobId]/route.ts')
+  const workerRoute = read('src/app/api/import-export/[module]/import/route.ts')
+  assert.match(service, /const processedRows = input\.importedCount \+ input\.updatedCount \+ input\.skippedCount \+ input\.failedCount/)
+  assert.match(service, /processed_rows: processedRows/)
+  assert.match(api, /const persistedOutcomeRows = job\.importedCount \+ job\.updatedCount \+ job\.skippedCount \+ job\.failedCount/)
+  assert.match(api, /progressPercent: completed \? 100/)
+  assert.match(workerRoute, /Math\.max\(job\.processedRows, snapshot\.processedRecords \?\? 0\)/)
+})
+
 test('migration wizard renders the live enterprise dashboard instead of spinner-only progress', () => {
   const wizard = read('src/components/import-export/steps/ConnectedSourceFlow.tsx')
   assert.match(wizard, /MigrationDashboard/)

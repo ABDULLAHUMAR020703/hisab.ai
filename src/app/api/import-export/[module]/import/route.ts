@@ -302,7 +302,8 @@ export async function runImportJobStep(jobId: string, companyId: string, userId:
     let progressWrite: Promise<void> = Promise.resolve()
     const trace = new MigrationTrace(job.moduleKey, undefined, {
       onEvent: (event, snapshot) => {
-        progressWrite = progressWrite.then(() => updateImportJobProgress(job.id, job.processedRows, undefined, job.totalRows || snapshot.estimatedTotalRecords, {
+        const eventProcessedRows = Math.max(job.processedRows, snapshot.processedRecords ?? 0)
+        progressWrite = progressWrite.then(() => updateImportJobProgress(job.id, eventProcessedRows, undefined, job.totalRows || snapshot.estimatedTotalRecords, {
           progressSnapshot: snapshot as MigrationProgressSnapshot,
           activityEvent: event as MigrationActivityEvent,
         }, companyId))

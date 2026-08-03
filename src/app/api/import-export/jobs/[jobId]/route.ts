@@ -18,8 +18,10 @@ export async function GET(
       return Response.json({ error: 'Job not found' }, { status: 404 })
     }
 
-    const snapshot = job.progressSnapshot ?? {}
-    const processedRows = snapshot.processedRecords ?? job.processedRows
+    const completed = job.status === 'completed'
+    const persistedOutcomeRows = job.importedCount + job.updatedCount + job.skippedCount + job.failedCount
+    const snapshot = completed ? { ...(job.progressSnapshot ?? {}), processedRecords: persistedOutcomeRows } : (job.progressSnapshot ?? {})
+    const processedRows = completed ? persistedOutcomeRows : (snapshot.processedRecords ?? job.processedRows)
     const totalRows = snapshot.estimatedTotalRecords ?? job.totalRows
     const startedAt = snapshot.startedAt ?? job.startedAt
     const elapsedMs = startedAt ? Math.max(0, Date.now() - new Date(startedAt).getTime()) : (job.durationMs ?? 0)
@@ -58,7 +60,7 @@ export async function GET(
       currentModule: snapshot.currentModule ?? job.moduleKey,
       currentStage: snapshot.currentStage ?? null,
       currentRecord: snapshot.currentRecord ?? null,
-      progressPercent: totalRows ? Math.min(100, Math.round((processedRows / totalRows) * 10000) / 100) : 0,
+      progressPercent: completed ? 100 : (totalRows ? Math.min(100, Math.round((processedRows / totalRows) * 10000) / 100) : 0),
       currentBatch: snapshot.currentBatch ?? (Math.floor(processedRows / Math.max(1, job.batchSize ?? 250)) + 1),
       totalBatches: snapshot.totalBatches ?? (totalRows ? Math.ceil(totalRows / Math.max(1, job.batchSize ?? 250)) : null),
       estimatedRemaining: remaining,

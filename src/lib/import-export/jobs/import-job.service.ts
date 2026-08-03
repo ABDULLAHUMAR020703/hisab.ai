@@ -216,8 +216,9 @@ export async function finalizeImportJob(
   const completedAt = new Date()
   const startedAt = input.startedAt ? new Date(input.startedAt) : completedAt
   const durationMs = Math.max(0, completedAt.getTime() - startedAt.getTime())
+  const processedRows = input.importedCount + input.updatedCount + input.skippedCount + input.failedCount
 
-  logger.info('quickbooks.import_job.finalize.persist_attempt', { importJobId: jobId, companyId, status: input.status, totalRows: input.totalRows, processedRows: input.totalRows })
+  logger.info('quickbooks.import_job.finalize.persist_attempt', { importJobId: jobId, companyId, status: input.status, totalRows: input.totalRows, processedRows })
 
   const { data, error } = await db
     .from('import_jobs')
@@ -228,7 +229,7 @@ export async function finalizeImportJob(
       skipped_count: input.skippedCount,
       failed_count: input.failedCount,
       total_rows: input.totalRows,
-      processed_rows: input.totalRows,
+      processed_rows: processedRows,
       valid_rows: input.validRows ?? null,
       invalid_rows: input.invalidRows ?? null,
       warning_count: input.warningCount ?? null,
