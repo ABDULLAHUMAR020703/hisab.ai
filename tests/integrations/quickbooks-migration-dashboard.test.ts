@@ -31,3 +31,16 @@ test('migration wizard renders the live enterprise dashboard instead of spinner-
   assert.match(wizard, /Stage progress/)
   assert.match(wizard, /estimatedRemainingSeconds/)
 })
+
+test('performance mode profiles materialization operations and database request aggregates', () => {
+  const processor = read('src/lib/import-export/import/import-processor.ts')
+  const trace = read('src/lib/import-export/quickbooks/migration-telemetry.ts')
+  const transactions = read('src/lib/import-export/registry/modules/transactions.module.ts')
+  assert.match(processor, /measure\('native_create'/)
+  assert.match(processor, /measure\('accounting_materialization'/)
+  assert.match(processor, /measure\('source_hash_check'/)
+  assert.match(transactions, /duplicate_batch_queries/)
+  assert.match(trace, /QUICKBOOKS_PERFORMANCE_MODE/)
+  assert.match(trace, /slowestOperations/)
+  assert.match(trace, /totalDatabaseTimeMs/)
+})

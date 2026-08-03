@@ -29,15 +29,22 @@ export interface MigrationTraceSnapshot {
   currentBatch: number
   estimatedTotalRecords: number
   processedRecords: number
+  importedCount: number
+  updatedCount: number
+  skippedCount: number
+  failedCount: number
   throughput: number
   averageThroughput: number
   apiRequests: number
   databaseQueries: number
   databaseWrites: number
+  databaseTimeMs: number
+  apiTimeMs: number
   retryCount: number
   memoryBytes: number
   startedAt: string
   stages: Record<string, { status: 'pending' | 'running' | 'completed' | 'failed'; durationMs?: number; progress?: number }>
+  operations?: Record<string, { calls: number; totalMs: number; averageMs: number; maxMs: number; failed: number }>
 }
 
 export interface MigrationTraceOptions {
@@ -54,6 +61,13 @@ interface RequestAggregate {
   writes: number
 }
 
+interface OperationAggregate {
+  calls: number
+  totalMs: number
+  maxMs: number
+  failed: number
+}
+
 export class MigrationTrace {
   readonly correlationId: string
   private readonly startedAt = performance.now()
@@ -62,11 +76,14 @@ export class MigrationTrace {
   private peakHeap = this.initialHeap
   private readonly stages = new Map<string, { calls: number; durationMs: number; failed: number }>()
   private readonly requests = new Map<string, RequestAggregate>()
+  private readonly operations = new Map<string, OperationAggregate>()
+  private readonly profilingEnabled = process.env.QUICKBOOKS_PERFORMANCE_MODE === 'true' || process.env.DEBUG?.includes('quickbooks') === true
   private readonly events: MigrationTraceEvent[] = []
   private currentStage: string | null = null
   private processedRecords = 0
   private estimatedTotalRecords = 0
   private currentBatch = 0
+  private counts = { importedCount: 0, updatedCount: 0, skippedCount: 0, failedCount: 0 }
   private readonly onEvent?: MigrationTraceOptions['onEvent']
 
   constructor(readonly module: string, correlationId?: string, options?: MigrationTraceOptions) {
@@ -99,6 +116,19 @@ export class MigrationTrace {
     }
   }
 
+  async measureOperation<T>(name: string, operation: () => Promise<T> | T): Promise<T> {
+    if (!this.profilingEnabled) return operation()
+    const startedAt = performance.now()
+    try {
+      const result = await operation()
+      this.recordOperation(name, performance.now() - startedAt, false)
+      return result
+    } catch (error) {
+      this.recordOperation(name, performance.now() - startedAt, true)
+      throw error
+    }
+  }
+
   page(records: number, extracted: number) {
     this.sampleHeap()
     this.currentBatch += 1
@@ -106,6 +136,14 @@ export class MigrationTrace {
     this.estimatedTotalRecords = Math.max(this.estimatedTotalRecords, extracted)
     this.emitEvent('batch_completed', `Completed batch ${this.currentBatch}`, { stage: 'extraction', batch: this.currentBatch, records })
     logger.info('quickbooks.migration.page', { correlationId:this.correlationId, module:this.module, records, extracted, heapUsedBytes:process.memoryUsage().heapUsed })
+  }
+
+  batch(records: number, processed: number, total: number) {
+    this.sampleHeap()
+    this.currentBatch += 1
+    this.processedRecords = processed
+    this.estimatedTotalRecords = Math.max(this.estimatedTotalRecords, total)
+    this.emitEvent('batch_completed', `Processed ${processed.toLocaleString()} of ${total.toLocaleString()} records`, { stage: this.currentStage, batch: this.currentBatch, records })
   }
 
   accumulate(stage: MigrationStage, durationMs: number, failed = false) {
@@ -128,10 +166,16 @@ export class MigrationTrace {
     this.estimatedTotalRecords = Math.max(this.estimatedTotalRecords, estimatedTotalRecords)
   }
 
+  setCounts(counts: Partial<typeof this.counts>) {
+    this.counts = { ...this.counts, ...counts }
+  }
+
   snapshot(): MigrationTraceSnapshot {
     const elapsedMs = Math.max(1, performance.now() - this.startedAt)
     const apiRequests = [...this.requests.values()].filter(item => item.kind === 'quickbooks').reduce((sum, item) => sum + item.calls, 0)
     const databaseQueries = [...this.requests.values()].filter(item => item.kind === 'supabase').reduce((sum, item) => sum + item.calls, 0)
+    const databaseTimeMs = [...this.requests.values()].filter(item => item.kind === 'supabase').reduce((sum, item) => sum + item.durationMs, 0)
+    const apiTimeMs = [...this.requests.values()].filter(item => item.kind === 'quickbooks').reduce((sum, item) => sum + item.durationMs, 0)
     const averageThroughput = this.processedRecords / (elapsedMs / 1000)
     return {
       currentModule: this.module,
@@ -139,6 +183,7 @@ export class MigrationTrace {
       currentBatch: this.currentBatch,
       estimatedTotalRecords: this.estimatedTotalRecords,
       processedRecords: this.processedRecords,
+      ...this.counts,
       throughput: averageThroughput,
       averageThroughput,
       apiRequests,
@@ -147,10 +192,13 @@ export class MigrationTrace {
       memoryBytes: process.memoryUsage().heapUsed,
       startedAt: this.startedWallClock,
       databaseWrites: [...this.requests.values()].filter(item => item.kind === 'supabase').reduce((sum, item) => sum + item.writes, 0),
+      databaseTimeMs,
+      apiTimeMs,
       stages: Object.fromEntries([
         ...[...this.stages.entries()].map(([stage, value]) => [stage, { status: value.failed ? 'failed' as const : 'completed' as const, durationMs: value.durationMs }] as const),
         ...(this.currentStage && !this.stages.has(this.currentStage) ? [[this.currentStage, { status: 'running' as const, progress: 35 }] as const] : []),
       ]),
+      operations: this.profilingEnabled ? Object.fromEntries([...this.operations.entries()].map(([name, value]) => [name, { ...value, averageMs: value.calls ? value.totalMs / value.calls : 0 }])) : undefined,
     }
   }
 
@@ -163,10 +211,11 @@ export class MigrationTrace {
   finish(counts: MigrationModuleCounts = {}) {
     this.sampleHeap()
     const requestList = [...this.requests.values()]
+    const totalDurationMs = Math.max(1, performance.now() - this.startedAt)
     const profile = {
       correlationId:this.correlationId,
       module:this.module,
-      durationMs:Math.round(performance.now() - this.startedAt),
+      durationMs:Math.round(totalDurationMs),
       ...counts,
       quickBooksApiCalls:requestList.filter(item => item.kind === 'quickbooks').reduce((sum,item)=>sum+item.calls,0),
       supabaseQueries:requestList.filter(item => item.kind === 'supabase').reduce((sum,item)=>sum+item.calls,0),
@@ -176,6 +225,11 @@ export class MigrationTrace {
       heapFinishBytes:process.memoryUsage().heapUsed,
       stages:Object.fromEntries(this.stages),
       repeatedRequests:requestList.filter(item=>item.calls>1),
+      operations: this.profilingEnabled ? Object.fromEntries([...this.operations.entries()].map(([name, value]) => [name, { ...value, averageMs: value.calls ? value.totalMs / value.calls : 0 }])) : undefined,
+      slowestOperations: this.profilingEnabled ? [...this.operations.entries()].sort(([, a], [, b]) => b.totalMs - a.totalMs).slice(0, 20).map(([name, value]) => ({ name, ...value, averageMs: value.calls ? value.totalMs / value.calls : 0, percentage: (value.totalMs / totalDurationMs) * 100 })) : undefined,
+      requestProfiles: requestList.map(item => ({ ...item, averageMs: item.calls ? item.durationMs / item.calls : 0 })).sort((a, b) => b.durationMs - a.durationMs),
+      totalDatabaseTimeMs: requestList.filter(item => item.kind === 'supabase').reduce((sum, item) => sum + item.durationMs, 0),
+      totalApiTimeMs: requestList.filter(item => item.kind === 'quickbooks').reduce((sum, item) => sum + item.durationMs, 0),
     }
     logger.info('quickbooks.migration.module.finished', profile)
     return profile
@@ -189,6 +243,15 @@ export class MigrationTrace {
     if (failed) current.failed += 1
     this.stages.set(stage,current)
     if (emitLog) logger.info('quickbooks.migration.stage.finished', { correlationId:this.correlationId, module:this.module, stage, durationMs:Math.round(durationMs), failed, heapUsedBytes:process.memoryUsage().heapUsed })
+  }
+
+  private recordOperation(name: string, durationMs: number, failed: boolean) {
+    const current = this.operations.get(name) ?? { calls: 0, totalMs: 0, maxMs: 0, failed: 0 }
+    current.calls += 1
+    current.totalMs += durationMs
+    current.maxMs = Math.max(current.maxMs, durationMs)
+    if (failed) current.failed += 1
+    this.operations.set(name, current)
   }
 
   private sampleHeap() {

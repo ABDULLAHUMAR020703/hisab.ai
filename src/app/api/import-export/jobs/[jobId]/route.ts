@@ -2,6 +2,9 @@ import { requireAuth } from '@/lib/auth'
 import { getImportJob } from '@/lib/import-export/jobs/import-job.service'
 import { apiError } from '@/lib/import-export/api-helpers'
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ jobId: string }> },
@@ -26,10 +29,10 @@ export async function GET(
       status: job.status,
       totalRows,
       processedRows,
-      importedCount: job.importedCount,
-      updatedCount: job.updatedCount,
-      skippedCount: job.skippedCount,
-      failedCount: job.failedCount,
+      importedCount: snapshot.importedCount ?? job.importedCount,
+      updatedCount: snapshot.updatedCount ?? job.updatedCount,
+      skippedCount: snapshot.skippedCount ?? job.skippedCount,
+      failedCount: snapshot.failedCount ?? job.failedCount,
       validRows: job.validRows,
       invalidRows: job.invalidRows,
       warningCount: job.warningCount,
@@ -53,7 +56,7 @@ export async function GET(
       averageThroughput: snapshot.averageThroughput ?? null,
       estimatedRemainingSeconds: secondsRemaining,
       estimatedCompletionAt: secondsRemaining === null ? null : new Date(Date.now() + secondsRemaining * 1000).toISOString(),
-    })
+    }, { headers: { 'Cache-Control': 'no-store, max-age=0, must-revalidate' } })
   } catch (error) {
     return apiError(error)
   }

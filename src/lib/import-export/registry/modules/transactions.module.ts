@@ -167,10 +167,13 @@ function makeModule(c: Config): ModuleDefinition {
       const parsed=rows.map(row=>({rowNumber:row.rowNumber,record:parseRow(row.mapped)})),client=createAdminClient()
       const sourceIds=[...new Set(parsed.map(item=>item.record.sourceId).filter((value):value is string=>Boolean(value)))]
       const numbers=[...new Set(parsed.map(item=>item.record.transactionNo).filter(Boolean))]
-      const [sourceMatches,numberMatches]=await Promise.all([
+      const [sourceMatches,numberMatches]=await (ctx.performance?.measureOperation('duplicate_batch_queries', () => Promise.all([
         c.legacy&&sourceIds.length?client.from(c.table).select('*').eq('company_id',ctx.companyId).in('legacy_id',sourceIds).is('deleted_at',null):Promise.resolve({data:[],error:null}),
         numbers.length?client.from(c.table).select('*').eq('company_id',ctx.companyId).in(c.numberColumn,numbers).is('deleted_at',null):Promise.resolve({data:[],error:null}),
-      ])
+      ])) ?? Promise.all([
+        c.legacy&&sourceIds.length?client.from(c.table).select('*').eq('company_id',ctx.companyId).in('legacy_id',sourceIds).is('deleted_at',null):Promise.resolve({data:[],error:null}),
+        numbers.length?client.from(c.table).select('*').eq('company_id',ctx.companyId).in(c.numberColumn,numbers).is('deleted_at',null):Promise.resolve({data:[],error:null}),
+      ]))
       if(sourceMatches.error)throw sourceMatches.error
       if(numberMatches.error)throw numberMatches.error
       const bySource=new Map((sourceMatches.data??[]).map(item=>[String(item.legacy_id),String(item.id)]))

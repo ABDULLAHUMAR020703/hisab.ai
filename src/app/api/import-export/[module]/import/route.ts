@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { resolveCompanyId } from '@/lib/tenant'
 import { requireAccountingAdmin } from '@/lib/product-parity/permissions'
 import { detectDuplicates } from '@/lib/import-export/duplicate/duplicate-detector'
@@ -119,7 +118,7 @@ async function handleImport(
     const validRows = mappedRows.filter((row) => validation.validRowNumbers.includes(row.rowNumber))
     // Client/preview duplicate results are advisory only. Import always checks
     // the authoritative tenant data immediately before applying a strategy.
-    const duplicateMatches = await trace.measure('duplicate_detection', () => detectDuplicates(definition, validRows, { companyId, userId: user.id }))
+    const duplicateMatches = await trace.measure('duplicate_detection', () => detectDuplicates(definition, validRows, { companyId, userId: user.id, performance: trace }))
 
     if (body.background === true && !existingJobId) {
       await setImportJobStatus(job.id, 'pending')
@@ -134,8 +133,10 @@ async function handleImport(
       validation,
       duplicateStrategy,
       duplicateMatches,
-      ctx: { companyId, userId: user.id },
+      ctx: { companyId, userId: user.id, performance: trace },
       onProgress: async (processed, _total, counts) => {
+        if (counts) trace?.setCounts(counts)
+        trace?.batch(Math.min(job.batchSize ?? 250, Math.max(0, processed - (job.processedRows ?? 0))), processed, _total)
         trace?.setTotals(processed, _total)
         await updateImportJobProgress(job.id, processed, counts?{
           importedCount:base.importedCount+counts.importedCount,
@@ -144,7 +145,6 @@ async function handleImport(
           failedCount:base.failedCount+counts.failedCount,
         }:undefined, sourcePage?.checkpoint.fetched, {
           progressSnapshot: trace?.snapshot() as MigrationProgressSnapshot,
-          activityEvent: { id: randomUUID(), at: new Date().toISOString(), type: 'batch_completed', message: `Processed ${processed.toLocaleString()} records`, module: definition.key, stage: 'materialization', batch: Math.ceil(processed / Math.max(1, sourcePage ? 100 : job.batchSize ?? 250)), records: processed },
         })
       },
       isCancelled: () => isJobCancelled(job.id),

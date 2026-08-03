@@ -126,6 +126,9 @@ export interface DuplicateMatch {
 export interface ImportContext {
   companyId: string
   userId: string
+  performance?: {
+    measureOperation<T>(name: string, operation: () => Promise<T> | T): Promise<T>
+  }
 }
 
 export interface ImportProcessorResult {
@@ -201,11 +204,17 @@ export interface MigrationProgressSnapshot {
   currentRecord?: string | null
   estimatedTotalRecords?: number | null
   processedRecords?: number
+  importedCount?: number
+  updatedCount?: number
+  skippedCount?: number
+  failedCount?: number
   throughput?: number | null
   averageThroughput?: number | null
   apiRequests?: number
   databaseQueries?: number
   databaseWrites?: number
+  databaseTimeMs?: number
+  apiTimeMs?: number
   retryCount?: number
   memoryBytes?: number | null
   startedAt?: string | null

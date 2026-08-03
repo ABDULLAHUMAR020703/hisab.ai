@@ -56,6 +56,7 @@ export async function processImport(
   input: ProcessImportInput,
 ): Promise<ImportProcessorResult> {
   const parser = input.module.parseImportRow ?? ((mapped) => mapped)
+  const measure = <T>(name: string, operation: () => Promise<T> | T) => input.trace?.measureOperation(name, operation) ?? Promise.resolve(operation())
   const allValidRows = input.rows.filter((row) => input.validation.validRowNumbers.includes(row.rowNumber))
   const validRows = dependencyOrderedRows(input.module.key,allValidRows).slice(input.startAt ?? 0)
   const errors: ImportRowError[] = []
@@ -100,21 +101,21 @@ export async function processImport(
       let recordStage = 'source_check'
       try {
         recordStage='source_hash_check'
-        const sourceUnchanged=await isQuickBooksRecordUnchanged(input.ctx.companyId,row.mapped)
+        const sourceUnchanged=await measure('source_hash_check',()=>isQuickBooksRecordUnchanged(input.ctx.companyId,row.mapped))
         const duplicate = duplicateMap.get(row.rowNumber)
         recordStage='materialization_status_check'
-        const priorMaterialization=sourceUnchanged&&duplicate&&tracksQuickBooksMaterialization(input.module.key)?await getQuickBooksMaterializationStatus(input.ctx.companyId,input.module.key,duplicate.existingId,row.mapped):null
+        const priorMaterialization=sourceUnchanged&&duplicate&&tracksQuickBooksMaterialization(input.module.key)?await measure('materialization_status_lookup',()=>getQuickBooksMaterializationStatus(input.ctx.companyId,input.module.key,duplicate.existingId,row.mapped)):null
         if(sourceUnchanged&&duplicate&&(!tracksQuickBooksMaterialization(input.module.key)||priorMaterialization==='completed')){
           recordStage='source_link_verification'
-          await archive(row.mapped, duplicate.existingId)
-          await assertQuickBooksRecordLinked(input.ctx.companyId,row.mapped,duplicate.existingId)
+          await measure('source_link_archive',()=>archive(row.mapped, duplicate.existingId))
+          await measure('source_link_verification',()=>assertQuickBooksRecordLinked(input.ctx.companyId,row.mapped,duplicate.existingId))
           skippedCount+=1
           continue
         }
         recordStage='source_archive'
-        await archive(row.mapped)
+        await measure('source_archive',()=>archive(row.mapped))
         recordStage='dependency_validation'
-        await assertQuickBooksDependencies(input.module.key, row.mapped, input.ctx)
+        await measure('dependency_validation',()=>assertQuickBooksDependencies(input.module.key, row.mapped, input.ctx))
         // Parsers coerce business fields; protected provider metadata remains
         // authoritative and must accompany the parsed record to materializers.
         const record = { ...row.mapped, ...parser(row.mapped as Record<string, unknown>) }
@@ -126,7 +127,7 @@ export async function processImport(
 
         if (action === 'skip') {
           recordStage='source_link_verification'
-          await archive(row.mapped, duplicate?.existingId)
+          await measure('source_link_archive',()=>archive(row.mapped, duplicate?.existingId))
           skippedCount += 1
           continue
         }
@@ -143,37 +144,37 @@ export async function processImport(
             continue
           }
           recordStage='native_update'
-          await input.module.updateRecord(duplicate.existingId, record, input.ctx)
+          await measure('native_update',()=>input.module.updateRecord(duplicate.existingId, record, input.ctx))
           recordStage='source_link_verification'
-          await archive(row.mapped, duplicate.existingId)
-          await assertQuickBooksRecordLinked(input.ctx.companyId,row.mapped,duplicate.existingId)
+          await measure('source_link_archive',()=>archive(row.mapped, duplicate.existingId))
+          await measure('source_link_verification',()=>assertQuickBooksRecordLinked(input.ctx.companyId,row.mapped,duplicate.existingId))
           recordStage='accounting_materialization'
           const postingStarted=performance.now()
-          try { await materializeQuickBooksAccounting({companyId:input.ctx.companyId,userId:input.ctx.userId,moduleKey:input.module.key,localId:duplicate.existingId,sourceRow:row.mapped});input.trace?.accumulate('posting',performance.now()-postingStarted) }
+          try { await measure('accounting_materialization',()=>materializeQuickBooksAccounting({companyId:input.ctx.companyId,userId:input.ctx.userId,moduleKey:input.module.key,localId:duplicate.existingId,sourceRow:row.mapped}));input.trace?.accumulate('posting',performance.now()-postingStarted) }
           catch(error){input.trace?.accumulate('posting',performance.now()-postingStarted,true);throw error}
           recordStage='accounting_verification'
-          await assertQuickBooksAccountingCompleted(input.module.key, input.ctx.companyId, duplicate.existingId, row.mapped)
+          await measure('accounting_verification',()=>assertQuickBooksAccountingCompleted(input.module.key, input.ctx.companyId, duplicate.existingId, row.mapped))
           updatedCount += 1
           continue
         }
 
         recordStage='native_create'
-        const created = await input.module.createRecord(record, input.ctx)
+        const created = await measure('native_create',()=>input.module.createRecord(record, input.ctx))
         createdId = created.id
         recordStage='source_link_verification'
-        await archive(row.mapped, created.id)
-        await assertQuickBooksRecordLinked(input.ctx.companyId,row.mapped,created.id)
+        await measure('source_link_archive',()=>archive(row.mapped, created.id))
+        await measure('source_link_verification',()=>assertQuickBooksRecordLinked(input.ctx.companyId,row.mapped,created.id))
         recordStage='accounting_materialization'
         const postingStarted=performance.now()
-        try { await materializeQuickBooksAccounting({companyId:input.ctx.companyId,userId:input.ctx.userId,moduleKey:input.module.key,localId:created.id,sourceRow:row.mapped});input.trace?.accumulate('posting',performance.now()-postingStarted) }
+        try { await measure('accounting_materialization',()=>materializeQuickBooksAccounting({companyId:input.ctx.companyId,userId:input.ctx.userId,moduleKey:input.module.key,localId:created.id,sourceRow:row.mapped}));input.trace?.accumulate('posting',performance.now()-postingStarted) }
         catch(error){input.trace?.accumulate('posting',performance.now()-postingStarted,true);throw error}
         recordStage='accounting_verification'
-        await assertQuickBooksAccountingCompleted(input.module.key, input.ctx.companyId, created.id, row.mapped)
+        await measure('accounting_verification',()=>assertQuickBooksAccountingCompleted(input.module.key, input.ctx.companyId, created.id, row.mapped))
         importedCount += 1
       } catch (err) {
         let rollbackMessage: string | undefined
         if (createdId && input.module.rollbackCreatedRecord) {
-          try { await input.module.rollbackCreatedRecord(createdId, input.ctx) }
+          try { await measure('rollback_created_record',()=>input.module.rollbackCreatedRecord!(createdId!, input.ctx)) }
           catch (rollbackError) { rollbackMessage = normalizeImportError(rollbackError).message }
         }
         const normalized = normalizeImportError(err)
