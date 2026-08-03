@@ -100,14 +100,15 @@ export async function getImportJob(jobId: string): Promise<ImportJobRecord | nul
 export async function updateImportJobProgress(
   jobId: string,
   processedRows: number,
-  counts?: { importedCount?: number; updatedCount?: number; skippedCount?: number; failedCount?: number },
+  counts?: { importedCount?: number; updatedCount?: number; skippedCount?: number; failedCount?: number; validRows?: number; invalidRows?: number; warningCount?: number },
+  totalRows?: number,
 ): Promise<void> {
   const db = supabaseDb()
   const companyId = await resolveCompanyId()
-  const countPatch = counts ? { imported_count: counts.importedCount, updated_count: counts.updatedCount, skipped_count: counts.skippedCount, failed_count: counts.failedCount } : {}
+  const countPatch = counts ? { imported_count: counts.importedCount, updated_count: counts.updatedCount, skipped_count: counts.skippedCount, failed_count: counts.failedCount, ...(counts.validRows === undefined ? {} : { valid_rows: counts.validRows }), ...(counts.invalidRows === undefined ? {} : { invalid_rows: counts.invalidRows }), ...(counts.warningCount === undefined ? {} : { warning_count: counts.warningCount }) } : {}
   const { error } = await db
     .from('import_jobs')
-    .update({ processed_rows: processedRows, batch_cursor: processedRows, last_heartbeat_at: new Date().toISOString(), ...countPatch })
+    .update({ processed_rows: processedRows, batch_cursor: processedRows, ...(totalRows === undefined ? {} : { total_rows: totalRows }), last_heartbeat_at: new Date().toISOString(), ...countPatch })
     .eq('id', jobId)
     .eq('company_id', companyId)
 

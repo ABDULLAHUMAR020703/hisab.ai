@@ -35,6 +35,8 @@ export interface ProcessImportInput {
   isPaused?: () => Promise<boolean>
   startAt?: number
   batchSize?: number
+  /** Bounds a worker invocation to a single import batch. */
+  maxBatches?: number
   trace?: MigrationTrace
 }
 
@@ -79,6 +81,7 @@ export async function processImport(
   }
 
   const batchSize = Math.max(1, input.batchSize ?? DEFAULT_BATCH_SIZE)
+  let batchesProcessed = 0
   for (let index = 0; index < validRows.length; index += batchSize) {
     if (input.isCancelled && (await input.isCancelled())) {
       break
@@ -188,6 +191,8 @@ export async function processImport(
     if (input.onProgress) {
       await input.onProgress(Math.min((input.startAt ?? 0) + index + batch.length, allValidRows.length), allValidRows.length, { importedCount, updatedCount, skippedCount, failedCount })
     }
+    batchesProcessed += 1
+    if (input.maxBatches && batchesProcessed >= input.maxBatches) break
   }
 
   return { importedCount, updatedCount, skippedCount, failedCount, errors, paused }

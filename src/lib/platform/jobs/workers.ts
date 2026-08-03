@@ -91,6 +91,17 @@ registerJobHandler('WEBHOOK_RETRY', async (payload) => {
   return { retried: true }
 })
 
+registerJobHandler('QUICKBOOKS_IMPORT_STEP', async (payload) => {
+  const importJobId = String(payload.importJobId ?? '')
+  const companyId = String(payload.companyId ?? '')
+  const userId = String(payload.userId ?? '')
+  if (!importJobId || !companyId || !userId) throw new Error('QuickBooks import continuation payload is incomplete.')
+  const { runImportJobStep } = await import('@/app/api/import-export/[module]/import/route')
+  const response = await runImportJobStep(importJobId, companyId, userId)
+  if (!response.ok) throw new Error(`QuickBooks import continuation failed with HTTP ${response.status}.`)
+  return await response.json() as Record<string, unknown>
+})
+
 registerJobHandler('AUTOMATION_RUN', async (payload) => {
   const { executeAutomationRules } = await import('../automation/engine')
   const event = payload.event as Parameters<typeof executeAutomationRules>[0]

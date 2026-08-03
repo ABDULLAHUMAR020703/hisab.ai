@@ -37,6 +37,12 @@ export async function claimNextJob() {
   const client = createAdminClient()
   const now = new Date().toISOString()
 
+  // A timed-out or redeployed worker must become claimable again. Migration
+  // progress is durable in its checkpoint tables, so replay is safe.
+  const stale = new Date(Date.now() - 2 * 60 * 1000).toISOString()
+  await client.from('job_queue').update({ status: 'PENDING', updated_at: now })
+    .eq('status', 'RUNNING').lt('updated_at', stale)
+
   const { data: jobs } = await client
     .from('job_queue')
     .select('*')

@@ -26,19 +26,23 @@ import { normalizeImportError } from '@/lib/import-export/import/import-error'
 import { CORRELATION_HEADER, getCorrelationId } from '@/lib/ops/correlation'
 import { withExternalRequestDiagnostics } from '@/lib/ops/external-request-diagnostics'
 import { MigrationTrace } from '@/lib/import-export/quickbooks/migration-telemetry'
-import { fetchSourceResource, getImportSource } from '@/lib/import-export/sources/source-registry'
+import { fetchSourceResourcePage, getImportSource } from '@/lib/import-export/sources/source-registry'
 import { FrameworkBadRequestError } from '@/lib/import-export/errors'
+import { enqueueJob } from '@/lib/platform/jobs/queue'
+import { withCompanyContext } from '@/lib/tenant'
 
 async function handleImport(
   request: Request,
   { params }: { params: Promise<{ module: string }> },
   trace: MigrationTrace,
+  backgroundUser?: { id: string },
 ) {
   let jobId: string | null = null
+  let sourcePage: Awaited<ReturnType<typeof fetchSourceResourcePage>> | null = null
 
   try {
     const { user, moduleKey } = await trace.measure('module_scheduling', async () => {
-      const authenticated = await requireAccountingAdmin()
+      const authenticated = backgroundUser ?? await requireAccountingAdmin()
       const { module: resolvedModule } = await params
       resolveModuleParam(resolvedModule)
       return { user: authenticated, moduleKey: resolvedModule }
@@ -86,7 +90,8 @@ async function handleImport(
 
     let importBody = body
     if (existingJob && sourceResource) {
-      const normalized = await trace.measure('extraction', () => fetchSourceResource(companyId, sourceKey, resourceKey))
+      sourcePage = await trace.measure('extraction', () => fetchSourceResourcePage(companyId, sourceKey, resourceKey))
+      const normalized = sourcePage.resource
       const fullMapping = Object.fromEntries(definition.fields
         .filter((field) => field.importable !== false)
         .map((field) => [field.key, field.key]))
@@ -134,35 +139,51 @@ async function handleImport(
           updatedCount:base.updatedCount+counts.updatedCount,
           skippedCount:base.skippedCount+counts.skippedCount,
           failedCount:base.failedCount+counts.failedCount,
-        }:undefined)
+        }:undefined, sourcePage?.checkpoint.fetched)
       },
       isCancelled: () => isJobCancelled(job.id),
       isPaused: () => isJobPaused(job.id),
-      startAt: job.batchCursor ?? 0,
-      batchSize: job.batchSize ?? 250,
+      startAt: sourcePage ? 0 : job.batchCursor ?? 0,
+      batchSize: sourcePage ? 100 : job.batchSize ?? 250,
+      maxBatches: sourcePage ? 1 : undefined,
       trace,
     }))
 
     const allErrors = [...validationErrors, ...result.errors]
     await saveImportJobErrors(job.id, allErrors)
     const aggregate = { importedCount: base.importedCount + result.importedCount, updatedCount: base.updatedCount + result.updatedCount, skippedCount: base.skippedCount + result.skippedCount, failedCount: base.failedCount + result.failedCount }
+    const invalidRowCount = validation.invalidRowNumbers.length
+    const aggregateSkippedCount = aggregate.skippedCount + invalidRowCount
+    const cancelledAfterBatch = await isJobCancelled(job.id)
 
-    if (result.paused) {
-      trace.finish({ fetched:mappedRows.length, imported:aggregate.importedCount, updated:aggregate.updatedCount, skipped:aggregate.skippedCount, failed:aggregate.failedCount })
+    if (result.paused || cancelledAfterBatch) {
+      await setImportJobStatus(job.id, result.paused ? 'paused' : 'pending')
+      trace.finish({ fetched: sourcePage?.checkpoint.fetched ?? mappedRows.length, imported: aggregate.importedCount, updated: aggregate.updatedCount, skipped: aggregate.skippedCount, failed: aggregate.failedCount })
+      return Response.json({ jobId: job.id, status: result.paused ? 'paused' : 'cancelled', ...aggregate, totalRows: sourcePage?.checkpoint.fetched ?? mappedRows.length, validRows: validation.validRowNumbers.length, invalidRows: validation.invalidRowNumbers.length, warningCount: validation.warningCount, durationMs: Date.now() - new Date(job.startedAt ?? Date.now()).getTime() })
+    }
+
+    if (sourcePage?.hasMore) {
+      await sourcePage.commit()
+      await updateImportJobProgress(job.id, sourcePage.checkpoint.fetched, { ...aggregate, skippedCount: aggregateSkippedCount, validRows: (job.validRows ?? 0) + validation.validRowNumbers.length, invalidRows: (job.invalidRows ?? 0) + invalidRowCount, warningCount: (job.warningCount ?? 0) + validation.warningCount }, sourcePage.checkpoint.fetched)
+      await setImportJobStatus(job.id, 'pending')
+      await enqueueJob({ jobType: 'QUICKBOOKS_IMPORT_STEP', companyId, payload: { importJobId: job.id, moduleKey, companyId, userId: user.id } })
+      trace.finish({ fetched: sourcePage.checkpoint.fetched, imported: aggregate.importedCount, updated: aggregate.updatedCount, skipped: aggregate.skippedCount, failed: aggregate.failedCount })
       return Response.json({
         jobId: job.id,
-        status: 'paused',
+        status: 'pending',
         ...aggregate,
-        totalRows: mappedRows.length,
+        skippedCount: aggregateSkippedCount,
+        totalRows: sourcePage.checkpoint.fetched,
+        validRows: validation.validRowNumbers.length,
+        invalidRows: validation.invalidRowNumbers.length,
+        warningCount: validation.warningCount,
         durationMs: Date.now() - new Date(job.startedAt ?? Date.now()).getTime(),
       })
     }
 
-    const cancelled = await isJobCancelled(job.id)
-    const invalidRowCount = validation.invalidRowNumbers.length
-    const status = cancelled
-      ? 'cancelled'
-      : aggregate.failedCount > 0 && aggregate.importedCount === 0 && aggregate.updatedCount === 0
+    if (sourcePage) await sourcePage.commit()
+
+    const status = aggregate.failedCount > 0 && aggregate.importedCount === 0 && aggregate.updatedCount === 0
         ? 'failed'
         : 'completed'
 
@@ -170,11 +191,11 @@ async function handleImport(
       status,
       importedCount: aggregate.importedCount,
       updatedCount: aggregate.updatedCount,
-      skippedCount: aggregate.skippedCount + invalidRowCount,
+      skippedCount: aggregateSkippedCount,
       failedCount: aggregate.failedCount,
-      totalRows: mappedRows.length,
-      validRows: validation.validRowNumbers.length,
-      invalidRows: invalidRowCount,
+      totalRows: sourcePage?.checkpoint.fetched ?? mappedRows.length,
+      validRows: (existingJob?.validRows ?? 0) + validation.validRowNumbers.length,
+      invalidRows: (existingJob?.invalidRows ?? 0) + invalidRowCount,
       warningCount: validation.warningCount,
       validationSummary: validation.summaryByCode,
       errorSummary: allErrors.reduce<Record<string, number>>((acc, item) => {
@@ -244,4 +265,23 @@ export async function POST(
   )
   response.headers.set(CORRELATION_HEADER, trace.correlationId)
   return response
+}
+
+/** Executes one bounded migration unit from the durable platform queue. */
+export async function runImportJobStep(jobId: string, companyId: string, userId: string) {
+  return withCompanyContext(companyId, async () => {
+    const job = await getImportJob(jobId)
+    if (!job) return Response.json({ error: 'Import job not found.' }, { status: 404 })
+    const trace = new MigrationTrace(job.moduleKey)
+    return handleImport(
+      new Request('http://internal/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...(job.payloadSnapshot ?? {}), jobId }),
+      }),
+      { params: Promise.resolve({ module: job.moduleKey }) },
+      trace,
+      { id: userId },
+    )
+  })
 }

@@ -235,6 +235,102 @@ export async function fetchSourceResource(
   }
 }
 
+export interface SourceResourcePage {
+  resource: NormalizedImportResource
+  hasMore: boolean
+  checkpoint: { startPosition: number; partitionStart?: string; partitionEnd?: string; fetched: number }
+  commit: () => Promise<void>
+}
+
+/**
+ * Fetches exactly one provider page. The caller commits the cursor only after
+ * the corresponding import batch succeeds, so a crash safely replays the page.
+ */
+export async function fetchSourceResourcePage(
+  tenantId: string,
+  sourceKey: string,
+  resourceKey: string,
+): Promise<SourceResourcePage> {
+  const source = getImportSource(sourceKey)
+  const runtime = createAccountingIntegrationRuntime()
+  const providerSlug = sourceKey as Provider
+  const provider = runtime.providers.get(providerSlug)
+  return runtime.connections.executeForProvider(tenantId, providerSlug, async (context) => {
+    const db = createAdminClient()
+    const existing = await db.from('quickbooks_migration_checkpoints').select('*')
+      .eq('company_id', tenantId).eq('realm_id', context.realmId).eq('resource_key', resourceKey).maybeSingle()
+    if (existing.error) throw existing.error
+    const prior = existing.data
+    const resumable = ['running', 'failed'].includes(String(prior?.status))
+    const priorFetched = resumable ? Number(prior?.extracted_count ?? 0) : 0
+    if (!resumable) await clearQuickBooksStaging(db, tenantId, context.realmId, resourceKey)
+
+    let pageCheckpoint: SourceResourcePage['checkpoint'] = {
+      startPosition: resumable ? Number(prior?.next_start_position ?? 1) : 1,
+      partitionStart: resumable && prior?.partition_start ? String(prior.partition_start) : undefined,
+      partitionEnd: resumable && prior?.partition_end ? String(prior.partition_end) : undefined,
+      fetched: priorFetched,
+    }
+    let pageRows: Record<string, string>[] = []
+    let hasMore = true
+    const result = await source.fetchResource(provider, context, resourceKey, {
+      companyId: tenantId,
+      resumeStartPosition: pageCheckpoint.startPosition,
+      partitionStart: pageCheckpoint.partitionStart,
+      partitionEnd: undefined,
+      boundedPage: true,
+      signal: AbortSignal.timeout(45 * 1000),
+      onBatch: async (rows, checkpoint) => {
+        pageRows = rows
+        pageCheckpoint = { ...checkpoint, fetched: priorFetched + checkpoint.fetched }
+        hasMore = Boolean(checkpoint.hasMore || checkpoint.partitionComplete)
+        if (rows.length) {
+          const values = rows.map((payload) => ({
+            company_id: tenantId,
+            realm_id: context.realmId,
+            resource_key: resourceKey,
+            source_id: String(payload._quickbooksId || payload.sourceId || ''),
+            payload,
+          })).filter((value) => value.source_id)
+          if (values.length) {
+            const staged = await db.from('quickbooks_extraction_staging').upsert(values, { onConflict: 'company_id,realm_id,resource_key,source_id' })
+            if (staged.error) throw staged.error
+          }
+        }
+      },
+      onCheckpoint: async (checkpoint) => {
+        pageCheckpoint = { ...checkpoint, fetched: priorFetched + checkpoint.fetched }
+        hasMore = Boolean(checkpoint.hasMore || checkpoint.partitionComplete)
+      },
+    })
+    if (!pageRows.length) pageRows = result.rows
+    if (!pageRows.length && pageCheckpoint.fetched === 0) hasMore = false
+
+    return {
+      resource: { ...result, rows: pageRows, hasMore },
+      hasMore,
+      checkpoint: pageCheckpoint,
+      commit: async () => {
+        const saved = await db.from('quickbooks_migration_checkpoints').upsert({
+          company_id: tenantId,
+          realm_id: context.realmId,
+          resource_key: resourceKey,
+          extraction_mode: pageCheckpoint.partitionStart ? 'partitioned' : 'full',
+          partition_start: pageCheckpoint.partitionStart ?? null,
+          partition_end: pageCheckpoint.partitionEnd ?? null,
+          next_start_position: pageCheckpoint.startPosition,
+          status: hasMore ? 'running' : 'completed',
+          extracted_count: pageCheckpoint.fetched,
+          last_error: null,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'company_id,realm_id,resource_key' })
+        if (saved.error) throw saved.error
+        if (!hasMore) await clearQuickBooksStaging(db, tenantId, context.realmId, resourceKey)
+      },
+    }
+  })
+}
+
 export async function fetchSourceResources(
   tenantId: string,
   sourceKey: string,

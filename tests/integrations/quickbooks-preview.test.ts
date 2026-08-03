@@ -159,6 +159,19 @@ test('QuickBooks provider stops pagination at the preview record limit', async (
   assert.match(requestedQueries[0], /MAXRESULTS 10/)
 })
 
+test('QuickBooks provider can stop after one resumable extraction page', async () => {
+  let requests = 0
+  const provider = new QuickBooksIntegrationService({
+    clientId: 'client', clientSecret: 'secret', redirectUri: 'https://example.test/callback', environment: 'sandbox',
+  }, async () => {
+    requests += 1
+    return new Response(JSON.stringify({ QueryResponse: { Invoice: Array.from({ length: 100 }, (_, index) => ({ Id: String(index + 1) })) } }), { status: 200 })
+  })
+  const rows = await provider.getEntityRecords({ accessToken: 'token', realmId: '123' }, 'Invoice', { pageSize: 100, maxPages: 1, onPage: async () => undefined })
+  assert.equal(rows.length, 100)
+  assert.equal(requests, 1)
+})
+
 test('attachment preview returns metadata without downloading file content', async () => {
   let downloads = 0
   const provider = {

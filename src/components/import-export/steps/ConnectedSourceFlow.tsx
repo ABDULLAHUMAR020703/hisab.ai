@@ -57,6 +57,13 @@ interface ImportResult extends ImportTotals {
   durationMs?: number
   errors?: import('@/lib/import-export/types').ImportRowError[]
 }
+interface JobProgress {
+  module: string
+  status: string
+  currentBatch: number
+  processedRows: number
+  estimatedRemaining: number | null
+}
 interface CompanyAnalysis {
   companyName: string | null
   fiscalYear: string | null
@@ -96,6 +103,7 @@ export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }:
   const [report, setReport] = useState<MigrationReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [jobProgress, setJobProgress] = useState<JobProgress | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -140,6 +148,7 @@ export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }:
     setStrategy('skip')
     setTotals(null)
     setReport(null)
+    setJobProgress(null)
     setError(null)
     onClose()
   }
@@ -196,7 +205,19 @@ export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }:
       for (const { resource, jobId } of queued) {
         const response = await fetch(`/api/import-export/jobs/${jobId}/run`, { method: 'POST' })
         if (!response.ok) throw new Error(`${resource.label}: ${await readApiError(response)}`)
-        const result = await response.json() as ImportResult
+        let result = await response.json() as ImportResult
+        while (result.status === 'pending' || result.status === 'processing') {
+          const progressResponse = await fetch(`/api/import-export/jobs/${jobId}`, { cache: 'no-store' })
+          if (!progressResponse.ok) throw new Error(`${resource.label}: ${await readApiError(progressResponse)}`)
+          const progress = await progressResponse.json() as JobProgress & ImportResult
+          setJobProgress({ module: resource.label, status: progress.status, currentBatch: progress.currentBatch, processedRows: progress.processedRows, estimatedRemaining: progress.estimatedRemaining })
+          if (progress.status === 'pending' || progress.status === 'processing') {
+            await new Promise((resolve) => window.setTimeout(resolve, 1500))
+          }
+          result = progress
+        }
+        setJobProgress(null)
+        if (result.status !== 'completed') throw new Error(`${resource.label}: migration job ended with status ${result.status}`)
         for (const key of Object.keys(summary) as Array<keyof ImportTotals>) summary[key] += result[key]
         moduleReports.push({ key: resource.key, label: resource.label, sourceCount: result.totalRows, validCount: result.validRows ?? Math.max(0, result.totalRows - (result.invalidRows ?? 0)), warningCount: result.warningCount ?? 0, validationErrors: result.invalidRows ?? 0, importedCount: result.importedCount, updatedCount: result.updatedCount, skippedCount: result.skippedCount, failedCount: result.failedCount, durationMs: result.durationMs ?? 0, errors: result.errors })
       }
@@ -270,7 +291,7 @@ export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }:
 
         {step === 'validation' && <div className="space-y-5"><div className="flex items-start gap-3 rounded-xl border border-emerald-100 bg-emerald-50 p-4"><FileCheck2 size={20} className="mt-0.5 text-emerald-600" /><div><h3 className="font-semibold text-emerald-900">Preview complete</h3><p className="mt-1 text-sm text-emerald-800">Counts come from QuickBooks; field validation uses the displayed sample. Full duplicate detection runs during import.</p></div></div>{previews.map(renderPreviewResource)}</div>}
 
-        {step === 'import' && <div className="space-y-5">{loading ? <div className="py-12 text-center"><div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" /><p className="text-sm text-slate-600">Running full background extraction and migration…</p></div> : <><div className="flex items-start gap-3 rounded-xl border border-indigo-100 bg-indigo-50 p-4"><ShieldCheck size={20} className="mt-0.5 text-indigo-600" /><div><h3 className="font-semibold text-indigo-900">Ready to migrate</h3><p className="mt-1 text-sm text-indigo-800">{sourceRecordCount.toLocaleString()} source records will be extracted in the background. Preview samples are informational and are not reused. Select how existing records should be handled.</p></div></div><DuplicateStep duplicateCount={duplicateCount} strategy={strategy} onStrategyChange={setStrategy} /></>}</div>}
+        {step === 'import' && <div className="space-y-5">{loading ? <div className="py-12 text-center"><div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" /><p className="text-sm text-slate-600">Running bounded background migration units…</p>{jobProgress && <p className="mt-3 text-xs text-slate-500">{jobProgress.module} · batch {jobProgress.currentBatch} · {jobProgress.processedRows.toLocaleString()} records processed · {jobProgress.estimatedRemaining === null ? 'remaining work is being calculated' : `${jobProgress.estimatedRemaining.toLocaleString()} estimated remaining`}</p>}</div> : <><div className="flex items-start gap-3 rounded-xl border border-indigo-100 bg-indigo-50 p-4"><ShieldCheck size={20} className="mt-0.5 text-indigo-600" /><div><h3 className="font-semibold text-indigo-900">Ready to migrate</h3><p className="mt-1 text-sm text-indigo-800">{sourceRecordCount.toLocaleString()} source records will be extracted in the background. Preview samples are informational and are not reused. Select how existing records should be handled.</p></div></div><DuplicateStep duplicateCount={duplicateCount} strategy={strategy} onStrategyChange={setStrategy} /></>}</div>}
 
         {step === 'report' && totals && report && <div className="space-y-5"><div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-5"><CheckCircle2 size={24} className="mt-0.5 text-emerald-600" /><div><h3 className="font-semibold text-emerald-900">Migration complete</h3><p className="mt-1 text-sm text-emerald-800">Your professional migration report is ready.</p></div></div><div className="grid grid-cols-2 gap-3 md:grid-cols-4">{([['Imported', totals.importedCount, 'text-emerald-700'], ['Updated', totals.updatedCount, 'text-blue-700'], ['Skipped', totals.skippedCount, 'text-amber-700'], ['Failed', totals.failedCount, 'text-red-700']] as const).map(([label, count, color]) => <div key={label} className="rounded-xl border border-slate-200 p-4 text-center"><p className="text-xs uppercase tracking-wide text-slate-400">{label}</p><p className={`mt-1 text-2xl font-bold ${color}`}>{count}</p></div>)}</div><div className="grid grid-cols-2 gap-3 md:grid-cols-4"><div className="rounded-xl bg-indigo-50 p-4"><p className="text-xs text-indigo-600">Validation score</p><p className="mt-1 text-2xl font-bold text-indigo-800">{report.validationScore}%</p></div><div className="rounded-xl bg-emerald-50 p-4"><p className="text-xs text-emerald-600">Integrity score</p><p className="mt-1 text-2xl font-bold text-emerald-800">{report.integrityScore}%</p></div><div className="rounded-xl bg-amber-50 p-4"><p className="text-xs text-amber-600">Warnings</p><p className="mt-1 text-2xl font-bold text-amber-800">{report.totals.warnings}</p></div><div className="rounded-xl bg-slate-100 p-4"><p className="text-xs text-slate-500">Duration</p><p className="mt-1 text-2xl font-bold text-slate-800">{(report.durationMs / 1000).toFixed(1)}s</p></div></div><div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => void downloadReport('pdf')}>Export PDF</Button><Button variant="outline" onClick={() => void downloadReport('csv')}>Export CSV</Button><Button variant="outline" onClick={() => void downloadReport('json')}>Export JSON</Button></div><div className="space-y-2"><h3 className="text-sm font-semibold text-slate-800">Module report</h3>{report.modules.map((module) => <div key={module.key} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-4 py-3 text-sm"><span className="font-medium text-slate-700">{module.label}</span><span className="text-slate-500">{module.sourceCount} records · {module.importedCount} imported · {module.updatedCount} updated · {module.skippedCount} skipped · {module.failedCount} failed · {module.warningCount} warnings</span></div>)}</div></div>}
       </div>

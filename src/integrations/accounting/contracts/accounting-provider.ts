@@ -42,8 +42,10 @@ export interface ProviderEntityFetchOptions {
   retainRows?: boolean
   /** Cancels pagination, checkpoint callbacks, retry backoff, and requests. */
   signal?: AbortSignal
-  onCheckpoint?: (checkpoint: { startPosition: number; partitionStart?: string; partitionEnd?: string; extractedCount: number }) => Promise<void>
-  onPage?: (rows:unknown[],checkpoint:{startPosition:number;partitionStart?:string;partitionEnd?:string;extractedCount:number})=>Promise<void>
+  /** Limits a full extraction to one provider page for resumable workers. */
+  maxPages?: number
+  onCheckpoint?: (checkpoint: { startPosition: number; partitionStart?: string; partitionEnd?: string; extractedCount: number; hasMore?: boolean; partitionComplete?: boolean }) => Promise<void>
+  onPage?: (rows:unknown[],checkpoint:{startPosition:number;partitionStart?:string;partitionEnd?:string;extractedCount:number;hasMore?:boolean;partitionComplete?:boolean})=>Promise<void>
 }
 
 export interface ProviderCdcResult {

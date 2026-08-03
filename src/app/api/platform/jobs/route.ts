@@ -9,7 +9,8 @@ export async function POST(request: Request) {
     if (!isCronAuthorized(request)) {
       await requirePlatformAdmin()
     }
-    const result = await processJobBatch(10)
+    // Keep each invocation bounded; long-running migrations enqueue their next unit.
+    const result = await processJobBatch(1)
     return Response.json(result)
   } catch (error) {
     return authzErrorResponse(error)

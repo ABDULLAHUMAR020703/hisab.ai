@@ -65,7 +65,7 @@ test('sampled previews queue source-backed jobs and are never used as import pay
   assert.doesNotMatch(wizard,/resource\.count > resource\.rows\.length/)
 
   assert.match(route,/payloadSnapshot: \{ sourceKey, resourceKey, filename, fileFormat, duplicateStrategy \}/)
-  assert.match(route,/fetchSourceResource\(companyId, sourceKey, resourceKey\)/)
+  assert.match(route,/fetchSourceResourcePage\(companyId, sourceKey, resourceKey\)/)
   assert.match(route,/rows: normalized\.rows, mapping: fullMapping/)
   assert.match(runner,/job\.payloadSnapshot/)
   assert.match(registry,/fetchWithCheckpoint\(tenantId, source, provider, context, resourceKey/)
@@ -73,6 +73,31 @@ test('sampled previews queue source-backed jobs and are never used as import pay
   const preview={count:89,rows:Array.from({length:10})}
   assert.equal(preview.count,89)
   assert.equal(preview.rows.length,10)
+})
+
+test('QuickBooks import execution is a checkpointed state machine, not one long-lived worker',()=>{
+  const route=file('src/app/api/import-export/[module]/import/route.ts')
+  const processor=file('src/lib/import-export/import/import-processor.ts')
+  const worker=file('src/lib/platform/jobs/workers.ts')
+  const queueRoute=file('src/app/api/platform/jobs/route.ts')
+  const queue=file('src/lib/platform/jobs/queue.ts')
+  const vercel=file('vercel.json')
+  const wizard=file('src/components/import-export/steps/ConnectedSourceFlow.tsx')
+
+  assert.match(route,/fetchSourceResourcePage/)
+  assert.match(route,/maxBatches: sourcePage \? 1 : undefined/)
+  assert.match(route,/sourcePage\.commit\(\)/)
+  assert.match(route,/QUICKBOOKS_IMPORT_STEP/)
+  assert.match(processor,/maxBatches\?: number/)
+  assert.match(processor,/if \(input\.maxBatches && batchesProcessed >= input\.maxBatches\) break/)
+  assert.match(worker,/registerJobHandler\('QUICKBOOKS_IMPORT_STEP'/)
+  assert.match(queueRoute,/processJobBatch\(1\)/)
+  assert.match(queue,/status: 'PENDING'/)
+  assert.match(queue,/status', 'RUNNING'/)
+  assert.match(vercel,/"schedule": "\* \* \* \* \*"/)
+  assert.match(file('src/lib/import-export/sources/source-registry.ts'),/boundedPage: true/)
+  assert.match(wizard,/fetch\(.*jobs\/\$\{jobId\}/)
+  assert.match(wizard,/estimatedRemaining/)
 })
 
 test('QuickBooks transaction importer matches the deployed canonical schema',()=>{

@@ -118,6 +118,7 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
   async fetchResource(provider: AccountingProvider, context: ProviderAccessContext, resourceKey: string, options?: ImportSourceFetchOptions): Promise<NormalizedImportResource> {
     const resource = this.resources.find((item) => item.key === resourceKey)
     if (!resource) throw new Error(`Unsupported QuickBooks import resource: ${resourceKey}`)
+    let hasMore = false
     const fetchEntity = async (entity:string,fallback:()=>Promise<unknown[]>) => provider.getEntityRecords
       ? provider.getEntityRecords(context,entity,{
           includeInactive:true,
@@ -125,10 +126,12 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
           startPosition:options?.resumeStartPosition,
           partitionStart:options?.partitionStart?new Date(options.partitionStart):undefined,
           partitionEnd:options?.partitionEnd?new Date(options.partitionEnd):undefined,
-          retainRows:!options?.onBatch,
+          maxPages: options?.boundedPage ? 1 : undefined,
+          pageSize: options?.boundedPage ? 100 : undefined,
+          retainRows:!options?.onBatch || options?.boundedPage,
           signal:options?.signal,
-          onCheckpoint:options?.onCheckpoint?async checkpoint=>options.onCheckpoint!({...checkpoint,fetched:checkpoint.extractedCount}):undefined,
-          onPage:options?.onBatch?async(page,checkpoint)=>options.onBatch!(this.normalizeRecords(resourceKey,filterResourceRows(resourceKey,page),context.realmId),{...checkpoint,fetched:checkpoint.extractedCount}):undefined,
+          onCheckpoint:options?.onCheckpoint?async checkpoint=>{hasMore=Boolean(checkpoint.hasMore||checkpoint.partitionComplete);return options.onCheckpoint!({...checkpoint,fetched:checkpoint.extractedCount})}:undefined,
+          onPage:options?.onBatch?async(page,checkpoint)=>{hasMore=Boolean(checkpoint.hasMore||checkpoint.partitionComplete);return options.onBatch!(this.normalizeRecords(resourceKey,filterResourceRows(resourceKey,page),context.realmId),{...checkpoint,fetched:checkpoint.extractedCount})}:undefined,
         })
       : fallback()
 
@@ -162,16 +165,12 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
 
     let sourceRows: unknown[]
     switch (resourceKey) {
-      case 'accounts': sourceRows = await provider.getAccounts(context); break
-      case 'customers': sourceRows = await provider.getCustomers(context); break
-      case 'vendors': sourceRows = await provider.getVendors(context); break
-      case 'items': sourceRows = await provider.getItems(context); break
-      case 'tax-codes': sourceRows = provider.getTaxRates
-        ? await provider.getTaxRates(context)
-        : provider.getEntityRecords
-          ? await provider.getEntityRecords(context, 'TaxRate')
-          : []; break
-      case 'payment-terms': sourceRows = await provider.getPaymentTerms(context); break
+      case 'accounts': sourceRows = await fetchEntity('Account',()=>provider.getAccounts(context)); break
+      case 'customers': sourceRows = await fetchEntity('Customer',()=>provider.getCustomers(context)); break
+      case 'vendors': sourceRows = await fetchEntity('Vendor',()=>provider.getVendors(context)); break
+      case 'items': sourceRows = await fetchEntity('Item',()=>provider.getItems(context)); break
+      case 'tax-codes': sourceRows = await fetchEntity('TaxRate', () => provider.getTaxRates?.(context) ?? Promise.resolve([])); break
+      case 'payment-terms': sourceRows = await fetchEntity('Term',()=>provider.getPaymentTerms(context)); break
       case 'invoices': sourceRows = await fetchEntity('Invoice',()=>provider.getInvoices(context)); break
       case 'bills': sourceRows = await fetchEntity('Bill',()=>provider.getBills(context)); break
       case 'expenses': sourceRows = await fetchEntity('Purchase',()=>provider.getExpenses?.(context)??Promise.resolve([])); break
@@ -211,7 +210,7 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
         }))
       }
     }
-    return { ...resource, rows }
+    return { ...resource, rows, hasMore }
   }
 
   normalizeRecords(resourceKey: string, sourceRows: unknown[], realmId: string): Record<string, string>[] {

@@ -11,6 +11,7 @@ export interface NormalizedImportResource extends ImportSourceResource {
   totalCount?: number
   countAccuracy?: 'exact' | 'upper-bound'
   sampled?: boolean
+  hasMore?: boolean
 }
 
 export interface SourcePreviewBatch { count: number; rows: unknown[] }
@@ -21,8 +22,9 @@ export interface ImportSourceFetchOptions {
   partitionStart?: string
   partitionEnd?: string
   signal?: AbortSignal
-  onCheckpoint?: (checkpoint: { startPosition: number; partitionStart?: string; partitionEnd?: string; fetched: number }) => Promise<void> | void
-  onBatch?: (rows:Record<string,string>[], checkpoint: { startPosition:number; partitionStart?:string; partitionEnd?:string; fetched:number })=>Promise<void>|void
+  boundedPage?: boolean
+  onCheckpoint?: (checkpoint: { startPosition: number; partitionStart?: string; partitionEnd?: string; fetched: number; hasMore?: boolean; partitionComplete?: boolean }) => Promise<void> | void
+  onBatch?: (rows:Record<string,string>[], checkpoint: { startPosition:number; partitionStart?:string; partitionEnd?:string; fetched:number; hasMore?: boolean; partitionComplete?: boolean })=>Promise<void>|void
   preview?: {
     sampleSize: number
     cache?: Map<string, Promise<SourcePreviewBatch>>

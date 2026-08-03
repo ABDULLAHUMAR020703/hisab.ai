@@ -42,6 +42,8 @@ function fiscalYearValue(value: unknown): string | null {
 interface QueryPageResult {
   rows: unknown[]
   count: number
+  hasMore: boolean
+  partitionComplete?: boolean
 }
 
 async function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
@@ -247,13 +249,13 @@ export class QuickBooksIntegrationService implements AccountingProvider {
   }
 
   private async queryAll(context: ProviderAccessContext, entity: string, options: ProviderEntityFetchOptions = {}): Promise<unknown[]> {
-    if (options.partitioned && TRANSACTION_DATE_ENTITIES.has(entity)) return this.queryPartitioned(context, entity, options)
+    if (options.partitioned && TRANSACTION_DATE_ENTITIES.has(entity)) return (await this.queryPartitioned(context, entity, options)).rows
     return (await this.queryPages(context, entity, options, options.where)).rows
   }
 
-  private async queryPartitioned(context: ProviderAccessContext, entity: string, options: ProviderEntityFetchOptions): Promise<unknown[]> {
+  private async queryPartitioned(context: ProviderAccessContext, entity: string, options: ProviderEntityFetchOptions): Promise<QueryPageResult> {
     const first = options.partitionStart ?? await this.findEarliestTransactionDate(context, entity, options.signal)
-    if (!first) return []
+    if (!first) return { rows: [], count: 0, hasMore: false }
     const last = options.partitionEnd ?? new Date(Date.UTC(this.now().getUTCFullYear() + 1, 0, 1))
     const rows: unknown[] = []
     let extractedCount = 0
@@ -267,10 +269,19 @@ export class QuickBooksIntegrationService implements AccountingProvider {
       const pageResult = await this.queryPages(context, entity, { ...options, partitioned: false, startPosition: resumePosition, maxRecords: remaining }, where, extractedCount, start, end)
       if (options.retainRows !== false) rows.push(...pageResult.rows)
       extractedCount += pageResult.count
+      if (options.maxPages && pageResult.partitionComplete) {
+        const hasMore = end < last
+        const nextCheckpoint = { startPosition: 1, partitionStart: end.toISOString(), partitionEnd: undefined, extractedCount, hasMore, partitionComplete: false }
+        if (options.onCheckpoint) await options.onCheckpoint(nextCheckpoint)
+        return { rows, count: extractedCount, hasMore, partitionComplete: false }
+      }
+      if (options.maxPages && pageResult.hasMore) {
+        return { rows, count: extractedCount, hasMore: true, partitionComplete: false }
+      }
       resumePosition = 1
       start = end
     }
-    return rows
+    return { rows, count: extractedCount, hasMore: false }
   }
 
   private async findEarliestTransactionDate(context: ProviderAccessContext, entity: string, signal?: AbortSignal): Promise<Date | null> {
@@ -292,6 +303,7 @@ export class QuickBooksIntegrationService implements AccountingProvider {
     const maxRecords = options.maxRecords === undefined ? Number.POSITIVE_INFINITY : Math.max(0, options.maxRecords)
     const rows: unknown[] = []
     let fetchedCount = 0
+    let pages = 0
     const inactive = options.includeInactive && INACTIVE_ENTITIES.has(entity) ? 'Active IN (true, false)' : ''
     const predicate = [where, inactive].filter(Boolean).join(' AND ')
     let previousPageSignature:string|null=null
@@ -314,13 +326,16 @@ export class QuickBooksIntegrationService implements AccountingProvider {
       previousPageSignature=pageSignature
       if (options.retainRows !== false) rows.push(...page)
       fetchedCount += page.length
-      const checkpoint={ startPosition: start + page.length, partitionStart: partitionStart?.toISOString(), partitionEnd: partitionEnd?.toISOString(), extractedCount: offset + fetchedCount }
+      pages += 1
+      const pageHasMore = page.length >= pageSize && fetchedCount < maxRecords
+      const partitionComplete = Boolean(partitionStart && page.length < pageSize)
+      const checkpoint={ startPosition: start + page.length, partitionStart: partitionStart?.toISOString(), partitionEnd: partitionEnd?.toISOString(), extractedCount: offset + fetchedCount, hasMore: pageHasMore, partitionComplete }
       if(options.onPage)await options.onPage(page,checkpoint)
       if (options.onCheckpoint) await options.onCheckpoint(checkpoint)
-      if (page.length < pageSize || fetchedCount >= maxRecords) break
+      if (page.length < pageSize || fetchedCount >= maxRecords || (options.maxPages && pages >= options.maxPages)) break
       start += page.length
     }
-    return { rows, count: fetchedCount }
+    return { rows, count: fetchedCount, hasMore: Boolean(options.maxPages && pages >= options.maxPages && fetchedCount > 0), partitionComplete: Boolean(partitionStart && fetchedCount < maxRecords) }
   }
 
   private async requestTokens(body: URLSearchParams): Promise<ProviderTokenSet> {
