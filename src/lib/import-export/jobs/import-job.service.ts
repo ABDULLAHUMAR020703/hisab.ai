@@ -12,6 +12,7 @@ import type {
   MigrationProgressSnapshot,
   SkippedRecordDiagnostic,
 } from '../types'
+import { finalizeProgressSnapshot, mergeImportJobProgress } from './progress-merge'
 
 function mapJobRow(row: Record<string, unknown>): ImportJobRecord {
   return {
@@ -107,6 +108,22 @@ export async function getImportJob(jobId: string, companyIdOverride?: string): P
   return data ? mapJobRow(data) : null
 }
 
+export async function getImportJobsByIds(jobIds: string[], companyIdOverride?: string): Promise<ImportJobRecord[]> {
+  const unique = [...new Set(jobIds.filter(Boolean))]
+  if (unique.length === 0) return []
+  await assertImportJobSchemaCompatibility()
+  const db = supabaseDb()
+  const companyId = companyIdOverride ?? await resolveCompanyId()
+  const { data, error } = await db
+    .from('import_jobs')
+    .select('*')
+    .eq('company_id', companyId)
+    .in('id', unique)
+
+  if (error) throw error
+  return (data ?? []).map((row) => mapJobRow(row))
+}
+
 export async function updateImportJobProgress(
   jobId: string,
   processedRows: number,
@@ -117,29 +134,86 @@ export async function updateImportJobProgress(
 ): Promise<void> {
   const db = supabaseDb()
   const companyId = companyIdOverride ?? await resolveCompanyId()
-  const countPatch = counts ? { imported_count: counts.importedCount, updated_count: counts.updatedCount, skipped_count: counts.skippedCount, failed_count: counts.failedCount, ...(counts.validRows === undefined ? {} : { valid_rows: counts.validRows }), ...(counts.invalidRows === undefined ? {} : { invalid_rows: counts.invalidRows }), ...(counts.warningCount === undefined ? {} : { warning_count: counts.warningCount }) } : {}
-  const patch: Record<string, unknown> = { processed_rows: processedRows, batch_cursor: processedRows, ...(totalRows === undefined ? {} : { total_rows: totalRows }), last_heartbeat_at: new Date().toISOString(), ...countPatch }
-  if (observability?.progressSnapshot) patch.progress_snapshot = observability.progressSnapshot
-  if (observability?.activityEvent) {
-    const current = await db.from('import_jobs').select('activity_events').eq('id', jobId).eq('company_id', companyId).maybeSingle()
-    if (current.error) throw current.error
-    const events = Array.isArray(current.data?.activity_events) ? current.data.activity_events as MigrationActivityEvent[] : []
-    patch.activity_events = [...events, observability.activityEvent].slice(-100)
+  const current = await getImportJob(jobId, companyId)
+  if (!current) {
+    const missing = new Error(`Import job progress update matched no row for job ${jobId} and company ${companyId}.`)
+    logger.error('quickbooks.import_job.progress.persist_failed', {
+      importJobId: jobId,
+      companyId,
+      processedRows,
+      error: { code: 'IMPORT_JOB_NOT_FOUND', message: missing.message },
+    })
+    throw missing
   }
+
+  const merged = mergeImportJobProgress({
+    status: current.status,
+    processedRows: current.processedRows,
+    totalRows: current.totalRows,
+    importedCount: current.importedCount,
+    updatedCount: current.updatedCount,
+    skippedCount: current.skippedCount,
+    failedCount: current.failedCount,
+    validRows: current.validRows,
+    invalidRows: current.invalidRows,
+    warningCount: current.warningCount,
+    progressSnapshot: current.progressSnapshot ?? null,
+  }, {
+    processedRows,
+    totalRows,
+    counts,
+    progressSnapshot: observability?.progressSnapshot,
+  })
+
+  if (merged === 'stale_completed') {
+    logger.info('quickbooks.import_job.progress.stale_ignored', {
+      importJobId: jobId,
+      companyId,
+      status: current.status,
+      processedRows,
+      totalRows,
+      hasProgressSnapshot: Boolean(observability?.progressSnapshot),
+      hasActivityEvent: Boolean(observability?.activityEvent),
+      reason: 'completed_job_immutable',
+    })
+    return
+  }
+
+  const events = observability?.activityEvent
+    ? [...(current.activityEvents ?? []), observability.activityEvent].slice(-100)
+    : undefined
+  const patch: Record<string, unknown> = {
+    processed_rows: merged.processedRows,
+    batch_cursor: merged.processedRows,
+    total_rows: merged.totalRows,
+    imported_count: merged.importedCount,
+    updated_count: merged.updatedCount,
+    skipped_count: merged.skippedCount,
+    failed_count: merged.failedCount,
+    valid_rows: merged.validRows,
+    invalid_rows: merged.invalidRows,
+    warning_count: merged.warningCount,
+    progress_snapshot: merged.progressSnapshot,
+    last_heartbeat_at: new Date().toISOString(),
+    ...(events ? { activity_events: events } : {}),
+  }
+
   logger.info('quickbooks.import_job.progress.persist_attempt', {
     importJobId: jobId,
     companyId,
-    processedRows,
-    totalRows,
-    hasProgressSnapshot: Boolean(observability?.progressSnapshot),
+    processedRows: merged.processedRows,
+    totalRows: merged.totalRows,
+    hasProgressSnapshot: true,
     hasActivityEvent: Boolean(observability?.activityEvent),
     updatePayload: patch,
   })
+
   const { data: persisted, error } = await db
     .from('import_jobs')
     .update(patch)
     .eq('id', jobId)
     .eq('company_id', companyId)
+    .neq('status', 'completed')
     .select('id,company_id,status,processed_rows,total_rows,progress_snapshot,activity_events,last_heartbeat_at')
     .maybeSingle()
 
@@ -147,17 +221,28 @@ export async function updateImportJobProgress(
     logger.error('quickbooks.import_job.progress.persist_failed', {
       importJobId: jobId,
       companyId,
-      processedRows,
+      processedRows: merged.processedRows,
       error: { code: error.code, message: error.message, details: error.details, hint: error.hint },
     })
     throw error
   }
   if (!persisted) {
+    const latest = await getImportJob(jobId, companyId)
+    if (latest?.status === 'completed') {
+      logger.info('quickbooks.import_job.progress.stale_ignored', {
+        importJobId: jobId,
+        companyId,
+        status: latest.status,
+        processedRows: merged.processedRows,
+        reason: 'completed_job_immutable_race',
+      })
+      return
+    }
     const missing = new Error(`Import job progress update matched no row for job ${jobId} and company ${companyId}.`)
     logger.error('quickbooks.import_job.progress.persist_failed', {
       importJobId: jobId,
       companyId,
-      processedRows,
+      processedRows: merged.processedRows,
       error: { code: 'IMPORT_JOB_NOT_FOUND', message: missing.message },
     })
     throw missing
@@ -213,10 +298,20 @@ export async function finalizeImportJob(
 ): Promise<ImportJobRecord> {
   const db = supabaseDb()
   const companyId = await resolveCompanyId()
+  const existing = await getImportJob(jobId, companyId)
   const completedAt = new Date()
   const startedAt = input.startedAt ? new Date(input.startedAt) : completedAt
   const durationMs = Math.max(0, completedAt.getTime() - startedAt.getTime())
   const processedRows = input.importedCount + input.updatedCount + input.skippedCount + input.failedCount
+  const progressSnapshot = finalizeProgressSnapshot(existing?.progressSnapshot, {
+    status: input.status,
+    processedRows,
+    totalRows: input.totalRows,
+    importedCount: input.importedCount,
+    updatedCount: input.updatedCount,
+    skippedCount: input.skippedCount,
+    failedCount: input.failedCount,
+  })
 
   logger.info('quickbooks.import_job.finalize.persist_attempt', { importJobId: jobId, companyId, status: input.status, totalRows: input.totalRows, processedRows })
 
@@ -236,6 +331,7 @@ export async function finalizeImportJob(
       validation_summary: input.validationSummary ?? null,
       error_summary: input.errorSummary ?? null,
       skip_summary: input.skipSummary ?? {},
+      progress_snapshot: progressSnapshot,
       completed_at: completedAt.toISOString(),
       duration_ms: durationMs,
     })

@@ -52,14 +52,15 @@ test('import endpoint always performs authoritative duplicate detection',()=>{
 
 test('sampled previews queue source-backed jobs and are never used as import payloads',()=>{
   const wizard=file('src/components/import-export/steps/ConnectedSourceFlow.tsx')
+  const coordinator=file('src/components/import-export/MigrationSessionProvider.tsx')
   const route=file('src/app/api/import-export/[module]/import/route.ts')
   const runner=file('src/app/api/import-export/jobs/[jobId]/run/route.ts')
   const registry=file('src/lib/import-export/sources/source-registry.ts')
 
-  assert.match(wizard,/background: true/)
-  assert.match(wizard,/sourceKey: source\.key/)
-  assert.match(wizard,/resourceKey: resource\.key/)
-  assert.match(wizard,/jobs\/\$\{jobId\}\/run/)
+  assert.match(coordinator,/background: true/)
+  assert.match(coordinator,/sourceKey: current\.config\.provider/)
+  assert.match(coordinator,/resourceKey: unfinished\.key/)
+  assert.match(coordinator,/jobs\/\$\{unfinished\.jobId\}\/run/)
   assert.doesNotMatch(wizard,/rows: resource\.rows/)
   assert.doesNotMatch(wizard,/mapping: resource\.mapping/)
   assert.doesNotMatch(wizard,/resource\.count > resource\.rows\.length/)
@@ -83,6 +84,7 @@ test('QuickBooks import execution is a checkpointed state machine, not one long-
   const queue=file('src/lib/platform/jobs/queue.ts')
   const vercel=file('vercel.json')
   const wizard=file('src/components/import-export/steps/ConnectedSourceFlow.tsx')
+  const coordinator=file('src/components/import-export/MigrationSessionProvider.tsx')
 
   assert.match(route,/fetchSourceResourcePage/)
   assert.match(route,/maxBatches: sourcePage \? 1 : undefined/)
@@ -97,7 +99,7 @@ test('QuickBooks import execution is a checkpointed state machine, not one long-
   assert.doesNotMatch(vercel, /"crons"/)
   assert.doesNotMatch(vercel, /api\/platform\/jobs/)
   assert.match(file('src/lib/import-export/sources/source-registry.ts'),/boundedPage: true/)
-  assert.match(wizard,/fetch\(.*jobs\/\$\{jobId\}/)
+  assert.match(coordinator,/jobs\/\$\{unfinished\.jobId\}\/run/)
   assert.match(wizard,/estimatedRemaining/)
 })
 

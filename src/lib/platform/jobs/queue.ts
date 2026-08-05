@@ -180,13 +180,15 @@ export async function failJob(jobId: string, errorMessage: string, attempt?: num
   })
 }
 
-export async function updateJobProgress(jobId: string, progress: number, message?: string) {
+export async function updateJobProgress(jobId: string, progress: number, message?: string, attempt?: number) {
   const client = createAdminClient()
-  await client.from('job_queue').update({
+  let query = client.from('job_queue').update({
     progress: Math.min(100, Math.max(0, progress)),
     progress_message: message ?? null,
     updated_at: new Date().toISOString(),
   }).eq('id', jobId)
+  if (attempt !== undefined) query = query.eq('status', 'RUNNING').eq('attempts', attempt)
+  await query
 }
 
 export async function getQueueStats(companyId?: string) {

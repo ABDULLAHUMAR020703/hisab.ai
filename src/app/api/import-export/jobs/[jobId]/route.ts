@@ -20,13 +20,17 @@ export async function GET(
 
     const completed = job.status === 'completed'
     const persistedOutcomeRows = job.importedCount + job.updatedCount + job.skippedCount + job.failedCount
-    const snapshot = completed ? { ...(job.progressSnapshot ?? {}), processedRecords: persistedOutcomeRows } : (job.progressSnapshot ?? {})
-    const processedRows = completed ? persistedOutcomeRows : (snapshot.processedRecords ?? job.processedRows)
-    const totalRows = snapshot.estimatedTotalRecords ?? job.totalRows
+    const snapshot = completed
+      ? { ...(job.progressSnapshot ?? {}), processedRecords: persistedOutcomeRows, importedCount: job.importedCount, updatedCount: job.updatedCount, skippedCount: job.skippedCount, failedCount: job.failedCount, progressPercent: 100 }
+      : (job.progressSnapshot ?? {})
+    const processedRows = completed ? persistedOutcomeRows : Math.max(snapshot.processedRecords ?? 0, job.processedRows)
+    const totalRows = Math.max(snapshot.estimatedTotalRecords ?? 0, job.totalRows)
     const startedAt = snapshot.startedAt ?? job.startedAt
     const elapsedMs = startedAt ? Math.max(0, Date.now() - new Date(startedAt).getTime()) : (job.durationMs ?? 0)
     const remaining = job.status === 'completed' ? 0 : (totalRows > processedRows ? totalRows - processedRows : null)
     const secondsRemaining = remaining !== null && (snapshot.averageThroughput ?? 0) > 0 ? remaining / Number(snapshot.averageThroughput) : null
+    const livePercent = totalRows ? Math.min(100, Math.round((processedRows / totalRows) * 10000) / 100) : 0
+    const progressPercent = completed ? 100 : Math.max(Number(snapshot.progressPercent ?? 0), livePercent)
     logger.info('quickbooks.import_job.progress.read', {
       importJobId: job.id,
       companyId: job.companyId,
@@ -60,7 +64,7 @@ export async function GET(
       currentModule: snapshot.currentModule ?? job.moduleKey,
       currentStage: snapshot.currentStage ?? null,
       currentRecord: snapshot.currentRecord ?? null,
-      progressPercent: completed ? 100 : (totalRows ? Math.min(100, Math.round((processedRows / totalRows) * 10000) / 100) : 0),
+      progressPercent,
       currentBatch: snapshot.currentBatch ?? (Math.floor(processedRows / Math.max(1, job.batchSize ?? 250)) + 1),
       totalBatches: snapshot.totalBatches ?? (totalRows ? Math.ceil(totalRows / Math.max(1, job.batchSize ?? 250)) : null),
       estimatedRemaining: remaining,

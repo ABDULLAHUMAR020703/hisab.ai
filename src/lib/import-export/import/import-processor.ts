@@ -34,6 +34,8 @@ export interface ProcessImportInput {
   onProgress?: (processed: number, total: number, counts?: Pick<ImportProcessorResult, 'importedCount' | 'updatedCount' | 'skippedCount' | 'failedCount'>) => Promise<void>
   isCancelled?: () => Promise<boolean>
   isPaused?: () => Promise<boolean>
+  /** Throws when the worker no longer owns the queue lease. */
+  assertActive?: () => Promise<void>
   startAt?: number
   batchSize?: number
   /** Bounds a worker invocation to a single import batch. */
@@ -93,6 +95,7 @@ export async function processImport(
   const batchSize = Math.max(1, input.batchSize ?? DEFAULT_BATCH_SIZE)
   let batchesProcessed = 0
   for (let index = 0; index < validRows.length; index += batchSize) {
+    if (input.assertActive) await input.assertActive()
     if (input.isCancelled && (await input.isCancelled())) {
       break
     }
@@ -101,6 +104,7 @@ export async function processImport(
     const batch = validRows.slice(index, index + batchSize)
 
     for (const row of batch) {
+      if (input.assertActive) await input.assertActive()
       if (input.isCancelled && (await input.isCancelled())) {
         break
       }

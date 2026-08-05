@@ -31,6 +31,8 @@ import { fetchSourceResourcePage, getImportSource } from '@/lib/import-export/so
 import { FrameworkBadRequestError } from '@/lib/import-export/errors'
 import { enqueueJob } from '@/lib/platform/jobs/queue'
 import { withCompanyContext } from '@/lib/tenant'
+import { isOwnershipLostError, type JobOwnership } from '@/lib/platform/jobs/ownership'
+import { logger } from '@/lib/ops/logger'
 import type { MigrationActivityEvent, MigrationProgressSnapshot, SkippedRecordDiagnostic } from '@/lib/import-export/types'
 
 async function handleImport(
@@ -38,11 +40,17 @@ async function handleImport(
   { params }: { params: Promise<{ module: string }> },
   trace: MigrationTrace,
   backgroundUser?: { id: string },
+  ownership?: JobOwnership,
 ) {
   let jobId: string | null = null
   let sourcePage: Awaited<ReturnType<typeof fetchSourceResourcePage>> | null = null
+  const ensureOwned = async () => {
+    if (!ownership) return
+    await ownership.assertOwned()
+  }
 
   try {
+    await ensureOwned()
     const { user, moduleKey } = await trace.measure('module_scheduling', async () => {
       const authenticated = backgroundUser ?? await requireAccountingAdmin()
       const { module: resolvedModule } = await params
@@ -136,6 +144,16 @@ async function handleImport(
     }
 
     const base = existingJob ? { importedCount: existingJob.importedCount, updatedCount: existingJob.updatedCount, skippedCount: existingJob.skippedCount, failedCount: existingJob.failedCount } : { importedCount: 0, updatedCount: 0, skippedCount: 0, failedCount: 0 }
+    const baseProcessedRows = existingJob?.processedRows ?? 0
+    if (existingJob) {
+      trace.setTotals(existingJob.processedRows, existingJob.totalRows)
+      trace.setCounts({
+        importedCount: existingJob.importedCount,
+        updatedCount: existingJob.updatedCount,
+        skippedCount: existingJob.skippedCount,
+        failedCount: existingJob.failedCount,
+      })
+    }
     const result = await trace.measure('materialization', () => processImport({
       module:definition,
       rows: mappedRows,
@@ -144,20 +162,30 @@ async function handleImport(
       duplicateMatches,
       ctx: { companyId, userId: user.id, performance: trace },
       onProgress: async (processed, _total, counts) => {
-        if (counts) trace?.setCounts(counts)
-        trace?.batch(Math.min(job.batchSize ?? 250, Math.max(0, processed - (job.processedRows ?? 0))), processed, _total)
-        trace?.setTotals(processed, _total)
-        await updateImportJobProgress(job.id, processed, counts?{
+        await ensureOwned()
+        const absoluteProcessed = sourcePage ? baseProcessedRows + processed : processed
+        if (counts) {
+          trace?.setCounts({
+            importedCount: base.importedCount + counts.importedCount,
+            updatedCount: base.updatedCount + counts.updatedCount,
+            skippedCount: base.skippedCount + counts.skippedCount,
+            failedCount: base.failedCount + counts.failedCount,
+          })
+        }
+        trace?.batch(Math.min(job.batchSize ?? 250, Math.max(0, absoluteProcessed - baseProcessedRows)), absoluteProcessed, Math.max(_total, sourcePage?.checkpoint.fetched ?? _total, job.totalRows))
+        trace?.setTotals(absoluteProcessed, Math.max(_total, sourcePage?.checkpoint.fetched ?? 0, job.totalRows))
+        await updateImportJobProgress(job.id, absoluteProcessed, counts?{
           importedCount:base.importedCount+counts.importedCount,
           updatedCount:base.updatedCount+counts.updatedCount,
           skippedCount:base.skippedCount+counts.skippedCount,
           failedCount:base.failedCount+counts.failedCount,
-        }:undefined, sourcePage?.checkpoint.fetched, {
+        }:undefined, Math.max(sourcePage?.checkpoint.fetched ?? 0, job.totalRows, absoluteProcessed), {
           progressSnapshot: trace?.snapshot() as MigrationProgressSnapshot,
         })
       },
       isCancelled: () => isJobCancelled(job.id),
       isPaused: () => isJobPaused(job.id),
+      assertActive: ensureOwned,
       startAt: sourcePage ? 0 : job.batchCursor ?? 0,
       batchSize: sourcePage ? 100 : job.batchSize ?? 250,
       maxBatches: sourcePage ? 1 : undefined,
@@ -179,20 +207,22 @@ async function handleImport(
     const cancelledAfterBatch = await isJobCancelled(job.id)
 
     if (result.paused || cancelledAfterBatch) {
+      await ensureOwned()
       await setImportJobStatus(job.id, result.paused ? 'paused' : 'pending')
       trace.finish({ fetched: sourcePage?.checkpoint.fetched ?? mappedRows.length, imported: aggregate.importedCount, updated: aggregate.updatedCount, skipped: aggregate.skippedCount, failed: aggregate.failedCount })
       return Response.json({ jobId: job.id, status: result.paused ? 'paused' : 'cancelled', ...aggregate, totalRows: sourcePage?.checkpoint.fetched ?? mappedRows.length, validRows: validation.validRowNumbers.length, invalidRows: validation.invalidRowNumbers.length, warningCount: validation.warningCount, durationMs: Date.now() - new Date(job.startedAt ?? Date.now()).getTime() })
     }
 
     if (sourcePage?.hasMore) {
+      await ensureOwned()
       await sourcePage.commit()
       await updateImportJobProgress(job.id, sourcePage.checkpoint.fetched, { ...aggregate, skippedCount: aggregateSkippedCount, validRows: (job.validRows ?? 0) + validation.validRowNumbers.length, invalidRows: (job.invalidRows ?? 0) + invalidRowCount, warningCount: (job.warningCount ?? 0) + validation.warningCount }, sourcePage.checkpoint.fetched)
-      await setImportJobStatus(job.id, 'pending')
+      await ensureOwned()
       await enqueueJob({ jobType: 'QUICKBOOKS_IMPORT_STEP', companyId, payload: { importJobId: job.id, moduleKey, companyId, userId: user.id } })
       trace.finish({ fetched: sourcePage.checkpoint.fetched, imported: aggregate.importedCount, updated: aggregate.updatedCount, skipped: aggregate.skippedCount, failed: aggregate.failedCount })
       return Response.json({
         jobId: job.id,
-        status: 'pending',
+        status: 'processing',
         ...aggregate,
         skippedCount: aggregateSkippedCount,
         totalRows: sourcePage.checkpoint.fetched,
@@ -209,6 +239,7 @@ async function handleImport(
         ? 'failed'
         : 'completed'
 
+    await ensureOwned()
     const finalized = await trace.measure('report_generation', () => finalizeImportJob(job.id, {
       status,
       importedCount: aggregate.importedCount,
@@ -244,9 +275,20 @@ async function handleImport(
       errors: allErrors,
     })
   } catch (error) {
+    if (isOwnershipLostError(error)) {
+      logger.warn('quickbooks.import_job.abandoned_after_ownership_loss', {
+        importJobId: jobId,
+        platformJobId: ownership?.platformJobId,
+        attempt: ownership?.attempt,
+        error: { message: error.message, name: error.name },
+      })
+      trace.finish()
+      throw error
+    }
     const normalized=normalizeImportError(error)
     if (jobId) {
       try {
+        if (ownership) await ownership.assertOwned()
         const existing = await getImportJob(jobId)
         await finalizeImportJob(jobId, {
           status: 'failed',
@@ -264,7 +306,14 @@ async function handleImport(
           details: normalized.details,
           rawRow: { _importError:normalized.details },
         }])
-      } catch {
+      } catch (finalizeError) {
+        if (isOwnershipLostError(finalizeError)) {
+          logger.warn('quickbooks.import_job.failed_finalize_skipped_after_ownership_loss', {
+            importJobId: jobId,
+            platformJobId: ownership?.platformJobId,
+            attempt: ownership?.attempt,
+          })
+        }
         // Best-effort job finalization.
       }
     }
@@ -291,8 +340,9 @@ export async function POST(
 }
 
 /** Executes one bounded migration unit from the durable platform queue. */
-export async function runImportJobStep(jobId: string, companyId: string, userId: string) {
+export async function runImportJobStep(jobId: string, companyId: string, userId: string, ownership?: JobOwnership) {
   return withCompanyContext(companyId, async () => {
+    if (ownership) await ownership.assertOwned()
     const job = await getImportJob(jobId, companyId)
     if (!job) return Response.json({ error: 'Import job not found.' }, { status: 404 })
     if (job.companyId !== companyId) {
@@ -302,12 +352,51 @@ export async function runImportJobStep(jobId: string, companyId: string, userId:
     let progressWrite: Promise<void> = Promise.resolve()
     const trace = new MigrationTrace(job.moduleKey, undefined, {
       onEvent: (event, snapshot) => {
-        const eventProcessedRows = Math.max(job.processedRows, snapshot.processedRecords ?? 0)
-        progressWrite = progressWrite.then(() => updateImportJobProgress(job.id, eventProcessedRows, undefined, job.totalRows || snapshot.estimatedTotalRecords, {
-          progressSnapshot: snapshot as MigrationProgressSnapshot,
-          activityEvent: event as MigrationActivityEvent,
-        }, companyId))
+        progressWrite = progressWrite.then(async () => {
+          if (ownership?.isLost()) {
+            logger.info('quickbooks.import_job.progress.stale_ignored', {
+              importJobId: job.id,
+              companyId,
+              platformJobId: ownership.platformJobId,
+              attempt: ownership.attempt,
+              reason: 'ownership_lost',
+            })
+            return
+          }
+          try {
+            if (ownership) await ownership.assertOwned()
+          } catch (error) {
+            if (isOwnershipLostError(error)) {
+              logger.info('quickbooks.import_job.progress.stale_ignored', {
+                importJobId: job.id,
+                companyId,
+                platformJobId: ownership?.platformJobId,
+                attempt: ownership?.attempt,
+                reason: 'ownership_lost',
+              })
+              return
+            }
+            throw error
+          }
+          const eventProcessedRows = Math.max(job.processedRows, snapshot.processedRecords ?? 0)
+          await updateImportJobProgress(job.id, eventProcessedRows, {
+            importedCount: Math.max(job.importedCount, snapshot.importedCount ?? 0),
+            updatedCount: Math.max(job.updatedCount, snapshot.updatedCount ?? 0),
+            skippedCount: Math.max(job.skippedCount, snapshot.skippedCount ?? 0),
+            failedCount: Math.max(job.failedCount, snapshot.failedCount ?? 0),
+          }, Math.max(job.totalRows, snapshot.estimatedTotalRecords ?? 0), {
+            progressSnapshot: snapshot as MigrationProgressSnapshot,
+            activityEvent: event as MigrationActivityEvent,
+          }, companyId)
+        })
       },
+    })
+    trace.setTotals(job.processedRows, job.totalRows)
+    trace.setCounts({
+      importedCount: job.importedCount,
+      updatedCount: job.updatedCount,
+      skippedCount: job.skippedCount,
+      failedCount: job.failedCount,
     })
     const response = await withExternalRequestDiagnostics(
       { correlationId: trace.correlationId, module: job.moduleKey, onRequest: trace.request },
@@ -320,9 +409,11 @@ export async function runImportJobStep(jobId: string, companyId: string, userId:
         { params: Promise.resolve({ module: job.moduleKey }) },
         trace,
         { id: userId },
+        ownership,
       ),
     )
     await progressWrite
+    if (ownership) await ownership.assertOwned()
     return response
   })
 }

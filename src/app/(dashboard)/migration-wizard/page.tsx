@@ -1,16 +1,31 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
-import { ConnectedSourceFlow } from '@/components/import-export/steps/ConnectedSourceFlow'
+import { useEffect } from 'react'
+import { Button } from '@/components/ui/button'
+import { useMigrationSession } from '@/components/import-export/MigrationSessionProvider'
 
-/** Central migration entry point. The source-driven wizard owns the full migration lifecycle. */
+/**
+ * Configuration entry point only.
+ * If a migration has already started, openViewer routes to Migration Center.
+ */
 export default function MigrationWizardPage() {
-  const router = useRouter()
+  const { openViewer, session } = useMigrationSession()
+
+  useEffect(() => {
+    openViewer()
+  }, [openViewer])
+
   return (
-    <ConnectedSourceFlow
-      open
-      initialSource="quickbooks"
-      onClose={() => router.push('/settings/integrations')}
-    />
+    <div className="flex min-h-[60vh] items-center justify-center p-6">
+      <div className="max-w-md text-center">
+        <h1 className="text-xl font-semibold text-slate-900">Migration Wizard</h1>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          Configure your QuickBooks migration. Once started, progress continues in the Migration Center.
+        </p>
+        <Button className="mt-4" onClick={openViewer}>
+          {session && session.config.state !== 'cancelled' ? 'Open Migration Center' : 'Configure Migration'}
+        </Button>
+      </div>
+    </div>
   )
 }

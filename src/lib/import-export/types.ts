@@ -231,6 +231,7 @@ export interface MigrationProgressSnapshot {
   retryCount?: number
   memoryBytes?: number | null
   startedAt?: string | null
+  progressPercent?: number
   stages?: Record<string, { status: 'pending' | 'running' | 'completed' | 'failed'; durationMs?: number; progress?: number }>
 }
 

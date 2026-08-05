@@ -20,7 +20,50 @@ test('standalone QuickBooks worker polls only migration continuation jobs', () =
   assert.match(packageJson, /"worker": "tsx .*worker\/index\.ts"/)
   assert.match(dockerfile, /CMD \["npm", "run", "worker"\]/)
   assert.match(runRoute, /enqueueJob\(\{ jobType: 'QUICKBOOKS_IMPORT_STEP'/)
-  assert.match(runRoute, /status: 'pending'/)
+  assert.match(runRoute, /status: persistedJob\.status/)
+})
+
+test('single-page imports return their finalized persisted state', () => {
+  const route = read('src/app/api/import-export/[module]/import/route.ts')
+
+  assert.match(route, /const finalized = await trace\.measure\('report_generation', \(\) => finalizeImportJob/)
+  assert.match(route, /status: finalized\.status/)
+  assert.match(route, /if \(sourcePage\) await sourcePage\.commit\(\)/)
+})
+
+test('multi-page imports remain processing between pages', () => {
+  const route = read('src/app/api/import-export/[module]/import/route.ts')
+  const continuationStart = route.indexOf('if (sourcePage?.hasMore)')
+  const continuationEnd = route.indexOf('if (sourcePage) await sourcePage.commit()', continuationStart)
+  const continuation = route.slice(continuationStart, continuationEnd)
+
+  assert.ok(continuationStart >= 0)
+  assert.ok(continuationEnd > continuationStart)
+  assert.match(continuation, /status: 'processing'/)
+  assert.doesNotMatch(continuation, /setImportJobStatus\(job\.id, 'pending'\)/)
+})
+
+test('continuation jobs preserve the processing import state', () => {
+  const route = read('src/app/api/import-export/[module]/import/route.ts')
+  const continuationStart = route.indexOf('if (sourcePage?.hasMore)')
+  const continuationEnd = route.indexOf('if (sourcePage) await sourcePage.commit()', continuationStart)
+  const continuation = route.slice(continuationStart, continuationEnd)
+
+  assert.match(continuation, /sourcePage\.commit\(\)/)
+  assert.match(continuation, /enqueueJob\(\{ jobType: 'QUICKBOOKS_IMPORT_STEP'/)
+  assert.match(route, /runImportJobStep[\s\S]*setImportJobStatus\(job\.id, 'processing'\)/)
+})
+
+test('completed jobs return their actual state and are not re-enqueued', () => {
+  const runRoute = read('src/app/api/import-export/jobs/[jobId]/run/route.ts')
+  const terminalGuard = runRoute.indexOf('TERMINAL_IMPORT_STATUSES.has(job.status)')
+  const enqueue = runRoute.indexOf('await enqueueJob')
+
+  assert.ok(terminalGuard >= 0)
+  assert.ok(enqueue > terminalGuard)
+  assert.match(runRoute, /status: job\.status/)
+  assert.match(runRoute, /status: persistedJob\.status/)
+  assert.doesNotMatch(runRoute, /status: 'pending'/)
 })
 
 test('queue ownership heartbeats prevent starvation and recover abandoned jobs', () => {

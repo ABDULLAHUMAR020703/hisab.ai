@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils'
 import { PRODUCT_NAME } from '@/lib/brand'
 import { CompanyCurrencyProvider } from '@/hooks/use-company-currency'
 import { DEFAULT_CURRENCY, isSaudiArabia } from '@/lib/currency/constants'
+import { MigrationSessionProvider } from '@/components/import-export/MigrationSessionProvider'
 
 const NAV = [
   {
@@ -103,6 +104,7 @@ const NAV = [
       { label: 'Approvals', href: '/workflows', icon: GitBranch },
       { label: 'Users', href: '/users', icon: UserCog },
       { label: 'Migration Wizard', href: '/migration-wizard', icon: Wand2 },
+      { label: 'Migration History', href: '/migration-history', icon: ClipboardList },
       { label: 'Import History', href: '/import-history', icon: History },
       { label: 'Settings', href: '/settings', icon: Settings },
       { label: 'Integrations', href: '/settings/integrations', icon: Blocks },
@@ -383,7 +385,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   )
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: 'var(--bg)' }}>
+    <MigrationSessionProvider>
+      <div className="flex h-screen overflow-hidden" style={{ background: 'var(--bg)' }}>
 
       {/* Desktop Sidebar */}
       <aside
@@ -584,6 +587,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </main>
       </div>
-    </div>
+      </div>
+    </MigrationSessionProvider>
   )
 }
