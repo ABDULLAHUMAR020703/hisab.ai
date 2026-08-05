@@ -10,6 +10,11 @@ import {
   type PersistedImportJobSnapshot,
   type SelectableResource,
 } from './module-lifecycle'
+import type {
+  MigrationQueueHealth,
+  MigrationQueueHealthThresholds,
+  PersistedQueueJobSnapshot,
+} from './migration-queue-health'
 
 export const QUICKBOOKS_MIGRATION_SESSION_KIND = 'quickbooks_migration' as const
 
@@ -59,6 +64,9 @@ export interface MigrationSessionRecord {
 
 export interface HydratedMigrationSession extends MigrationSessionRecord {
   jobs: Record<string, PersistedImportJobSnapshot & { id: string; moduleKey: string }>
+  queueJobs?: Record<string, PersistedQueueJobSnapshot>
+  queueHealth?: Record<string, MigrationQueueHealth>
+  queueHealthThresholds?: MigrationQueueHealthThresholds
   lifecycle: ModuleLifecycleState
 }
 
@@ -270,7 +278,11 @@ export function jobRecordToProgressSnapshot(job: {
   warningCount?: number | null
   invalidRows?: number | null
   durationMs?: number | null
+  createdAt?: string | null
+  updatedAt?: string | null
   startedAt?: string | null
+  pausedAt?: string | null
+  lastHeartbeatAt?: string | null
   batchSize?: number
   progressSnapshot?: PersistedImportJobSnapshot['progressSnapshot'] | null
   activityEvents?: PersistedImportJobSnapshot['activityEvents']
@@ -304,6 +316,11 @@ export function jobRecordToProgressSnapshot(job: {
     id: job.id,
     moduleKey: job.moduleKey,
     status: job.status,
+    createdAt: job.createdAt ?? null,
+    updatedAt: job.updatedAt ?? null,
+    startedAt: job.startedAt ?? null,
+    pausedAt: job.pausedAt ?? null,
+    lastHeartbeatAt: job.lastHeartbeatAt ?? null,
     totalRows,
     processedRows,
     importedCount: snapshot.importedCount ?? job.importedCount,

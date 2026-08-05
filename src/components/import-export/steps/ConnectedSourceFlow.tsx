@@ -82,11 +82,20 @@ const STAGES: Array<{ key: Step; label: string }> = [
   { key: 'report', label: 'Migration Report' },
 ]
 
-export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }: {
+export function ConnectedSourceFlow({
+  open,
+  onClose,
+  onSuccess,
+  persistentSession,
+  onCancelSession,
+  initialSource,
+}: {
   open: boolean
   onClose: () => void
   /** Invoked after a migration session is created or an existing one should open Migration Center. */
   onSuccess?: (sessionId?: string) => void
+  persistentSession: HydratedMigrationSession | null
+  onCancelSession: (sessionId: string) => Promise<void>
   initialSource?: string
 }) {
   const [step, setStep] = useState<Step>('analyze')
@@ -106,17 +115,33 @@ export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }:
   const [sessionBootstrapping, setSessionBootstrapping] = useState(false)
   const sessionIdRef = useRef<string | null>(null)
   const resumeTokenRef = useRef(0)
+  const redirectedSessionRef = useRef<string | null>(null)
   const onSuccessRef = useRef(onSuccess)
   const onCloseRef = useRef(onClose)
   onSuccessRef.current = onSuccess
   onCloseRef.current = onClose
+  const activeSessionId = persistentSession
+    && (persistentSession.config.state === 'running' || migrationHasStarted(persistentSession.lifecycle))
+    ? persistentSession.id
+    : null
 
   useEffect(() => {
     sessionIdRef.current = sessionId
   }, [sessionId])
 
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      redirectedSessionRef.current = null
+      return
+    }
+    if (!activeSessionId || redirectedSessionRef.current === activeSessionId) return
+    redirectedSessionRef.current = activeSessionId
+    onCloseRef.current()
+    onSuccessRef.current?.(activeSessionId)
+  }, [activeSessionId, open])
+
+  useEffect(() => {
+    if (!open || activeSessionId) return
     let active = true
     const token = ++resumeTokenRef.current
     const timer = window.setTimeout(() => {
@@ -129,38 +154,24 @@ export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }:
         fetch('/api/integrations', { cache: 'no-store' }),
         fetch('/api/import-export/sources', { cache: 'no-store' }),
         fetch('/api/integrations/quickbooks/analyze', { cache: 'no-store' }),
-        fetch('/api/import-export/migration-sessions', { cache: 'no-store' }),
-      ]).then(async ([integrationResponse, sourceResponse, analysisResponse, sessionResponse]) => {
+      ]).then(async ([integrationResponse, sourceResponse, analysisResponse]) => {
         if (!integrationResponse.ok) throw new Error(await readApiError(integrationResponse))
         if (!sourceResponse.ok) throw new Error(await readApiError(sourceResponse))
-        if (!sessionResponse.ok) throw new Error(await readApiError(sessionResponse))
         const integrations = await integrationResponse.json() as ImportSource[]
         const sourceAdapters = await sourceResponse.json() as ImportSource[]
         const analysisPayload = analysisResponse.ok ? await analysisResponse.json() as CompanyAnalysis : null
-        const sessionPayload = await sessionResponse.json() as { session: HydratedMigrationSession | null }
         const items = sourceAdapters.map((adapter) => ({
           ...adapter,
           ...(integrations.find((item) => item.provider === adapter.key) ?? {}),
           resources: adapter.resources,
         }))
-        return { items, analysis: analysisPayload, session: sessionPayload.session }
-      }).then(async ({ items, analysis: analysisPayload, session }) => {
+        return { items, analysis: analysisPayload }
+      }).then(async ({ items, analysis: analysisPayload }) => {
         if (!active || token !== resumeTokenRef.current) return
-        // Configuration wizard only — if a migration already started, open Migration Center.
-        if (session && (session.config.state === 'running' || migrationHasStarted(session.lifecycle))) {
-          setLoading(false)
-          setSessionBootstrapping(false)
-          onCloseRef.current()
-          onSuccessRef.current?.(session.id)
-          return
-        }
         setSources(items)
         setAnalysis(analysisPayload)
         const preferred = items.find((item) => item.key === initialSource && item.connected)
         setSource(preferred ?? items.find((item) => item.connected) ?? null)
-        if (session) {
-          setBlockedSession(session)
-        }
         setLoading(false)
         setSessionBootstrapping(false)
       })
@@ -172,7 +183,7 @@ export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }:
       })
     }, 0)
     return () => { active = false; window.clearTimeout(timer) }
-  }, [initialSource, open])
+  }, [activeSessionId, initialSource, open])
 
   function resetLocalWizardState() {
     setStep('analyze')
@@ -300,10 +311,7 @@ export function ConnectedSourceFlow({ open, onClose, onSuccess, initialSource }:
     setError(null)
     try {
       resumeTokenRef.current += 1
-      const response = await fetch(`/api/import-export/migration-sessions/${id}/cancel`, { method: 'POST' })
-      if (!response.ok) throw new Error(await readApiError(response))
-      const payload = await response.json() as { session: HydratedMigrationSession }
-      setLifecycle(payload.session.lifecycle)
+      await onCancelSession(id)
       setBlockedSession(null)
       setSessionId(null)
       sessionIdRef.current = null

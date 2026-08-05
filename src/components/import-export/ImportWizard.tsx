@@ -14,6 +14,7 @@ import { ValidationSummary } from './ValidationSummary'
 import { DuplicateStep } from './steps/DuplicateStep'
 import { MappingTemplateDialog } from './MappingTemplateDialog'
 import { ConnectedSourceFlow } from './steps/ConnectedSourceFlow'
+import { useMigrationSession } from './MigrationSessionProvider'
 
 type WizardStep =
   | 'upload'
@@ -357,8 +358,18 @@ function FileImportWizard({
 }
 
 export function ImportWizard(props: ImportWizardProps) {
+  const { session, cancelSession } = useMigrationSession()
   if (!props.moduleKey || !props.moduleLabel || !props.fields) {
-    return <ConnectedSourceFlow open={props.open} onClose={props.onClose} onSuccess={props.onSuccess} initialSource={props.initialSource} />
+    return (
+      <ConnectedSourceFlow
+        open={props.open}
+        onClose={props.onClose}
+        onSuccess={props.onSuccess}
+        persistentSession={session}
+        onCancelSession={cancelSession}
+        initialSource={props.initialSource}
+      />
+    )
   }
   return <FileImportWizard {...props as FileImportWizardProps} />
 }

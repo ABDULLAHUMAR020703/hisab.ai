@@ -1,10 +1,10 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useMigrationHistory } from '@/components/import-export/MigrationSessionProvider'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
-import { readApiError } from '@/lib/api-client'
 import {
   formatMigrationDuration,
   migrationCenterPath,
@@ -19,49 +19,22 @@ const STATUS_TONE: Record<MigrationSessionState, string> = {
 }
 
 export default function MigrationHistoryPage() {
-  const [items, setItems] = useState<MigrationHistorySummary[]>([])
-  const [total, setTotal] = useState(0)
+  const { history, loadHistory } = useMigrationHistory()
   const [page, setPage] = useState(1)
   const [status, setStatus] = useState<MigrationSessionState | ''>('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const limit = 25
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const params = new URLSearchParams({
-        list: 'true',
-        page: String(page),
-        limit: String(limit),
-      })
-      if (status) params.set('status', status)
-      const response = await fetch(`/api/import-export/migration-sessions?${params}`, {
-        cache: 'no-store',
-      })
-      if (!response.ok) throw new Error(await readApiError(response))
-      const payload = await response.json() as { items: MigrationHistorySummary[]; total: number }
-      setItems(payload.items ?? [])
-      setTotal(payload.total ?? 0)
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Unable to load migration history.')
-    } finally {
-      setLoading(false)
-    }
-  }, [page, status])
-
   useEffect(() => {
-    void load()
-  }, [load])
+    void loadHistory({ page, limit, status })
+  }, [loadHistory, page, status])
 
-  const totalPages = Math.max(1, Math.ceil(total / limit))
+  const totalPages = Math.max(1, Math.ceil(history.total / limit))
 
   return (
     <div className="mx-auto max-w-[1600px] space-y-4 p-6" data-migration-history>
       <PageHeader
         title="Migration History"
-        subtitle={`${total} migration${total === 1 ? '' : 's'}`}
+        subtitle={`${history.total} migration${history.total === 1 ? '' : 's'}`}
         breadcrumb={[{ label: 'Administration' }, { label: 'Migration History' }]}
         action={(
           <Link
@@ -93,7 +66,7 @@ export default function MigrationHistoryPage() {
         </label>
       </div>
 
-      {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+      {history.error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{history.error}</p>}
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <table className="w-full text-left text-sm">
@@ -114,17 +87,17 @@ export default function MigrationHistoryPage() {
             </tr>
           </thead>
           <tbody>
-            {loading && (
+            {history.loading && (
               <tr>
                 <td colSpan={12} className="px-4 py-10 text-center text-slate-500">Loading migration history…</td>
               </tr>
             )}
-            {!loading && items.length === 0 && (
+            {!history.loading && history.items.length === 0 && (
               <tr>
                 <td colSpan={12} className="px-4 py-10 text-center text-slate-500">No migrations yet.</td>
               </tr>
             )}
-            {!loading && items.map((item) => (
+            {!history.loading && history.items.map((item: MigrationHistorySummary) => (
               <tr key={item.id} data-migration-id={item.id} className="border-t border-slate-100">
                 <td className="px-4 py-3 whitespace-nowrap text-slate-700">{new Date(item.startedAt).toLocaleString()}</td>
                 <td className="px-4 py-3 whitespace-nowrap text-slate-700">

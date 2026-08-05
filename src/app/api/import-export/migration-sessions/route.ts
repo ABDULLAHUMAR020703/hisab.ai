@@ -5,13 +5,33 @@ import {
   findActiveQuickBooksMigrationSession,
   findLatestQuickBooksMigrationSession,
   listQuickBooksMigrationSessions,
+  pollQuickBooksMigrationSession,
 } from '@/lib/import-export/wizard/migration-session.service'
 import type { DuplicateStrategy } from '@/lib/import-export/types'
 import type { ModuleLifecycleState, SelectableResource } from '@/lib/import-export/wizard/module-lifecycle'
 import type { MigrationSessionState } from '@/lib/import-export/wizard/migration-session'
+import type { MigrationActivityCursors } from '@/lib/import-export/wizard/migration-poll-payload'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
+
+function parseActivityCursors(request: Request, url: URL): MigrationActivityCursors {
+  const header = request.headers.get('x-migration-activity-cursors')
+  const query = url.searchParams.get('activityCursors')
+  const raw = header || query
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const cursors: MigrationActivityCursors = {}
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === 'string' && value) cursors[key] = value
+    }
+    return cursors
+  } catch {
+    return {}
+  }
+}
 
 /** Detect or list QuickBooks migration sessions. Never creates one. */
 export async function GET(request: Request) {
@@ -25,6 +45,21 @@ export async function GET(request: Request) {
       const result = await listQuickBooksMigrationSessions({ page, limit, status })
       return Response.json(result, { headers: { 'Cache-Control': 'no-store, max-age=0, must-revalidate' } })
     }
+
+    // Compact poll mode used by MigrationSessionProvider. Full { session } remains the default.
+    if (url.searchParams.get('poll') === '1') {
+      const includeLatest = url.searchParams.get('includeLatest') === 'true'
+      const includeStatic = url.searchParams.get('static') !== '0'
+      const previousLiveFingerprint = request.headers.get('x-migration-live-fingerprint')
+      const { poll } = await pollQuickBooksMigrationSession({
+        includeLatest,
+        includeStatic,
+        activityCursors: parseActivityCursors(request, url),
+        previousLiveFingerprint,
+      })
+      return Response.json({ poll }, { headers: { 'Cache-Control': 'no-store, max-age=0, must-revalidate' } })
+    }
+
     const includeLatest = url.searchParams.get('includeLatest') === 'true'
     const session = includeLatest
       ? await findLatestQuickBooksMigrationSession()

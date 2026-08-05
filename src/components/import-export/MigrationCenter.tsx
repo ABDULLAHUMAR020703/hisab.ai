@@ -5,6 +5,7 @@ import Link from 'next/link'
 import {
   Activity,
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
   Clock3,
   Database,
@@ -87,9 +88,9 @@ export function MigrationCenter({
   const snapshot = progress?.progressSnapshot ?? {}
   const stageRows = Object.entries(snapshot.stages ?? {})
   const headline = view.currentModule
-    ? MODULE_PHASE_LABEL[view.currentModule.phase]
+    ? view.executionHealth?.label ?? MODULE_PHASE_LABEL[view.currentModule.phase]
     : view.overall.queued > 0
-      ? MODULE_PHASE_LABEL.queued
+      ? view.executionHealth?.label ?? MODULE_PHASE_LABEL.queued
       : view.status === 'completed'
         ? 'Completed'
         : 'Finishing up'
@@ -133,6 +134,42 @@ export function MigrationCenter({
       {actionError && (
         <p role="alert" className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">{actionError}</p>
       )}
+      {view.executionHealth?.warning && (
+        <section
+          role="alert"
+          aria-label="Worker Not Running"
+          data-worker-warning={view.executionHealth.warning}
+          className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-amber-950 shadow-sm"
+        >
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={22} className="mt-0.5 flex-none text-amber-700" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <h2 className="font-semibold">Worker Not Running</h2>
+              <p className="mt-1 text-sm font-medium">{view.executionHealth.warningMessage}</p>
+              <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                <div>
+                  <dt className="text-amber-700">Time waiting</dt>
+                  <dd className="mt-0.5 font-semibold tabular-nums">{formatMigrationDuration(view.executionHealth.waitingMs)}</dd>
+                </div>
+                <div>
+                  <dt className="text-amber-700">Last queue update</dt>
+                  <dd className="mt-0.5 font-semibold">
+                    {view.executionHealth.lastQueueUpdateAt
+                      ? new Date(view.executionHealth.lastQueueUpdateAt).toLocaleString()
+                      : 'No queue update recorded'}
+                  </dd>
+                </div>
+              </dl>
+              {view.executionHealth.suggestedAction && (
+                <p className="mt-3 text-sm"><span className="font-semibold">Suggested action:</span> {view.executionHealth.suggestedAction}</p>
+              )}
+              {view.executionHealth.retryAppropriate && onRetry && (
+                <Button className="mt-4" loading={busy} onClick={onRetry}>Retry</Button>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" aria-label="Overview">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -150,7 +187,7 @@ export function MigrationCenter({
               : view.status === 'failed' ? 'bg-red-50 text-red-700'
                 : 'bg-indigo-50 text-indigo-700'
           }`}>
-            {view.status === 'running' ? (view.overall.processing > 0 ? 'Running' : 'Queued') : view.status}
+            {view.status === 'running' ? view.executionHealth?.label ?? 'Queued' : view.status}
           </span>
         </div>
         <div className="mt-4 h-3 overflow-hidden rounded-full bg-slate-100">
@@ -187,7 +224,11 @@ export function MigrationCenter({
                 </span>
                 <span className="min-w-0 flex-1 truncate" title={`${entry.label} — ${MODULE_PHASE_LABEL[entry.phase]}`}>{entry.label}</span>
                 <span className="whitespace-nowrap text-[10px] text-slate-400">
-                  {entry.phase === 'queued' && entry.queuePosition !== null ? `#${entry.queuePosition}` : entry.durationMs ? formatMigrationDuration(entry.durationMs) : MODULE_PHASE_LABEL[entry.phase]}
+                  {entry.phase === 'queued' && entry.queuePosition !== null
+                    ? `#${entry.queuePosition}`
+                    : entry.durationMs
+                      ? formatMigrationDuration(entry.durationMs)
+                      : view.moduleExecutionHealth[entry.key]?.label ?? MODULE_PHASE_LABEL[entry.phase]}
                 </span>
               </div>
             ))}
@@ -288,16 +329,36 @@ export function MigrationCenter({
                 <Server size={16} className="text-slate-500" />
                 <h3 className="font-semibold text-slate-800">Worker Status</h3>
               </div>
-              <p className="text-sm text-slate-700" data-worker-status={view.workerStatus}>{view.workerStatus}</p>
-              <p className="mt-2 text-xs text-slate-500">Owned by the background queue worker. Restored from persisted import jobs.</p>
+              <p className="text-sm font-medium text-slate-700" data-worker-status={view.workerStatus}>
+                {view.executionHealth?.label ?? 'Idle'}
+              </p>
+              {view.executionHealth?.workerClaimedAt && (
+                <p className="mt-2 text-xs text-slate-500">
+                  Claimed: {new Date(view.executionHealth.workerClaimedAt).toLocaleString()}
+                </p>
+              )}
+              <p className="mt-2 text-xs text-slate-500">
+                {view.executionHealth?.lastHeartbeatAt
+                  ? `Last heartbeat: ${new Date(view.executionHealth.lastHeartbeatAt).toLocaleString()}`
+                  : 'No worker heartbeat recorded.'}
+              </p>
             </section>
             <section className="rounded-2xl border border-slate-200 bg-white p-5" aria-label="Queue Status">
               <h3 className="mb-3 font-semibold text-slate-800">Queue Status</h3>
-              <p className="text-sm text-slate-700" data-queue-depth={view.queueStatus.depth}>
+              <p className="text-sm font-medium text-slate-700">{view.executionHealth?.label ?? 'Idle'}</p>
+              <p className="mt-1 text-sm text-slate-700" data-queue-depth={view.queueStatus.depth}>
                 {view.queueStatus.depth} module{view.queueStatus.depth === 1 ? '' : 's'} waiting
               </p>
               <p className="mt-2 text-xs text-slate-500">
                 Next: {view.queueStatus.nextLabel ?? '—'}
+              </p>
+              {view.queueStatus.waitingMs > 0 && (
+                <p className="mt-1 text-xs text-slate-500">Waiting: {formatMigrationDuration(view.queueStatus.waitingMs)}</p>
+              )}
+              <p className="mt-1 text-xs text-slate-500">
+                Last update: {view.queueStatus.lastQueueUpdateAt
+                  ? new Date(view.queueStatus.lastQueueUpdateAt).toLocaleString()
+                  : '—'}
               </p>
             </section>
           </div>

@@ -10,9 +10,10 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import {
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
   ChevronRight,
   Clock3,
@@ -25,25 +26,95 @@ import {
   applyJobCreated,
   deriveOverallProgress,
   migrationHasStarted,
-  orderedModules,
 } from '@/lib/import-export/wizard/module-lifecycle'
+import {
+  coordinationFingerprint,
+  isReplayableCoordinationAction,
+  nextCoordinationAction,
+} from '@/lib/import-export/wizard/migration-coordination'
 import { migrationCenterPath } from '@/lib/import-export/wizard/migration-center-view'
-import type { HydratedMigrationSession } from '@/lib/import-export/wizard/migration-session'
+import {
+  navigationTarget,
+  resolveNavigation,
+} from '@/lib/import-export/wizard/migration-navigation'
+import {
+  extractActivityCursors,
+  mergeMigrationPollPayload,
+  migrationPollLiveFingerprint,
+  type MigrationPollEnvelope,
+} from '@/lib/import-export/wizard/migration-poll-payload'
+import type {
+  HydratedMigrationSession,
+  MigrationHistorySummary,
+  MigrationSessionState,
+} from '@/lib/import-export/wizard/migration-session'
 import { ConnectedSourceFlow } from './steps/ConnectedSourceFlow'
 
 const POLL_INTERVAL_MS = 1_500
+/** Releases a navigation latch whose transition never committed, so retries stay possible. */
+const NAVIGATION_LATCH_MS = 5_000
+
+function currentNavigationTarget(): string {
+  if (typeof window === 'undefined') return ''
+  return navigationTarget(window.location)
+}
 
 interface MigrationSessionContextValue {
   session: HydratedMigrationSession | null
+  sessionLoading: boolean
+  sessionError: string | null
   viewerOpen: boolean
   /** Opens configuration wizard only. Running migrations open Migration Center. */
   openViewer: () => void
   closeViewer: () => void
   openMigrationCenter: (sessionId?: string) => void
   refresh: () => Promise<void>
+  retrySession: (sessionId: string) => Promise<void>
+  cancelSession: (sessionId: string) => Promise<void>
+}
+
+interface MigrationHistoryContextValue {
+  history: MigrationHistoryState
+  loadHistory: (query: MigrationHistoryQuery) => Promise<void>
+}
+
+interface MigrationHistoryQuery {
+  page: number
+  limit: number
+  status: MigrationSessionState | ''
+}
+
+interface MigrationHistoryState {
+  items: MigrationHistorySummary[]
+  total: number
+  page: number
+  limit: number
+  status: MigrationSessionState | ''
+  loading: boolean
+  error: string | null
+}
+
+const EMPTY_HISTORY: MigrationHistoryState = {
+  items: [],
+  total: 0,
+  page: 1,
+  limit: 25,
+  status: '',
+  loading: false,
+  error: null,
+}
+
+function migrationSessionIdFromPathname(pathname: string): string | null {
+  const match = /^\/migration-center\/([^/]+)\/?$/.exec(pathname)
+  return match ? decodeURIComponent(match[1]) : null
+}
+
+function sessionSnapshot(session: HydratedMigrationSession | null): string {
+  return JSON.stringify(session)
 }
 
 const MigrationSessionContext = createContext<MigrationSessionContextValue | null>(null)
+const MigrationHistoryContext = createContext<MigrationHistoryContextValue | null>(null)
 
 export function useMigrationSession() {
   const value = useContext(MigrationSessionContext)
@@ -51,43 +122,198 @@ export function useMigrationSession() {
   return value
 }
 
+export function useMigrationHistory() {
+  const value = useContext(MigrationHistoryContext)
+  if (!value) throw new Error('useMigrationHistory must be used inside MigrationSessionProvider')
+  return value
+}
+
 export function MigrationSessionProvider({ children }: { children: ReactNode }) {
   const router = useRouter()
+  const pathname = usePathname()
+  const polledSessionId = migrationSessionIdFromPathname(pathname)
+  const pollScope = polledSessionId ?? '__latest__'
   const [session, setSession] = useState<HydratedMigrationSession | null>(null)
+  const [sessionLoading, setSessionLoading] = useState(true)
+  const [hydratedScope, setHydratedScope] = useState<string | null>(null)
+  const [sessionError, setSessionError] = useState<string | null>(null)
+  const [history, setHistory] = useState<MigrationHistoryState>(EMPTY_HISTORY)
   const [viewerOpen, setViewerOpen] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  /** Bumped only by explicit lifecycle events or a failed cycle, never by a poll. */
+  const [coordinationAttempt, setCoordinationAttempt] = useState(0)
+  const sessionRef = useRef<HydratedMigrationSession | null>(null)
+  const sessionSnapshotRef = useRef('')
+  const liveFingerprintRef = useRef<string | null>(null)
+  const hasStaticRef = useRef(false)
+  const polledSessionIdRef = useRef<string | null>(polledSessionId)
+  const previousPolledSessionIdRef = useRef<string | null>(polledSessionId)
+  polledSessionIdRef.current = polledSessionId
   const coordinatingRef = useRef(false)
+  const coordinatedSignalRef = useRef<string | null>(null)
+  const pendingSignalRef = useRef<string | null>(null)
+  const issuedActionsRef = useRef<Set<string>>(new Set())
+  const coordinationFailedRef = useRef(false)
+  const refreshControllerRef = useRef<AbortController | null>(null)
+  const refreshSequenceRef = useRef(0)
+  const historyControllerRef = useRef<AbortController | null>(null)
+  const historyRequestKeyRef = useRef<string | null>(null)
+  const historyLoadedKeyRef = useRef<string | null>(null)
   const mountedRef = useRef(true)
+  const pendingNavigationRef = useRef<string | null>(null)
+  const navigationTimerRef = useRef<number | null>(null)
 
-  const openMigrationCenter = useCallback((sessionId?: string) => {
-    const id = sessionId ?? session?.id
-    if (!id) return
-    setViewerOpen(false)
-    router.push(migrationCenterPath(id))
-  }, [router, session?.id])
+  const releaseNavigationLatch = useCallback(() => {
+    if (navigationTimerRef.current !== null) {
+      window.clearTimeout(navigationTimerRef.current)
+      navigationTimerRef.current = null
+    }
+    pendingNavigationRef.current = null
+  }, [])
 
-  const openViewer = useCallback(() => {
-    if (session && (session.config.state === 'running' || migrationHasStarted(session.lifecycle))) {
-      openMigrationCenter(session.id)
+  /** Drops the latch as soon as the pending transition is observed as committed. */
+  const syncNavigationLatch = useCallback(() => {
+    const pending = pendingNavigationRef.current
+    if (pending && currentNavigationTarget() === pending) releaseNavigationLatch()
+  }, [releaseNavigationLatch])
+
+  /**
+   * The only place this provider pushes a route. Repeated requests for a target
+   * that is already pending or already rendered are dropped, so polling-driven
+   * re-renders can neither duplicate nor restart a transition.
+   */
+  const navigateOnce = useCallback((target: string) => {
+    syncNavigationLatch()
+    const decision = resolveNavigation({
+      target,
+      currentTarget: currentNavigationTarget(),
+      pendingTarget: pendingNavigationRef.current,
+    })
+    if (decision === 'transition-pending') return
+    if (decision === 'already-there') {
+      releaseNavigationLatch()
       return
     }
-    if (session && (session.config.state === 'completed' || session.config.state === 'failed')) {
-      openMigrationCenter(session.id)
+    releaseNavigationLatch()
+    pendingNavigationRef.current = target
+    navigationTimerRef.current = window.setTimeout(() => {
+      navigationTimerRef.current = null
+      pendingNavigationRef.current = null
+    }, NAVIGATION_LATCH_MS)
+    router.push(target)
+  }, [releaseNavigationLatch, router, syncNavigationLatch])
+
+  const openMigrationCenter = useCallback((sessionId?: string) => {
+    const id = sessionId ?? sessionRef.current?.id
+    if (!id) return
+    setViewerOpen(false)
+    navigateOnce(migrationCenterPath(id))
+  }, [navigateOnce])
+
+  // Reads the session from a ref so the callback identity survives every poll:
+  // consumers that depend on it must not re-run once per refresh.
+  const openViewer = useCallback(() => {
+    syncNavigationLatch()
+    // A pending Migration Center transition must never be interrupted or restarted.
+    if (pendingNavigationRef.current) return
+    const current = sessionRef.current
+    if (current && (current.config.state === 'running' || migrationHasStarted(current.lifecycle))) {
+      openMigrationCenter(current.id)
+      return
+    }
+    if (current && (current.config.state === 'completed' || current.config.state === 'failed')) {
+      openMigrationCenter(current.id)
       return
     }
     setViewerOpen(true)
-  }, [openMigrationCenter, session])
+  }, [openMigrationCenter, syncNavigationLatch])
 
   const closeViewer = useCallback(() => setViewerOpen(false), [])
 
   const refresh = useCallback(async () => {
-    const response = await fetch('/api/import-export/migration-sessions?includeLatest=true', {
-      cache: 'no-store',
-      headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
-    })
-    if (!response.ok) throw new Error(await readApiError(response))
-    const payload = await response.json() as { session: HydratedMigrationSession | null }
-    if (mountedRef.current) setSession(payload.session)
+    refreshControllerRef.current?.abort()
+    const controller = new AbortController()
+    refreshControllerRef.current = controller
+    const sequence = ++refreshSequenceRef.current
+    const sessionId = polledSessionIdRef.current
+    const requestScope = sessionId ?? '__latest__'
+    const needStatic = !hasStaticRef.current
+      || !sessionRef.current
+      || (sessionId != null && sessionRef.current.id !== sessionId)
+    let nextSession: HydratedMigrationSession | null = null
+    try {
+      const params = new URLSearchParams({ poll: '1' })
+      if (!sessionId) params.set('includeLatest', 'true')
+      if (!needStatic) params.set('static', '0')
+      const endpoint = sessionId
+        ? `/api/import-export/migration-sessions/${encodeURIComponent(sessionId)}?${params}`
+        : `/api/import-export/migration-sessions?${params}`
+      const headers: Record<string, string> = {
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      }
+      const cursors = extractActivityCursors(sessionRef.current)
+      if (Object.keys(cursors).length > 0) {
+        headers['x-migration-activity-cursors'] = JSON.stringify(cursors)
+      }
+      if (liveFingerprintRef.current) {
+        headers['x-migration-live-fingerprint'] = liveFingerprintRef.current
+      }
+      const response = await fetch(endpoint, {
+        cache: 'no-store',
+        headers,
+        signal: controller.signal,
+      })
+      if (response.status === 404) {
+        nextSession = null
+        hasStaticRef.current = false
+        liveFingerprintRef.current = null
+      } else {
+        if (!response.ok) throw new Error(await readApiError(response))
+        const payload = await response.json() as {
+          poll?: MigrationPollEnvelope | null
+          session?: HydratedMigrationSession | null
+        }
+        if (payload.poll) {
+          if (payload.poll.kind === 'noop') {
+            nextSession = sessionRef.current
+          } else {
+            nextSession = mergeMigrationPollPayload(sessionRef.current, payload.poll)
+            if (payload.poll.static) hasStaticRef.current = true
+          }
+        } else if (payload.poll === null) {
+          nextSession = null
+          hasStaticRef.current = false
+          liveFingerprintRef.current = null
+        } else {
+          // Backward-compatible full session responses (create/retry/patch callers).
+          nextSession = payload.session ?? null
+          hasStaticRef.current = Boolean(nextSession)
+        }
+      }
+    } catch (error) {
+      if (controller.signal.aborted) return
+      throw error
+    } finally {
+      if (refreshControllerRef.current === controller) refreshControllerRef.current = null
+    }
+    // A superseded response can never overwrite newer session state.
+    if (
+      !mountedRef.current
+      || sequence !== refreshSequenceRef.current
+      || requestScope !== (polledSessionIdRef.current ?? '__latest__')
+    ) return
+    const snapshot = sessionSnapshot(nextSession)
+    if (snapshot !== sessionSnapshotRef.current) {
+      sessionSnapshotRef.current = snapshot
+      historyLoadedKeyRef.current = null
+      sessionRef.current = nextSession
+      liveFingerprintRef.current = migrationPollLiveFingerprint(nextSession)
+      setSession(nextSession)
+    }
+    setSessionError(nextSession ? null : polledSessionIdRef.current ? 'Migration session not found' : null)
+    setHydratedScope(requestScope)
+    setSessionLoading(false)
   }, [])
 
   const patchSession = useCallback(async (
@@ -102,37 +328,125 @@ export function MigrationSessionProvider({ children }: { children: ReactNode }) 
     if (!response.ok) throw new Error(await readApiError(response))
   }, [])
 
-  const coordinate = useCallback(async (current: HydratedMigrationSession) => {
-    if (coordinatingRef.current || current.config.state !== 'running') return
-    coordinatingRef.current = true
+  const loadHistory = useCallback(async (query: MigrationHistoryQuery) => {
+    const key = `${query.page}:${query.limit}:${query.status}`
+    if (historyRequestKeyRef.current === key || historyLoadedKeyRef.current === key) return
+    historyControllerRef.current?.abort()
+    const controller = new AbortController()
+    historyControllerRef.current = controller
+    historyRequestKeyRef.current = key
+    setHistory((current) => ({
+      ...current,
+      page: query.page,
+      limit: query.limit,
+      status: query.status,
+      loading: true,
+      error: null,
+    }))
     try {
-      const modules = orderedModules(current.lifecycle)
-      const participating = modules.filter((entry) =>
-        entry.phase !== 'unsupported' && entry.phase !== 'preview_failed')
+      const params = new URLSearchParams({
+        list: 'true',
+        page: String(query.page),
+        limit: String(query.limit),
+      })
+      if (query.status) params.set('status', query.status)
+      const response = await fetch(`/api/import-export/migration-sessions?${params}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+      if (!response.ok) throw new Error(await readApiError(response))
+      const payload = await response.json() as { items: MigrationHistorySummary[]; total: number }
+      if (!mountedRef.current || historyRequestKeyRef.current !== key) return
+      historyLoadedKeyRef.current = key
+      setHistory({
+        items: payload.items ?? [],
+        total: payload.total ?? 0,
+        page: query.page,
+        limit: query.limit,
+        status: query.status,
+        loading: false,
+        error: null,
+      })
+    } catch (error) {
+      if (controller.signal.aborted || !mountedRef.current) return
+      setHistory((current) => ({
+        ...current,
+        loading: false,
+        error: error instanceof Error ? error.message : 'Unable to load migration history.',
+      }))
+    } finally {
+      if (historyControllerRef.current === controller) historyControllerRef.current = null
+      if (historyRequestKeyRef.current === key) historyRequestKeyRef.current = null
+    }
+  }, [])
 
-      const failed = participating.find((entry) =>
-        entry.phase === 'failed' || entry.phase === 'cancelled')
-      if (failed) {
+  const forceCoordinationCycle = useCallback(() => {
+    coordinatedSignalRef.current = null
+    issuedActionsRef.current.clear()
+    hasStaticRef.current = false
+    liveFingerprintRef.current = null
+    setCoordinationAttempt((attempt) => attempt + 1)
+  }, [])
+
+  const retrySession = useCallback(async (sessionId: string) => {
+    const response = await fetch(`/api/import-export/migration-sessions/${sessionId}/retry`, {
+      method: 'POST',
+    })
+    if (!response.ok) throw new Error(await readApiError(response))
+    forceCoordinationCycle()
+    await refresh()
+  }, [forceCoordinationCycle, refresh])
+
+  const cancelSession = useCallback(async (sessionId: string) => {
+    const response = await fetch(`/api/import-export/migration-sessions/${sessionId}/cancel`, {
+      method: 'POST',
+    })
+    if (!response.ok) throw new Error(await readApiError(response))
+    await refresh()
+  }, [refresh])
+
+  /**
+   * Runs at most one side effect per meaningful lifecycle change. The signal is a
+   * content fingerprint, so an unchanged poll response is a no-op and the
+   * refresh issued after a mutation cannot feed itself another cycle.
+   */
+  const coordinate = useCallback(async (signal: string) => {
+    if (coordinatingRef.current) {
+      // Exactly one cycle may exist; a change seen mid-cycle is re-evaluated once.
+      pendingSignalRef.current = signal
+      return
+    }
+    if (coordinatedSignalRef.current === signal) return
+    const current = sessionRef.current
+    if (!current || current.config.state !== 'running') return
+
+    const action = nextCoordinationAction(current, issuedActionsRef.current)
+    coordinatedSignalRef.current = signal
+    if (action.type === 'idle') {
+      coordinationFailedRef.current = false
+      return
+    }
+
+    coordinatingRef.current = true
+    issuedActionsRef.current.add(action.key)
+    const replayableKey = isReplayableCoordinationAction(action) ? action.key : null
+    try {
+      if (action.type === 'mark-failed') {
         await patchSession(current.id, {
           lifecycle: current.lifecycle,
           step: 'import',
           state: 'failed',
         })
-        return
-      }
-
-      const unfinished = participating.find((entry) =>
-        entry.phase !== 'completed' && entry.phase !== 'completed_with_warnings')
-      if (!unfinished) {
+        await refresh()
+      } else if (action.type === 'mark-completed') {
         await patchSession(current.id, {
           lifecycle: current.lifecycle,
           step: 'report',
           state: 'completed',
         })
-        return
-      }
-
-      if (!unfinished.jobId) {
+        await refresh()
+      } else if (action.type === 'create-job') {
+        const unfinished = action.module
         const response = await fetch(`/api/import-export/${unfinished.moduleKey}/import`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -150,94 +464,153 @@ export function MigrationSessionProvider({ children }: { children: ReactNode }) 
         if (!created.jobId) throw new Error(`${unfinished.label}: migration job did not return an identifier`)
         const lifecycle = applyJobCreated(current.lifecycle, unfinished.key, created.jobId)
         await patchSession(current.id, { lifecycle, step: 'import', state: 'running' })
-        return
-      }
-
-      const job = current.jobs[unfinished.key]
-      if (!job || job.status === 'pending') {
+        await refresh()
+      } else {
+        const unfinished = action.module
         const response = await fetch(`/api/import-export/jobs/${unfinished.jobId}/run`, {
           method: 'POST',
         })
         if (!response.ok) throw new Error(await readApiError(response))
       }
+      coordinationFailedRef.current = false
+    } catch (error) {
+      // Only idempotent dispatches may be replayed; a created import never is.
+      coordinationFailedRef.current = true
+      coordinatedSignalRef.current = null
+      if (replayableKey) issuedActionsRef.current.delete(replayableKey)
+      throw error
     } finally {
       coordinatingRef.current = false
+      const dropped = pendingSignalRef.current
+      pendingSignalRef.current = null
+      if (dropped && dropped !== coordinatedSignalRef.current) {
+        setCoordinationAttempt((attempt) => attempt + 1)
+      }
     }
-  }, [patchSession])
+  }, [patchSession, refresh])
 
   useEffect(() => {
     mountedRef.current = true
     void refresh().catch((error) => {
-      if (mountedRef.current) setActionError(error instanceof Error ? error.message : 'Unable to load migration status.')
+      if (!mountedRef.current) return
+      const message = error instanceof Error ? error.message : 'Unable to load migration status.'
+      setActionError(message)
+      setSessionError(message)
+      setSessionLoading(false)
     })
     const timer = window.setInterval(() => {
       void refresh().catch(() => undefined)
+      // A failed cycle is retried once per poll tick, never in a tight loop.
+      if (coordinationFailedRef.current) setCoordinationAttempt((attempt) => attempt + 1)
     }, POLL_INTERVAL_MS)
-    const handleSessionChanged = () => void refresh()
+    const handleSessionChanged = () => {
+      forceCoordinationCycle()
+      void refresh().catch(() => undefined)
+    }
     window.addEventListener('quickbooks-migration-session-changed', handleSessionChanged)
     return () => {
       mountedRef.current = false
       window.clearInterval(timer)
+      releaseNavigationLatch()
+      refreshControllerRef.current?.abort()
+      historyControllerRef.current?.abort()
       window.removeEventListener('quickbooks-migration-session-changed', handleSessionChanged)
     }
-  }, [refresh])
+  }, [forceCoordinationCycle, refresh, releaseNavigationLatch])
 
   useEffect(() => {
-    if (!session || session.config.state !== 'running') return
-    void coordinate(session)
-      .then(refresh)
+    if (previousPolledSessionIdRef.current === polledSessionId) return
+    previousPolledSessionIdRef.current = polledSessionId
+    hasStaticRef.current = false
+    liveFingerprintRef.current = null
+    void refresh().catch((error) => {
+      if (!mountedRef.current) return
+      setSessionError(error instanceof Error ? error.message : 'Unable to restore migration session.')
+      setSessionLoading(false)
+    })
+  }, [polledSessionId, refresh])
+
+  const coordinationSignal = useMemo(() => coordinationFingerprint(session), [session])
+
+  useEffect(() => {
+    if (!coordinationSignal) return
+    void coordinate(coordinationSignal)
       .catch((error) => setActionError(error instanceof Error ? error.message : 'Migration coordination failed.'))
-  }, [coordinate, refresh, session])
+  }, [coordinate, coordinationAttempt, coordinationSignal])
 
   const retry = useCallback(async () => {
     if (!session) return
     setActionError(null)
-    const response = await fetch(`/api/import-export/migration-sessions/${session.id}/retry`, {
-      method: 'POST',
-    })
-    if (!response.ok) {
-      setActionError(await readApiError(response))
+    try {
+      await retrySession(session.id)
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Unable to retry migration.')
       return
     }
-    await refresh()
     openMigrationCenter(session.id)
-  }, [openMigrationCenter, refresh, session])
+  }, [openMigrationCenter, retrySession, session])
 
   const handleWizardSuccess = useCallback((createdSessionId?: string) => {
+    forceCoordinationCycle()
     void refresh()
     if (createdSessionId) {
       setViewerOpen(false)
-      router.push(migrationCenterPath(createdSessionId))
+      navigateOnce(migrationCenterPath(createdSessionId))
     }
-  }, [refresh, router])
+  }, [forceCoordinationCycle, navigateOnce, refresh])
 
   const value = useMemo<MigrationSessionContextValue>(() => ({
     session,
+    sessionLoading: sessionLoading || hydratedScope !== pollScope,
+    sessionError,
     viewerOpen,
     openViewer,
     closeViewer,
     openMigrationCenter,
     refresh,
-  }), [closeViewer, openMigrationCenter, openViewer, refresh, session, viewerOpen])
+    retrySession,
+    cancelSession,
+  }), [
+    cancelSession,
+    closeViewer,
+    hydratedScope,
+    openMigrationCenter,
+    openViewer,
+    refresh,
+    retrySession,
+    session,
+    sessionError,
+    sessionLoading,
+    pollScope,
+    viewerOpen,
+  ])
+  const historyValue = useMemo<MigrationHistoryContextValue>(() => ({
+    history,
+    loadHistory,
+  }), [history, loadHistory])
 
   return (
     <MigrationSessionContext.Provider value={value}>
-      {children}
-      {session && session.config.state !== 'cancelled' && (
-        <MigrationIndicator
-          session={session}
-          error={actionError}
-          onOpen={() => openMigrationCenter(session.id)}
-          onRetry={() => void retry()}
-          onLogs={() => router.push(`${migrationCenterPath(session.id)}#logs`)}
+      <MigrationHistoryContext.Provider value={historyValue}>
+        {children}
+        {session && session.config.state !== 'cancelled' && (
+          <MigrationIndicator
+            session={session}
+            error={actionError}
+            onOpen={() => openMigrationCenter(session.id)}
+            onRetry={() => void retry()}
+            onLogs={() => navigateOnce(`${migrationCenterPath(session.id)}#logs`)}
+          />
+        )}
+        <ConnectedSourceFlow
+          open={viewerOpen}
+          onClose={() => setViewerOpen(false)}
+          onSuccess={handleWizardSuccess}
+          persistentSession={session}
+          onCancelSession={cancelSession}
+          initialSource="quickbooks"
         />
-      )}
-      <ConnectedSourceFlow
-        open={viewerOpen}
-        onClose={() => setViewerOpen(false)}
-        onSuccess={handleWizardSuccess}
-        initialSource="quickbooks"
-      />
+      </MigrationHistoryContext.Provider>
     </MigrationSessionContext.Provider>
   )
 }
@@ -260,6 +633,12 @@ function MigrationIndicator({
   const state = session.config.state
   const completed = state === 'completed'
   const failed = state === 'failed'
+  const currentQueueHealth = current ? session.queueHealth?.[current.key] : null
+  const workerWarning = currentQueueHealth?.warning
+    ? currentQueueHealth
+    : current
+      ? null
+      : Object.values(session.queueHealth ?? {}).find((health) => health.warning)
 
   return (
     <aside
@@ -276,20 +655,28 @@ function MigrationIndicator({
         <span className={`flex h-10 w-10 flex-none items-center justify-center rounded-xl ${
           completed ? 'bg-emerald-100 text-emerald-700'
             : failed ? 'bg-red-100 text-red-700'
+              : workerWarning ? 'bg-amber-100 text-amber-800'
               : 'bg-indigo-100 text-indigo-700'
         }`}>
-          {completed ? <CheckCircle2 size={20} /> : failed ? <AlertCircle size={20} /> : <RefreshCw size={19} className="motion-safe:animate-spin" />}
+          {completed
+            ? <CheckCircle2 size={20} />
+            : failed
+              ? <AlertCircle size={20} />
+              : workerWarning
+                ? <AlertTriangle size={20} />
+                : <RefreshCw size={19} className="motion-safe:animate-spin" />}
         </span>
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-semibold text-slate-900">
-            {completed ? 'Migration Completed' : failed ? 'Migration Failed' : 'QuickBooks Migration'}
+            {completed ? 'Migration Completed' : failed ? 'Migration Failed' : workerWarning ? 'Worker Not Running' : 'QuickBooks Migration'}
           </span>
           <span className="mt-0.5 block truncate text-xs text-slate-600">
             {completed
               ? `${overall.completed} modules completed`
               : failed
                 ? 'Migration needs attention'
-                : `${overall.percent.toFixed(0)}% · ${current?.label ?? 'Waiting in queue'} · ${current?.progress?.currentStage?.replaceAll('_', ' ') ?? 'Importing…'}`}
+                : workerWarning?.warningMessage
+                  ?? `${overall.percent.toFixed(0)}% · ${current?.label ?? 'Waiting in queue'} · ${current?.progress?.currentStage?.replaceAll('_', ' ') ?? 'Importing…'}`}
           </span>
         </span>
         <ChevronRight size={18} className="flex-none text-slate-400" />

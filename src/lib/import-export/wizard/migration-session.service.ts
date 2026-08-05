@@ -26,6 +26,34 @@ import {
 import type { ModuleLifecycleState } from './module-lifecycle'
 import type { DuplicateStrategy } from '../types'
 import type { SelectableResource } from './module-lifecycle'
+import {
+  detectMigrationQueueHealth,
+  type MigrationQueueHealthThresholds,
+  type PersistedQueueJobSnapshot,
+} from './migration-queue-health'
+import {
+  projectMigrationPollPayload,
+  type MigrationActivityCursors,
+  type MigrationPollEnvelope,
+} from './migration-poll-payload'
+
+function configuredThreshold(value: string | undefined, fallback: number, minimum: number): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? Math.max(minimum, parsed) : fallback
+}
+
+const QUEUE_HEALTH_THRESHOLDS: MigrationQueueHealthThresholds = {
+  queueStallThresholdMs: configuredThreshold(
+    process.env.MIGRATION_QUEUE_STALL_MS,
+    2 * 60_000,
+    10_000,
+  ),
+  heartbeatTimeoutMs: configuredThreshold(
+    process.env.MIGRATION_WORKER_HEARTBEAT_TIMEOUT_MS ?? process.env.JOB_QUEUE_STALE_MS,
+    5 * 60_000,
+    30_000,
+  ),
+}
 
 function mapSessionRow(row: Record<string, unknown>): MigrationSessionRecord {
   const config = row.config
@@ -44,10 +72,20 @@ function mapSessionRow(row: Record<string, unknown>): MigrationSessionRecord {
   }
 }
 
-async function hydrateSession(session: MigrationSessionRecord): Promise<HydratedMigrationSession> {
+async function hydrateSession(
+  session: MigrationSessionRecord,
+  options: { includeQueueHealth?: boolean } = {},
+): Promise<HydratedMigrationSession> {
   const jobIds = importJobIdsFromConfig(session.config)
-  const jobs = await getImportJobsByIds(jobIds, session.companyId)
+  const [jobs, queueRows] = await Promise.all([
+    getImportJobsByIds(jobIds, session.companyId),
+    options.includeQueueHealth === false
+      ? Promise.resolve([])
+      : getMigrationQueueJobs(jobIds, session.companyId),
+  ])
   const jobsByKey: HydratedMigrationSession['jobs'] = {}
+  const queueJobsByKey: NonNullable<HydratedMigrationSession['queueJobs']> = {}
+  const queueHealthByKey: NonNullable<HydratedMigrationSession['queueHealth']> = {}
 
   for (const [resourceKey, jobId] of Object.entries(session.config.importJobIds)) {
     const job = jobs.find((item) => item.id === jobId)
@@ -59,11 +97,74 @@ async function hydrateSession(session: MigrationSessionRecord): Promise<Hydrated
     if (job) jobsByKey[card.key] = jobRecordToProgressSnapshot(job)
   }
 
+  if (options.includeQueueHealth !== false) {
+    for (const [resourceKey, job] of Object.entries(jobsByKey)) {
+      const queueJob = selectCurrentQueueJob(queueRows, job.id)
+      if (queueJob) queueJobsByKey[resourceKey] = queueJob
+      queueHealthByKey[resourceKey] = detectMigrationQueueHealth({
+        importJob: job,
+        queueJob,
+        thresholds: QUEUE_HEALTH_THRESHOLDS,
+      })
+    }
+  }
+
   return {
     ...session,
     jobs: jobsByKey,
+    queueJobs: queueJobsByKey,
+    queueHealth: queueHealthByKey,
+    queueHealthThresholds: QUEUE_HEALTH_THRESHOLDS,
     lifecycle: restoreLifecycleFromSession(session.config, jobsByKey),
   }
+}
+
+async function getMigrationQueueJobs(
+  importJobIds: string[],
+  companyId: string,
+): Promise<PersistedQueueJobSnapshot[]> {
+  if (importJobIds.length === 0) return []
+  const client = createAdminClient()
+  const { data, error } = await client
+    .from('job_queue')
+    .select('id,payload,status,scheduled_at,started_at,completed_at,created_at,updated_at,attempts,max_attempts,last_error')
+    .eq('company_id', companyId)
+    .eq('job_type', 'QUICKBOOKS_IMPORT_STEP')
+    .in('status', ['PENDING', 'RUNNING'])
+    .in('payload->>importJobId', importJobIds)
+    .order('updated_at', { ascending: false })
+
+  if (error) throw error
+  return (data ?? []).flatMap((row) => {
+    const payload = row.payload && typeof row.payload === 'object'
+      ? row.payload as Record<string, unknown>
+      : {}
+    const importJobId = typeof payload.importJobId === 'string' ? payload.importJobId : null
+    if (!importJobId) return []
+    return [{
+      id: String(row.id),
+      importJobId,
+      status: String(row.status),
+      scheduledAt: String(row.scheduled_at),
+      startedAt: row.started_at ? String(row.started_at) : null,
+      completedAt: row.completed_at ? String(row.completed_at) : null,
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+      attempts: Number(row.attempts ?? 0),
+      maxAttempts: Number(row.max_attempts ?? 0),
+      lastError: row.last_error ? String(row.last_error) : null,
+    }]
+  })
+}
+
+function selectCurrentQueueJob(
+  rows: PersistedQueueJobSnapshot[],
+  importJobId: string,
+): PersistedQueueJobSnapshot | null {
+  const matching = rows.filter((row) => row.importJobId === importJobId)
+  return matching.find((row) => row.status === 'RUNNING' || row.status === 'PENDING')
+    ?? matching[0]
+    ?? null
 }
 
 /** Returns the company's active QuickBooks migration session, if any. Never creates one. */
@@ -142,7 +243,7 @@ export async function listQuickBooksMigrationSessions(input?: {
   const slice = filtered.slice((page - 1) * limit, page * limit)
   const items: MigrationHistorySummary[] = []
   for (const row of slice) {
-    const hydrated = await hydrateSession(mapSessionRow(row))
+    const hydrated = await hydrateSession(mapSessionRow(row), { includeQueueHealth: false })
     items.push(summarizeMigrationSession(hydrated))
   }
   return { items, total, page, limit }
@@ -161,6 +262,30 @@ export async function getQuickBooksMigrationSession(sessionId: string, companyId
   if (!data) return null
   if (!isQuickBooksMigrationConfig(data.config)) return null
   return hydrateSession(mapSessionRow(data))
+}
+
+/** Compact poll projection for MigrationSessionProvider. Existing full APIs remain unchanged. */
+export async function pollQuickBooksMigrationSession(input: {
+  sessionId?: string | null
+  includeLatest?: boolean
+  includeStatic?: boolean
+  activityCursors?: MigrationActivityCursors
+  previousLiveFingerprint?: string | null
+}): Promise<{ session: HydratedMigrationSession | null; poll: MigrationPollEnvelope | null }> {
+  const session = input.sessionId
+    ? await getQuickBooksMigrationSession(input.sessionId)
+    : input.includeLatest
+      ? await findLatestQuickBooksMigrationSession()
+      : await findActiveQuickBooksMigrationSession()
+  if (!session) return { session: null, poll: null }
+  return {
+    session,
+    poll: projectMigrationPollPayload(session, {
+      includeStatic: input.includeStatic ?? true,
+      activityCursors: input.activityCursors,
+      previousLiveFingerprint: input.previousLiveFingerprint,
+    }),
+  }
 }
 
 export async function createQuickBooksMigrationSession(input: {

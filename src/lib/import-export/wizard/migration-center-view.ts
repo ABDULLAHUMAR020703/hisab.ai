@@ -10,6 +10,10 @@ import {
   type OverallMigrationProgress,
 } from './module-lifecycle'
 import type { MigrationActivityEvent } from '../types'
+import type {
+  MigrationExecutionState,
+  MigrationQueueHealth,
+} from './migration-queue-health'
 
 /**
  * Pure view-model for the Migration Center.
@@ -48,8 +52,15 @@ export interface MigrationCenterView {
     retryCount: number
     memoryBytes: number | null
   }
-  workerStatus: 'idle' | 'running' | 'failed' | 'completed'
-  queueStatus: { depth: number; nextLabel: string | null }
+  workerStatus: MigrationExecutionState | 'idle'
+  executionHealth: MigrationQueueHealth | null
+  moduleExecutionHealth: Record<string, MigrationQueueHealth>
+  queueStatus: {
+    depth: number
+    nextLabel: string | null
+    waitingMs: number
+    lastQueueUpdateAt: string | null
+  }
   warnings: Array<{ module: string; count: number }>
   errors: Array<{ module: string; message: string; stage: string | null; errorCode: string | null }>
   logs: MigrationActivityEvent[]
@@ -67,6 +78,44 @@ function formatDuration(milliseconds: number): string {
 
 export function formatMigrationDuration(milliseconds: number): string {
   return formatDuration(milliseconds)
+}
+
+function fallbackExecutionHealth(
+  entry: ModuleLifecycleEntry | null,
+  sessionState: HydratedMigrationSession['config']['state'],
+): MigrationQueueHealth | null {
+  const state: MigrationExecutionState | null = entry
+    ? entry.phase === 'claimed' ? 'worker_claimed'
+      : entry.phase === 'processing' ? 'processing'
+        : entry.phase === 'paused' ? 'paused'
+          : entry.phase === 'completed' || entry.phase === 'completed_with_warnings' ? 'completed'
+            : entry.phase === 'failed' || entry.phase === 'cancelled' ? 'failed'
+              : 'queued'
+    : sessionState === 'completed' ? 'completed'
+      : sessionState === 'failed' || sessionState === 'cancelled' ? 'failed'
+        : null
+  if (!state) return null
+  const label: Record<MigrationExecutionState, string> = {
+    queued: 'Queued',
+    worker_claimed: 'Worker Claimed',
+    processing: 'Processing',
+    paused: 'Paused',
+    completed: 'Completed',
+    failed: 'Failed',
+  }
+  return {
+    state,
+    label: label[state],
+    warning: null,
+    warningMessage: null,
+    waitingSince: null,
+    waitingMs: 0,
+    lastQueueUpdateAt: null,
+    workerClaimedAt: null,
+    lastHeartbeatAt: null,
+    suggestedAction: null,
+    retryAppropriate: state === 'failed',
+  }
 }
 
 export function buildMigrationCenterView(session: HydratedMigrationSession): MigrationCenterView {
@@ -112,12 +161,17 @@ export function buildMigrationCenterView(session: HydratedMigrationSession): Mig
       errorCode: entry.failure?.errorCode ?? null,
     }))
 
-  let workerStatus: MigrationCenterView['workerStatus'] = 'idle'
-  if (session.config.state === 'completed') workerStatus = 'completed'
-  else if (session.config.state === 'failed') workerStatus = 'failed'
-  else if (overall.processing > 0) workerStatus = 'running'
-
   const queued = modules.filter((entry) => entry.phase === 'queued')
+  const executionModule = current ?? queued[0] ?? modules.find((entry) => entry.phase === 'failed') ?? null
+  const moduleExecutionHealth: Record<string, MigrationQueueHealth> = {}
+  for (const entry of modules) {
+    const health = session.queueHealth?.[entry.key] ?? fallbackExecutionHealth(entry, session.config.state)
+    if (health) moduleExecutionHealth[entry.key] = health
+  }
+  const executionHealth = executionModule
+    ? moduleExecutionHealth[executionModule.key] ?? fallbackExecutionHealth(executionModule, session.config.state)
+    : fallbackExecutionHealth(null, session.config.state)
+  const workerStatus = executionHealth?.state ?? 'idle'
   const finalReport = terminal
     ? buildMigrationReport({
       source: session.config.sourceLabel ?? 'QuickBooks',
@@ -179,9 +233,13 @@ export function buildMigrationCenterView(session: HydratedMigrationSession): Mig
       memoryBytes: snapshot.memoryBytes ?? null,
     },
     workerStatus,
+    executionHealth,
+    moduleExecutionHealth,
     queueStatus: {
       depth: queued.length,
       nextLabel: queued[0]?.label ?? null,
+      waitingMs: executionHealth?.state === 'queued' ? executionHealth.waitingMs : 0,
+      lastQueueUpdateAt: executionHealth?.lastQueueUpdateAt ?? null,
     },
     warnings,
     errors,

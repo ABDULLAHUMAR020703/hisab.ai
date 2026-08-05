@@ -125,6 +125,11 @@ export interface PreviewResultLike {
 
 export interface PersistedImportJobSnapshot {
   status: string
+  createdAt?: string | null
+  updatedAt?: string | null
+  startedAt?: string | null
+  pausedAt?: string | null
+  lastHeartbeatAt?: string | null
   totalRows?: number
   processedRows?: number
   importedCount?: number

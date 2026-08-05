@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { useMigrationSession } from '@/components/import-export/MigrationSessionProvider'
 
@@ -9,11 +9,16 @@ import { useMigrationSession } from '@/components/import-export/MigrationSession
  * If a migration has already started, openViewer routes to Migration Center.
  */
 export default function MigrationWizardPage() {
-  const { openViewer, session } = useMigrationSession()
+  const { openViewer, session, sessionLoading } = useMigrationSession()
+  const openedRef = useRef(false)
 
   useEffect(() => {
+    // Exactly one automatic open per mount: polling re-renders must not reopen
+    // the wizard or restart a pending Migration Center transition.
+    if (sessionLoading || openedRef.current) return
+    openedRef.current = true
     openViewer()
-  }, [openViewer])
+  }, [openViewer, sessionLoading])
 
   return (
     <div className="flex min-h-[60vh] items-center justify-center p-6">

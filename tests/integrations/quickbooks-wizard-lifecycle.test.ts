@@ -300,7 +300,8 @@ test('the wizard renders permanent lifecycle cards and derives state from persis
   // Configuration wizard only — live progress lives in Migration Center from persisted jobs.
   assert.match(wizard, /Starting Migration Center/)
   assert.match(wizard, /onSuccess\?\.\(createdSession\.session\.id\)/)
-  assert.doesNotMatch(wizard, /persistentSession/)
+  assert.match(wizard, /persistentSession/)
+  assert.doesNotMatch(wizard, /fetch\('\/api\/import-export\/migration-sessions', \{ cache: 'no-store' \}\)/)
   assert.doesNotMatch(wizard, /deriveOverallProgress\(lifecycle\)/)
   assert.doesNotMatch(wizard, /moduleStates/)
   assert.doesNotMatch(wizard, /setJobProgress/)

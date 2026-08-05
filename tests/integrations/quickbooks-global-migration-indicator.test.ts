@@ -31,10 +31,11 @@ test('dashboard layout owns migration coordination across route navigation', () 
     layout.indexOf('<MigrationSessionProvider>') < layout.indexOf('{children}'),
     'provider must wrap route children',
   )
-  assert.match(provider, /coordinate\(session\)/)
+  assert.match(provider, /coordinate\(coordinationSignal\)/)
   assert.match(provider, /sourceKey: current\.config\.provider/)
   assert.match(provider, /\/jobs\/\$\{unfinished\.jobId\}\/run/)
-  assert.doesNotMatch(provider, /usePathname/)
+  assert.match(provider, /usePathname\(\)/)
+  assert.match(provider, /migrationSessionIdFromPathname/)
 })
 
 test('global indicator opens Migration Center from persisted session', () => {
@@ -73,7 +74,7 @@ test('failed migration indicator exposes resume, retry, and logs actions', () =>
   assert.match(provider, />Retry</)
   assert.match(provider, />View Logs</)
   assert.match(provider, /migrationCenterPath\(session\.id\)\}#logs/)
-  assert.match(provider, /\/migration-sessions\/\$\{session\.id\}\/retry/)
+  assert.match(provider, /\/migration-sessions\/\$\{sessionId\}\/retry/)
   assert.match(retryRoute, /retryQuickBooksMigrationSession/)
   assert.match(service, /incrementImportJobRetry/)
   assert.match(service, /phase: 'queued'/)
@@ -86,7 +87,8 @@ test('indicator state persists through refresh and session completion', () => {
   const route = read('src/app/api/import-export/migration-sessions/route.ts')
   const service = read('src/lib/import-export/wizard/migration-session.service.ts')
 
-  assert.match(provider, /includeLatest=true/)
+  assert.match(provider, /includeLatest/)
+  assert.match(provider, /poll: '1'/)
   assert.match(provider, /cache: 'no-store'/)
   assert.match(provider, /quickbooks-migration-session-changed/)
   assert.match(route, /includeLatest/)
