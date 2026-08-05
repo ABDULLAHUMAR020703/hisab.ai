@@ -266,7 +266,7 @@ test('performance metrics restoration reads progressSnapshot from jobs', () => {
   assert.equal(view.performance.databaseQueries, 20)
   assert.equal(view.performance.databaseWrites, 4)
   assert.equal(view.performance.retryCount, 1)
-  assert.equal(view.performance.averageThroughput, 2)
+  assert.equal(view.performance.averageThroughput, 2.5)
 
   const center = read('src/components/import-export/MigrationCenter.tsx')
   assert.match(center, /Performance Metrics/)

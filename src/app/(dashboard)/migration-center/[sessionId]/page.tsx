@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { RefreshCw } from 'lucide-react'
 import { MigrationCenter } from '@/components/import-export/MigrationCenter'
 import { useMigrationSession } from '@/components/import-export/MigrationSessionProvider'
+import { migrationCancelConfirmMessage } from '@/lib/import-export/wizard/migration-cancel'
 
 /**
  * Persistent Migration Center page.
@@ -41,6 +42,7 @@ export default function MigrationCenterPage() {
 
   async function handleCancel() {
     if (!session) return
+    if (!window.confirm(migrationCancelConfirmMessage())) return
     setBusy(true)
     setActionError(null)
     try {

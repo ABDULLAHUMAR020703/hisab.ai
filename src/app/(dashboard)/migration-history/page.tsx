@@ -18,6 +18,13 @@ const STATUS_TONE: Record<MigrationSessionState, string> = {
   cancelled: 'bg-slate-100 text-slate-600',
 }
 
+const STATUS_LABEL: Record<MigrationSessionState, string> = {
+  running: 'In Progress',
+  completed: 'Completed',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+}
+
 export default function MigrationHistoryPage() {
   const { history, loadHistory } = useMigrationHistory()
   const [page, setPage] = useState(1)
@@ -105,8 +112,8 @@ export default function MigrationHistoryPage() {
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap text-slate-700">{formatMigrationDuration(item.durationMs)}</td>
                 <td className="px-4 py-3">
-                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${STATUS_TONE[item.status]}`}>
-                    {item.status}
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_TONE[item.status]}`}>
+                    {STATUS_LABEL[item.status]}
                   </span>
                 </td>
                 <td className="px-4 py-3 capitalize text-slate-700">{item.provider}</td>

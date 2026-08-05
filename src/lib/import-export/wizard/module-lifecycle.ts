@@ -152,6 +152,7 @@ export interface PersistedImportJobSnapshot {
   estimatedCompletionAt?: string | null
   activityEvents?: MigrationActivityEvent[]
   progressSnapshot?: MigrationProgressSnapshot
+  skipSummary?: Record<string, number> | null
 }
 
 export function isTerminalPhase(phase: ModuleLifecyclePhase): boolean {

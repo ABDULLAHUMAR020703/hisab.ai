@@ -21,6 +21,8 @@ export interface MigrationTraceEvent {
   stage?: string | null
   batch?: number | null
   records?: number | null
+  durationMs?: number | null
+  warningCount?: number | null
 }
 
 export interface MigrationTraceSnapshot {
@@ -43,12 +45,15 @@ export interface MigrationTraceSnapshot {
   retryCount: number
   memoryBytes: number
   startedAt: string
+  activeProcessingMs: number
   stages: Record<string, { status: 'pending' | 'running' | 'completed' | 'failed'; durationMs?: number; progress?: number }>
   operations?: Record<string, { calls: number; totalMs: number; averageMs: number; maxMs: number; failed: number }>
 }
 
 export interface MigrationTraceOptions {
   onEvent?: (event: MigrationTraceEvent, snapshot: MigrationTraceSnapshot) => void
+  /** Active time persisted by earlier continuation steps for this import job. */
+  initialActiveProcessingMs?: number
 }
 
 interface RequestAggregate {
@@ -85,10 +90,12 @@ export class MigrationTrace {
   private currentBatch = 0
   private counts = { importedCount: 0, updatedCount: 0, skippedCount: 0, failedCount: 0 }
   private readonly onEvent?: MigrationTraceOptions['onEvent']
+  private readonly initialActiveProcessingMs: number
 
   constructor(readonly module: string, correlationId?: string, options?: MigrationTraceOptions) {
     this.correlationId = correlationId || randomUUID()
     this.onEvent = options?.onEvent
+    this.initialActiveProcessingMs = Math.max(0, Number(options?.initialActiveProcessingMs ?? 0))
   }
 
   async measure<T>(stage: MigrationStage, operation: () => Promise<T> | T): Promise<T> {
@@ -98,12 +105,14 @@ export class MigrationTrace {
     logger.info('quickbooks.migration.stage.started', { correlationId:this.correlationId, module:this.module, stage })
     try {
       const result = await operation()
-      this.recordStage(stage, performance.now() - startedAt, false)
-      this.emitEvent('stage_completed', `Completed ${stage.replaceAll('_', ' ')}`, { stage })
+      const durationMs = Math.max(0, performance.now() - startedAt)
+      this.recordStage(stage, durationMs, false)
+      this.emitEvent('stage_completed', `Completed ${stage.replaceAll('_', ' ')}`, { stage, durationMs })
       return result
     } catch (error) {
-      this.recordStage(stage, performance.now() - startedAt, true)
-      this.emitEvent('stage_failed', `Failed ${stage.replaceAll('_', ' ')}`, { stage })
+      const durationMs = Math.max(0, performance.now() - startedAt)
+      this.recordStage(stage, durationMs, true)
+      this.emitEvent('stage_failed', `Failed ${stage.replaceAll('_', ' ')}`, { stage, durationMs, warningCount: 1 })
       logger.error('quickbooks.migration.stage.failed', {
         correlationId:this.correlationId,
         module:this.module,
@@ -171,12 +180,13 @@ export class MigrationTrace {
   }
 
   snapshot(): MigrationTraceSnapshot {
-    const elapsedMs = Math.max(1, performance.now() - this.startedAt)
+    const currentRunMs = Math.max(1, performance.now() - this.startedAt)
+    const activeProcessingMs = this.initialActiveProcessingMs + currentRunMs
     const apiRequests = [...this.requests.values()].filter(item => item.kind === 'quickbooks').reduce((sum, item) => sum + item.calls, 0)
     const databaseQueries = [...this.requests.values()].filter(item => item.kind === 'supabase').reduce((sum, item) => sum + item.calls, 0)
     const databaseTimeMs = [...this.requests.values()].filter(item => item.kind === 'supabase').reduce((sum, item) => sum + item.durationMs, 0)
     const apiTimeMs = [...this.requests.values()].filter(item => item.kind === 'quickbooks').reduce((sum, item) => sum + item.durationMs, 0)
-    const averageThroughput = this.processedRecords / (elapsedMs / 1000)
+    const averageThroughput = this.processedRecords / (activeProcessingMs / 1000)
     return {
       currentModule: this.module,
       currentStage: this.currentStage,
@@ -191,6 +201,7 @@ export class MigrationTrace {
       retryCount: [...this.requests.values()].reduce((sum, item) => sum + Math.max(0, item.calls - 1), 0),
       memoryBytes: process.memoryUsage().heapUsed,
       startedAt: this.startedWallClock,
+      activeProcessingMs,
       databaseWrites: [...this.requests.values()].filter(item => item.kind === 'supabase').reduce((sum, item) => sum + item.writes, 0),
       databaseTimeMs,
       apiTimeMs,

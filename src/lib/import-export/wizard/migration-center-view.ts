@@ -14,6 +14,16 @@ import type {
   MigrationExecutionState,
   MigrationQueueHealth,
 } from './migration-queue-health'
+import { canCancelMigrationSession } from './migration-cancel'
+import {
+  deriveMigrationTiming,
+  ETA_ESTIMATING_LABEL,
+  formatTimingDuration,
+} from './migration-timing'
+import {
+  buildMigrationActivityTimeline,
+  type MigrationTimelineEntry,
+} from './migration-activity-timeline'
 
 /**
  * Pure view-model for the Migration Center.
@@ -35,14 +45,19 @@ export interface MigrationCenterView {
   currentBatch: number | null
   totalBatches: number | null
   elapsedMs: number
+  activeProcessingMs: number
   remainingMs: number | null
   etaLabel: string
   completedModules: ModuleLifecycleEntry[]
+  cancelledModules: ModuleLifecycleEntry[]
+  remainingModules: ModuleLifecycleEntry[]
   queuedModules: ModuleLifecycleEntry[]
   processingModules: ModuleLifecycleEntry[]
   failedModules: ModuleLifecycleEntry[]
   allModules: ModuleLifecycleEntry[]
-  activityTimeline: MigrationActivityEvent[]
+  canCancel: boolean
+  cancellingActiveBatch: boolean
+  activityTimeline: MigrationTimelineEntry[]
   performance: {
     averageThroughput: number | null
     apiRequests: number
@@ -69,16 +84,14 @@ export interface MigrationCenterView {
 }
 
 function formatDuration(milliseconds: number): string {
-  const seconds = Math.max(0, Math.floor(milliseconds / 1000))
-  const minutes = Math.floor(seconds / 60)
-  const hours = Math.floor(minutes / 60)
-  if (hours > 0) return `${hours}h ${String(minutes % 60).padStart(2, '0')}m`
-  return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`
+  return formatTimingDuration(milliseconds)
 }
 
 export function formatMigrationDuration(milliseconds: number): string {
   return formatDuration(milliseconds)
 }
+
+export { ETA_ESTIMATING_LABEL }
 
 function fallbackExecutionHealth(
   entry: ModuleLifecycleEntry | null,
@@ -118,35 +131,29 @@ function fallbackExecutionHealth(
   }
 }
 
-export function buildMigrationCenterView(session: HydratedMigrationSession): MigrationCenterView {
+export function buildMigrationCenterView(
+  session: HydratedMigrationSession,
+  nowMs: number = Date.now(),
+): MigrationCenterView {
   const modules = orderedModules(session.lifecycle)
   const overall = deriveOverallProgress(session.lifecycle)
   const current = activeModule(session.lifecycle)
   const progress = current?.progress ?? null
-  const finishedElapsedMs = modules.reduce((sum, entry) => sum + (entry.durationMs ?? 0), 0)
-  const elapsedMs = finishedElapsedMs + (progress?.elapsedMs ?? 0)
-  const queuedRemainingMs = modules
-    .filter((entry) => entry.phase === 'queued')
-    .reduce((sum, entry) => sum + (entry.estimate?.durationMs ?? 0), 0)
-  const activeRemainingMs = progress?.estimatedRemainingSeconds == null
-    ? null
-    : progress.estimatedRemainingSeconds * 1000
-  const remainingMs = activeRemainingMs === null
-    ? (queuedRemainingMs > 0 ? queuedRemainingMs : null)
-    : activeRemainingMs + queuedRemainingMs
+  const timing = deriveMigrationTiming(session, nowMs)
 
-  const timeline: MigrationActivityEvent[] = []
+  const rawLogs: MigrationActivityEvent[] = []
   for (const entry of modules) {
     for (const event of entry.progress?.activityEvents ?? []) {
-      timeline.push({ ...event, module: event.module ?? entry.label })
+      rawLogs.push({ ...event, module: event.module ?? entry.label })
     }
   }
-  timeline.sort((left, right) => Date.parse(right.at) - Date.parse(left.at))
+  rawLogs.sort((left, right) => Date.parse(right.at) - Date.parse(left.at))
+  const activityTimeline = buildMigrationActivityTimeline(session)
 
   const snapshot = progress?.progressSnapshot ?? {}
-  const startedAt = session.config.startedAt || session.createdAt
+  const startedAt = timing.startedAt
   const terminal = session.config.state !== 'running'
-  const completedAt = terminal ? session.updatedAt : null
+  const completedAt = timing.completedAt
 
   const warnings = modules
     .filter((entry) => (entry.warningCount ?? 0) > 0)
@@ -162,6 +169,21 @@ export function buildMigrationCenterView(session: HydratedMigrationSession): Mig
     }))
 
   const queued = modules.filter((entry) => entry.phase === 'queued')
+  const cancelled = modules.filter((entry) => entry.phase === 'cancelled')
+  const hasExecutionEvidence = (entry: ModuleLifecycleEntry) => Boolean(
+    entry.progress
+    && (
+      entry.progress.processedRows > 0
+      || entry.progress.currentStage
+      || entry.progress.activityEvents.length > 0
+    ),
+  )
+  const cancelledAfterExecution = cancelled.filter(hasExecutionEvidence)
+  const remainingNotExecuted = modules.filter((entry) =>
+    entry.phase === 'queued'
+    || entry.phase === 'ready'
+    || entry.phase === 'selected'
+    || (entry.phase === 'cancelled' && !hasExecutionEvidence(entry)))
   const executionModule = current ?? queued[0] ?? modules.find((entry) => entry.phase === 'failed') ?? null
   const moduleExecutionHealth: Record<string, MigrationQueueHealth> = {}
   for (const entry of modules) {
@@ -177,7 +199,7 @@ export function buildMigrationCenterView(session: HydratedMigrationSession): Mig
       source: session.config.sourceLabel ?? 'QuickBooks',
       companyName: session.config.companyName,
       currency: session.config.currency,
-      durationMs: Math.max(0, Date.parse(completedAt ?? session.updatedAt) - Date.parse(startedAt)),
+      durationMs: timing.elapsedMs,
       modules: modules.map((entry) => ({
         key: entry.key,
         label: entry.label,
@@ -192,7 +214,8 @@ export function buildMigrationCenterView(session: HydratedMigrationSession): Mig
         updatedCount: entry.progress?.updatedCount ?? 0,
         skippedCount: entry.progress?.skippedCount ?? 0,
         failedCount: entry.progress?.failedCount ?? 0,
-        durationMs: entry.durationMs ?? entry.progress?.elapsedMs ?? 0,
+        durationMs: entry.durationMs
+          ?? (Number(entry.progress?.progressSnapshot?.activeProcessingMs) || 0),
       })),
     })
     : null
@@ -211,20 +234,26 @@ export function buildMigrationCenterView(session: HydratedMigrationSession): Mig
     currentRecord: progress?.currentRecord ?? null,
     currentBatch: progress?.currentBatch ?? null,
     totalBatches: progress?.totalBatches ?? null,
-    elapsedMs,
-    remainingMs,
-    etaLabel: remainingMs === null ? 'Calculating…' : formatDuration(remainingMs),
+    elapsedMs: timing.elapsedMs,
+    activeProcessingMs: timing.activeProcessingMs,
+    remainingMs: timing.remainingMs,
+    etaLabel: timing.etaLabel,
     completedModules: modules.filter((entry) =>
       entry.phase === 'completed' || entry.phase === 'completed_with_warnings'),
+    cancelledModules: cancelledAfterExecution,
+    remainingModules: remainingNotExecuted,
     queuedModules: queued,
     processingModules: modules.filter((entry) =>
       entry.phase === 'processing' || entry.phase === 'claimed' || entry.phase === 'paused'),
     failedModules: modules.filter((entry) =>
-      entry.phase === 'failed' || entry.phase === 'preview_failed' || entry.phase === 'cancelled'),
+      entry.phase === 'failed' || entry.phase === 'preview_failed'),
     allModules: modules,
-    activityTimeline: timeline.slice(0, 50),
+    canCancel: canCancelMigrationSession(session.config.state),
+    cancellingActiveBatch: session.config.state === 'cancelled'
+      && modules.some((entry) => entry.phase === 'processing' || entry.phase === 'claimed'),
+    activityTimeline,
     performance: {
-      averageThroughput: progress?.averageThroughput ?? null,
+      averageThroughput: timing.completedThroughput,
       apiRequests: snapshot.apiRequests ?? 0,
       databaseQueries: snapshot.databaseQueries ?? 0,
       databaseWrites: snapshot.databaseWrites ?? 0,
@@ -243,7 +272,7 @@ export function buildMigrationCenterView(session: HydratedMigrationSession): Mig
     },
     warnings,
     errors,
-    logs: timeline,
+    logs: rawLogs,
     finalReport,
     historySummary: summarizeMigrationSession(session),
   }

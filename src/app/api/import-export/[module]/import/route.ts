@@ -34,6 +34,7 @@ import { withCompanyContext } from '@/lib/tenant'
 import { isOwnershipLostError, type JobOwnership } from '@/lib/platform/jobs/ownership'
 import { logger } from '@/lib/ops/logger'
 import type { MigrationActivityEvent, MigrationProgressSnapshot, SkippedRecordDiagnostic } from '@/lib/import-export/types'
+import { isImportJobMigrationCancelled } from '@/lib/import-export/wizard/migration-session.service'
 
 async function handleImport(
   request: Request,
@@ -205,10 +206,40 @@ async function handleImport(
     const invalidRowCount = validation.invalidRowNumbers.length
     const aggregateSkippedCount = aggregate.skippedCount + invalidRowCount
     const cancelledAfterBatch = await isJobCancelled(job.id)
+    // Session cancel never interrupts the batch above; stop before the next continuation.
+    const sessionCancelled = await isImportJobMigrationCancelled(job.id, companyId)
 
-    if (result.paused || cancelledAfterBatch) {
+    if (result.paused || cancelledAfterBatch || sessionCancelled) {
       await ensureOwned()
-      await setImportJobStatus(job.id, result.paused ? 'paused' : 'pending')
+      if (sessionCancelled && !cancelledAfterBatch && !result.paused) {
+        // The active batch is complete at this point. Persist its source
+        // checkpoint before making the import job terminal so resume starts
+        // from the next page instead of replaying the completed batch.
+        if (sourcePage) {
+          await sourcePage.commit()
+          await updateImportJobProgress(job.id, sourcePage.checkpoint.fetched, {
+            ...aggregate,
+            skippedCount: aggregateSkippedCount,
+            validRows: (job.validRows ?? 0) + validation.validRowNumbers.length,
+            invalidRows: (job.invalidRows ?? 0) + invalidRowCount,
+            warningCount: (job.warningCount ?? 0) + validation.warningCount,
+          }, sourcePage.checkpoint.fetched)
+        }
+        await finalizeImportJob(job.id, {
+          status: 'cancelled',
+          importedCount: aggregate.importedCount,
+          updatedCount: aggregate.updatedCount,
+          skippedCount: aggregateSkippedCount,
+          failedCount: aggregate.failedCount,
+          totalRows: sourcePage?.checkpoint.fetched ?? mappedRows.length,
+          validRows: (job.validRows ?? 0) + validation.validRowNumbers.length,
+          invalidRows: (job.invalidRows ?? 0) + invalidRowCount,
+          warningCount: (job.warningCount ?? 0) + validation.warningCount,
+          startedAt: job.startedAt,
+        })
+      } else {
+        await setImportJobStatus(job.id, result.paused ? 'paused' : 'pending')
+      }
       trace.finish({ fetched: sourcePage?.checkpoint.fetched ?? mappedRows.length, imported: aggregate.importedCount, updated: aggregate.updatedCount, skipped: aggregate.skippedCount, failed: aggregate.failedCount })
       return Response.json({ jobId: job.id, status: result.paused ? 'paused' : 'cancelled', ...aggregate, totalRows: sourcePage?.checkpoint.fetched ?? mappedRows.length, validRows: validation.validRowNumbers.length, invalidRows: validation.invalidRowNumbers.length, warningCount: validation.warningCount, durationMs: Date.now() - new Date(job.startedAt ?? Date.now()).getTime() })
     }
@@ -218,6 +249,32 @@ async function handleImport(
       await sourcePage.commit()
       await updateImportJobProgress(job.id, sourcePage.checkpoint.fetched, { ...aggregate, skippedCount: aggregateSkippedCount, validRows: (job.validRows ?? 0) + validation.validRowNumbers.length, invalidRows: (job.invalidRows ?? 0) + invalidRowCount, warningCount: (job.warningCount ?? 0) + validation.warningCount }, sourcePage.checkpoint.fetched)
       await ensureOwned()
+      if (await isImportJobMigrationCancelled(job.id, companyId)) {
+        await finalizeImportJob(job.id, {
+          status: 'cancelled',
+          importedCount: aggregate.importedCount,
+          updatedCount: aggregate.updatedCount,
+          skippedCount: aggregateSkippedCount,
+          failedCount: aggregate.failedCount,
+          totalRows: sourcePage.checkpoint.fetched,
+          validRows: (job.validRows ?? 0) + validation.validRowNumbers.length,
+          invalidRows: (job.invalidRows ?? 0) + invalidRowCount,
+          warningCount: (job.warningCount ?? 0) + validation.warningCount,
+          startedAt: job.startedAt,
+        })
+        trace.finish({ fetched: sourcePage.checkpoint.fetched, imported: aggregate.importedCount, updated: aggregate.updatedCount, skipped: aggregate.skippedCount, failed: aggregate.failedCount })
+        return Response.json({
+          jobId: job.id,
+          status: 'cancelled',
+          ...aggregate,
+          skippedCount: aggregateSkippedCount,
+          totalRows: sourcePage.checkpoint.fetched,
+          validRows: validation.validRowNumbers.length,
+          invalidRows: validation.invalidRowNumbers.length,
+          warningCount: validation.warningCount,
+          durationMs: Date.now() - new Date(job.startedAt ?? Date.now()).getTime(),
+        })
+      }
       await enqueueJob({ jobType: 'QUICKBOOKS_IMPORT_STEP', companyId, payload: { importJobId: job.id, moduleKey, companyId, userId: user.id } })
       trace.finish({ fetched: sourcePage.checkpoint.fetched, imported: aggregate.importedCount, updated: aggregate.updatedCount, skipped: aggregate.skippedCount, failed: aggregate.failedCount })
       return Response.json({
@@ -348,9 +405,28 @@ export async function runImportJobStep(jobId: string, companyId: string, userId:
     if (job.companyId !== companyId) {
       throw new Error(`Import job tenant mismatch: job ${job.id} belongs to ${job.companyId}, worker supplied ${companyId}.`)
     }
+    // Already-queued continuations must not start a new batch after session cancel.
+    if (job.status === 'cancelled' || await isImportJobMigrationCancelled(job.id, companyId)) {
+      if (job.status !== 'cancelled' && job.status !== 'completed' && job.status !== 'failed') {
+        await finalizeImportJob(job.id, {
+          status: 'cancelled',
+          importedCount: job.importedCount,
+          updatedCount: job.updatedCount,
+          skippedCount: job.skippedCount,
+          failedCount: job.failedCount,
+          totalRows: job.totalRows,
+          validRows: job.validRows ?? undefined,
+          invalidRows: job.invalidRows ?? undefined,
+          warningCount: job.warningCount ?? undefined,
+          startedAt: job.startedAt,
+        })
+      }
+      return Response.json({ jobId: job.id, status: 'cancelled' })
+    }
     await setImportJobStatus(job.id, 'processing')
     let progressWrite: Promise<void> = Promise.resolve()
     const trace = new MigrationTrace(job.moduleKey, undefined, {
+      initialActiveProcessingMs: Number(job.progressSnapshot?.activeProcessingMs ?? 0),
       onEvent: (event, snapshot) => {
         progressWrite = progressWrite.then(async () => {
           if (ownership?.isLost()) {

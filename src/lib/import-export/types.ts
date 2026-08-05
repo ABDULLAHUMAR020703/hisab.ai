@@ -207,6 +207,8 @@ export interface MigrationActivityEvent {
   stage?: string | null
   batch?: number | null
   records?: number | null
+  durationMs?: number | null
+  warningCount?: number | null
 }
 
 export interface MigrationProgressSnapshot {
@@ -231,6 +233,8 @@ export interface MigrationProgressSnapshot {
   retryCount?: number
   memoryBytes?: number | null
   startedAt?: string | null
+  /** Cumulative time spent inside claimed worker steps; excludes queue and pause time. */
+  activeProcessingMs?: number
   progressPercent?: number
   stages?: Record<string, { status: 'pending' | 'running' | 'completed' | 'failed'; durationMs?: number; progress?: number }>
 }

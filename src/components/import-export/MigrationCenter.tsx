@@ -116,8 +116,18 @@ export function MigrationCenter({
             {view.status === 'failed' && onRetry && (
               <Button loading={busy} onClick={onRetry}>Retry</Button>
             )}
-            {view.status === 'running' && onCancel && (
-              <Button variant="outline" loading={busy} onClick={onCancel}>Cancel Migration</Button>
+            {view.status === 'cancelled' && onRetry && (
+              <Button loading={busy} onClick={onRetry}>Resume Migration</Button>
+            )}
+            {view.canCancel && onCancel && (
+              <Button
+                variant="outline"
+                loading={busy}
+                data-cancel-migration
+                onClick={onCancel}
+              >
+                Cancel Migration
+              </Button>
             )}
             {view.status === 'completed' && (
               <a
@@ -133,6 +143,15 @@ export function MigrationCenter({
 
       {actionError && (
         <p role="alert" className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">{actionError}</p>
+      )}
+      {view.cancellingActiveBatch && (
+        <p
+          role="status"
+          data-cancel-finishing-batch
+          className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
+        >
+          Migration cancelled. The current module will finish its active batch before stopping. Completed modules will remain available.
+        </p>
       )}
       {view.executionHealth?.warning && (
         <section
@@ -185,16 +204,20 @@ export function MigrationCenter({
           <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
             view.status === 'completed' ? 'bg-emerald-50 text-emerald-700'
               : view.status === 'failed' ? 'bg-red-50 text-red-700'
+                : view.status === 'cancelled' ? 'bg-slate-100 text-slate-600'
                 : 'bg-indigo-50 text-indigo-700'
           }`}>
-            {view.status === 'running' ? view.executionHealth?.label ?? 'Queued' : view.status}
+            {view.status === 'running' ? view.executionHealth?.label ?? 'Queued'
+              : view.status === 'cancelled' ? 'Cancelled'
+                : view.status}
           </span>
         </div>
         <div className="mt-4 h-3 overflow-hidden rounded-full bg-slate-100">
           <div className="h-full rounded-full bg-indigo-600 transition-all duration-700" style={{ width: `${view.overall.percent}%` }} />
         </div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-4">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <Metric label="Elapsed Time" value={formatMigrationDuration(view.elapsedMs)} icon={<Clock3 size={15} />} />
+          <Metric label="Active Processing Time" value={formatMigrationDuration(view.activeProcessingMs)} icon={<Gauge size={15} />} />
           <Metric label="ETA" value={view.etaLabel} icon={<Activity size={15} />} />
           <Metric label="Average speed" value={view.performance.averageThroughput == null ? '—' : `${view.performance.averageThroughput.toFixed(1)} rows/s`} icon={<Gauge size={15} />} />
           <Metric label="Current Batch" value={view.currentBatch == null ? '—' : `${view.currentBatch}${view.totalBatches ? ` / ${view.totalBatches}` : ''}`} icon={<Database size={15} />} />
@@ -285,9 +308,11 @@ export function MigrationCenter({
 
           <div className="grid gap-4 md:grid-cols-2">
             <ModuleChipList title="Completed Modules" modules={view.completedModules} />
-            <ModuleChipList title="Queued Modules" modules={view.queuedModules} />
+            <ModuleChipList title="Cancelled Modules" modules={view.cancelledModules} />
+            <ModuleChipList title="Remaining Modules Not Executed" modules={view.remainingModules} />
             <ModuleChipList title="Processing Modules" modules={view.processingModules} />
             <ModuleChipList title="Failed Modules" modules={view.failedModules} />
+            <ModuleChipList title="Queued Modules" modules={view.queuedModules} />
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -296,13 +321,39 @@ export function MigrationCenter({
                 <Activity size={16} className="text-indigo-600" />
                 <h3 className="font-semibold text-slate-800">Activity Timeline</h3>
               </div>
-              <div className="max-h-72 space-y-3 overflow-y-auto">
+              <div className="max-h-96 space-y-1 overflow-y-auto" data-migration-activity-timeline>
                 {view.activityTimeline.length ? view.activityTimeline.map((event) => (
-                  <div key={event.id} className="flex gap-3 text-xs">
-                    <span className="whitespace-nowrap text-slate-400">{new Date(event.at).toLocaleTimeString()}</span>
-                    <span className="text-slate-600">
-                      {event.module ? `${event.module}: ` : ''}{event.message}
-                    </span>
+                  <div
+                    key={event.id}
+                    data-activity-type={event.type}
+                    className="grid grid-cols-[3.5rem_0.5rem_1fr] gap-2 rounded-lg px-2 py-2 text-xs hover:bg-slate-50"
+                  >
+                    <time
+                      dateTime={event.at}
+                      title={new Date(event.at).toLocaleString()}
+                      className="whitespace-nowrap font-medium tabular-nums text-slate-500"
+                    >
+                      {new Date(event.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </time>
+                    <span className={`mt-1 h-2 w-2 rounded-full ${
+                      event.severity === 'error' ? 'bg-red-500'
+                        : event.severity === 'warning' ? 'bg-amber-500'
+                          : event.severity === 'success' ? 'bg-emerald-500'
+                            : 'bg-indigo-500'
+                    }`} aria-hidden="true" />
+                    <div className="min-w-0">
+                      <p className="font-medium text-slate-700">{event.message}</p>
+                      <p className="mt-0.5 flex flex-wrap gap-x-2 text-[11px] text-slate-400">
+                        <span className="font-medium text-slate-500">{event.module}</span>
+                        {event.stage && <span>{event.stage.replaceAll('_', ' ')}</span>}
+                        {event.durationMs != null && <span>{formatMigrationDuration(event.durationMs)}</span>}
+                        {event.warningCount > 0 && (
+                          <span className="font-medium text-amber-700">
+                            {event.warningCount.toLocaleString()} warning{event.warningCount === 1 ? '' : 's'}
+                          </span>
+                        )}
+                      </p>
+                    </div>
                   </div>
                 )) : (
                   <p className="text-sm text-slate-400">Waiting for the worker to report activity…</p>

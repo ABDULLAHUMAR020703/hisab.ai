@@ -50,6 +50,9 @@ test('global indicator opens Migration Center from persisted session', () => {
   assert.match(provider, /openMigrationCenter\(session\.id\)/)
   assert.match(provider, /migrationCenterPath/)
   assert.match(provider, /Continues in background/)
+  assert.match(provider, /data-cancel-migration/)
+  assert.match(provider, /Cancel Migration/)
+  assert.match(provider, /migrationCancelConfirmMessage/)
 })
 
 test('completed migration indicator links to the persisted Migration Center report', () => {

@@ -23,6 +23,12 @@ import {
   type MigrationSessionStep,
   type QuickBooksMigrationSessionConfig,
 } from './migration-session'
+import {
+  canCancelMigrationSession,
+  MIGRATION_CANCEL_CONFIRMATION,
+  planGracefulMigrationCancel,
+  planResumeAfterCancellation,
+} from './migration-cancel'
 import type { ModuleLifecycleState } from './module-lifecycle'
 import type { DuplicateStrategy } from '../types'
 import type { SelectableResource } from './module-lifecycle'
@@ -378,27 +384,89 @@ export async function updateQuickBooksMigrationSession(input: {
   return hydrateSession(mapSessionRow(data))
 }
 
+/** Cancels PENDING continuation queue rows only — never interrupts a RUNNING worker claim. */
+async function cancelPendingContinuationJobs(importJobIds: string[], companyId: string): Promise<void> {
+  if (importJobIds.length === 0) return
+  const client = createAdminClient()
+  const { error } = await client
+    .from('job_queue')
+    .update({
+      status: 'CANCELLED',
+      last_error: MIGRATION_CANCEL_CONFIRMATION,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('company_id', companyId)
+    .eq('job_type', 'QUICKBOOKS_IMPORT_STEP')
+    .eq('status', 'PENDING')
+    .in('payload->>importJobId', importJobIds)
+  if (error) throw error
+}
+
+/**
+ * True when the migration session that owns this import job has been cancelled.
+ * Used at step boundaries so the active batch can finish, then stop before the
+ * next continuation is claimed or enqueued.
+ */
+export async function isImportJobMigrationCancelled(
+  importJobId: string,
+  companyIdOverride?: string,
+): Promise<boolean> {
+  const companyId = companyIdOverride ?? await resolveCompanyId()
+  const client = createAdminClient()
+  const { data, error } = await client
+    .from('migration_wizard_sessions')
+    .select('id, status, config')
+    .eq('company_id', companyId)
+    .order('updated_at', { ascending: false })
+    .limit(40)
+  if (error) throw error
+
+  for (const row of data ?? []) {
+    if (!isQuickBooksMigrationConfig(row.config)) continue
+    if (!importJobIdsFromConfig(row.config).includes(importJobId)) continue
+    return row.config.state === 'cancelled' || String(row.status) === 'CANCELLED'
+  }
+  return false
+}
+
+/**
+ * Graceful cancel: persist CANCELLED on the session, cancel not-started modules
+ * and their jobs, cancel PENDING continuation queue rows, and leave the active
+ * processing job running until its current batch/checkpoint completes.
+ */
 export async function cancelQuickBooksMigrationSession(sessionId: string, companyIdOverride?: string): Promise<HydratedMigrationSession> {
   const companyId = companyIdOverride ?? await resolveCompanyId()
   const current = await getQuickBooksMigrationSession(sessionId, companyId)
   if (!current) throw new FrameworkNotFoundError('Migration session not found')
-
-  const jobIds = importJobIdsFromConfig(current.config)
-  for (const jobId of jobIds) {
-    await cancelImportJob(jobId)
+  if (!canCancelMigrationSession(current.config.state)) {
+    throw new FrameworkBadRequestError(
+      current.config.state === 'completed'
+        ? 'Completed migrations cannot be cancelled.'
+        : `Migration session cannot be cancelled while ${current.config.state}.`,
+    )
   }
 
-  const refreshed = await getQuickBooksMigrationSession(sessionId, companyId)
-  if (!refreshed) throw new FrameworkNotFoundError('Migration session not found')
+  const plan = planGracefulMigrationCancel(current.lifecycle, current.jobs, MIGRATION_CANCEL_CONFIRMATION)
 
-  return updateQuickBooksMigrationSession({
+  // Persist cancellation first so coordination and continuation gates stop immediately.
+  const cancelled = await updateQuickBooksMigrationSession({
     sessionId,
     companyIdOverride: companyId,
     state: 'cancelled',
     status: 'CANCELLED',
-    step: refreshed.step,
-    lifecycle: refreshed.lifecycle,
+    step: current.step,
+    lifecycle: plan.lifecycle,
   })
+
+  for (const jobId of plan.cancelJobIds) {
+    await cancelImportJob(jobId)
+  }
+
+  const allJobIds = importJobIdsFromConfig(cancelled.config)
+  await cancelPendingContinuationJobs(allJobIds, companyId)
+
+  const refreshed = await getQuickBooksMigrationSession(sessionId, companyId)
+  return refreshed ?? cancelled
 }
 
 export async function retryQuickBooksMigrationSession(sessionId: string, companyIdOverride?: string): Promise<HydratedMigrationSession> {
@@ -406,27 +474,30 @@ export async function retryQuickBooksMigrationSession(sessionId: string, company
   const current = await getQuickBooksMigrationSession(sessionId, companyId)
   if (!current) throw new FrameworkNotFoundError('Migration session not found')
 
-  const failedJobIds = Object.values(current.jobs)
-    .filter((job) => job.status === 'failed')
+  const resumableJobIds = Object.values(current.jobs)
+    .filter((job) => job.status === 'failed' || job.status === 'cancelled')
     .map((job) => job.id)
 
-  if (failedJobIds.length === 0) {
-    throw new FrameworkBadRequestError('No failed migration jobs are available to retry.')
+  const hasCancelledModules = Object.values(current.lifecycle).some((entry) => entry.phase === 'cancelled')
+  if (resumableJobIds.length === 0 && !hasCancelledModules && current.config.state !== 'cancelled') {
+    throw new FrameworkBadRequestError('No failed or cancelled migration jobs are available to resume.')
   }
 
-  for (const jobId of failedJobIds) {
+  for (const jobId of resumableJobIds) {
     await incrementImportJobRetry(jobId)
   }
 
   const refreshed = await getQuickBooksMigrationSession(sessionId, companyId)
   if (!refreshed) throw new FrameworkNotFoundError('Migration session not found')
-  const retryLifecycle: ModuleLifecycleState = Object.fromEntries(
-    Object.entries(refreshed.lifecycle).map(([key, entry]) => [
-      key,
-      entry.phase === 'failed'
-        ? { ...entry, phase: 'queued' as const, failure: null }
-        : entry,
-    ]),
+  const retryLifecycle: ModuleLifecycleState = planResumeAfterCancellation(
+    Object.fromEntries(
+      Object.entries(refreshed.lifecycle).map(([key, entry]) => [
+        key,
+        entry.phase === 'failed'
+          ? { ...entry, phase: 'queued' as const, failure: null }
+          : entry,
+      ]),
+    ),
   )
 
   return updateQuickBooksMigrationSession({

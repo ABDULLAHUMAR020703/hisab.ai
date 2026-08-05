@@ -95,6 +95,7 @@ export function mergeProgressSnapshot(
     averageThroughput: next.averageThroughput ?? prior.averageThroughput ?? null,
     memoryBytes: next.memoryBytes ?? prior.memoryBytes ?? null,
     startedAt: prior.startedAt ?? next.startedAt ?? null,
+    activeProcessingMs: maxNumber(prior.activeProcessingMs, next.activeProcessingMs) || undefined,
     stages: { ...(prior.stages ?? {}), ...(next.stages ?? {}) },
     progressPercent: totals.progressPercent,
   }

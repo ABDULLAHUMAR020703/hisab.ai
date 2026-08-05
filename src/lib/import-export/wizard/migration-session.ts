@@ -286,6 +286,7 @@ export function jobRecordToProgressSnapshot(job: {
   batchSize?: number
   progressSnapshot?: PersistedImportJobSnapshot['progressSnapshot'] | null
   activityEvents?: PersistedImportJobSnapshot['activityEvents']
+  skipSummary?: Record<string, number> | null
 }): PersistedImportJobSnapshot & { id: string; moduleKey: string } {
   const completed = job.status === 'completed'
   const persistedOutcomeRows = job.importedCount + job.updatedCount + job.skippedCount + job.failedCount
@@ -343,5 +344,6 @@ export function jobRecordToProgressSnapshot(job: {
     estimatedCompletionAt: secondsRemaining === null ? null : new Date(Date.now() + secondsRemaining * 1000).toISOString(),
     activityEvents: job.activityEvents ?? [],
     progressSnapshot: snapshot,
+    skipSummary: job.skipSummary ?? null,
   }
 }

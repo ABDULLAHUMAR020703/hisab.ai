@@ -22,6 +22,7 @@ import {
   type ModuleLifecycleState,
 } from '@/lib/import-export/wizard/module-lifecycle'
 import type { HydratedMigrationSession } from '@/lib/import-export/wizard/migration-session'
+import { migrationCancelConfirmMessage } from '@/lib/import-export/wizard/migration-cancel'
 
 interface SourceResource { key: string; label: string; moduleKey: string }
 interface ImportSource {
@@ -307,6 +308,7 @@ export function ConnectedSourceFlow({
   async function cancelActiveMigration(targetSessionId?: string) {
     const id = targetSessionId ?? sessionIdRef.current ?? blockedSession?.id
     if (!id) return
+    if (!window.confirm(migrationCancelConfirmMessage())) return
     setLoading(true)
     setError(null)
     try {

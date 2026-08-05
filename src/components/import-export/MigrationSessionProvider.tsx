@@ -33,6 +33,7 @@ import {
   nextCoordinationAction,
 } from '@/lib/import-export/wizard/migration-coordination'
 import { migrationCenterPath } from '@/lib/import-export/wizard/migration-center-view'
+import { migrationCancelConfirmMessage } from '@/lib/import-export/wizard/migration-cancel'
 import {
   navigationTarget,
   resolveNavigation,
@@ -221,7 +222,7 @@ export function MigrationSessionProvider({ children }: { children: ReactNode }) 
       openMigrationCenter(current.id)
       return
     }
-    if (current && (current.config.state === 'completed' || current.config.state === 'failed')) {
+    if (current && (current.config.state === 'completed' || current.config.state === 'failed' || current.config.state === 'cancelled')) {
       openMigrationCenter(current.id)
       return
     }
@@ -550,6 +551,17 @@ export function MigrationSessionProvider({ children }: { children: ReactNode }) 
     openMigrationCenter(session.id)
   }, [openMigrationCenter, retrySession, session])
 
+  const cancel = useCallback(async () => {
+    if (!session || session.config.state !== 'running') return
+    if (!window.confirm(migrationCancelConfirmMessage())) return
+    setActionError(null)
+    try {
+      await cancelSession(session.id)
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Unable to cancel migration.')
+    }
+  }, [cancelSession, session])
+
   const handleWizardSuccess = useCallback((createdSessionId?: string) => {
     forceCoordinationCycle()
     void refresh()
@@ -599,6 +611,7 @@ export function MigrationSessionProvider({ children }: { children: ReactNode }) 
             error={actionError}
             onOpen={() => openMigrationCenter(session.id)}
             onRetry={() => void retry()}
+            onCancel={() => void cancel()}
             onLogs={() => navigateOnce(`${migrationCenterPath(session.id)}#logs`)}
           />
         )}
@@ -620,12 +633,14 @@ function MigrationIndicator({
   error,
   onOpen,
   onRetry,
+  onCancel,
   onLogs,
 }: {
   session: HydratedMigrationSession
   error: string | null
   onOpen: () => void
   onRetry: () => void
+  onCancel: () => void
   onLogs: () => void
 }) {
   const overall = deriveOverallProgress(session.lifecycle)
@@ -633,6 +648,7 @@ function MigrationIndicator({
   const state = session.config.state
   const completed = state === 'completed'
   const failed = state === 'failed'
+  const running = state === 'running'
   const currentQueueHealth = current ? session.queueHealth?.[current.key] : null
   const workerWarning = currentQueueHealth?.warning
     ? currentQueueHealth
@@ -696,6 +712,11 @@ function MigrationIndicator({
         <div className="flex gap-1">
           {failed && <Button size="sm" variant="outline" onClick={onRetry}>Retry</Button>}
           {failed && <Button size="sm" variant="outline" onClick={onLogs}>View Logs</Button>}
+          {running && (
+            <Button size="sm" variant="outline" data-cancel-migration onClick={onCancel}>
+              Cancel Migration
+            </Button>
+          )}
           <Button size="sm" onClick={onOpen}>{completed ? 'View Report' : failed ? 'Resume' : 'View Progress'}</Button>
         </div>
       </div>
