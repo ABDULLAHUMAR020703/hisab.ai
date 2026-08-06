@@ -35,6 +35,7 @@ import { isOwnershipLostError, type JobOwnership } from '@/lib/platform/jobs/own
 import { logger } from '@/lib/ops/logger'
 import type { MigrationActivityEvent, MigrationProgressSnapshot, SkippedRecordDiagnostic } from '@/lib/import-export/types'
 import { isImportJobMigrationCancelled } from '@/lib/import-export/wizard/migration-session.service'
+import { createProgressWriteQueue } from '@/lib/import-export/jobs/progress-write-queue'
 
 async function handleImport(
   request: Request,
@@ -193,21 +194,43 @@ async function handleImport(
       trace,
     }))
 
+    // Post-materialization orchestration is where a stalled module leaves the
+    // queue row RUNNING forever, so each step is traceable on its own.
+    const orchestrationStep = (step: string, meta?: Record<string, unknown>) => {
+      logger.info('quickbooks.import_job.orchestration.step', {
+        importJobId: job.id,
+        module: moduleKey,
+        platformJobId: ownership?.platformJobId,
+        attempt: ownership?.attempt,
+        step,
+        ...meta,
+      })
+    }
+
     const allErrors = [...validationErrors, ...result.errors]
     const skippedRecords = [...validationSkips, ...result.skippedRecords]
+    orchestrationStep('save_skips', { skippedRecords: skippedRecords.length })
     await saveImportJobSkips(job.id, skippedRecords)
     const skipSummary = skippedRecords.reduce<Record<string, number>>((summary, item) => {
       const label = item.reason === 'duplicate' ? 'Duplicate (already exists)' : item.reason === 'validation_failed' ? 'Validation failed' : item.reason === 'inactive' ? 'Inactive records' : item.reason === 'filtered' ? 'Filtered by module' : item.reason === 'unsupported_type' ? 'Unsupported type' : 'Other'
       summary[label] = (summary[label] ?? 0) + 1
       return summary
     }, { 'Duplicate (already exists)': 0, 'Inactive records': 0, 'Filtered by module': 0, 'Validation failed': 0, 'Unsupported type': 0, Other: 0 })
+    orchestrationStep('save_errors', { errors: allErrors.length })
     await saveImportJobErrors(job.id, allErrors)
     const aggregate = { importedCount: base.importedCount + result.importedCount, updatedCount: base.updatedCount + result.updatedCount, skippedCount: base.skippedCount + result.skippedCount, failedCount: base.failedCount + result.failedCount }
     const invalidRowCount = validation.invalidRowNumbers.length
     const aggregateSkippedCount = aggregate.skippedCount + invalidRowCount
+    orchestrationStep('cancel_checks')
     const cancelledAfterBatch = await isJobCancelled(job.id)
     // Session cancel never interrupts the batch above; stop before the next continuation.
     const sessionCancelled = await isImportJobMigrationCancelled(job.id, companyId)
+    orchestrationStep('cancel_checks_resolved', {
+      paused: result.paused,
+      cancelledAfterBatch,
+      sessionCancelled,
+      hasMore: sourcePage?.hasMore ?? false,
+    })
 
     if (result.paused || cancelledAfterBatch || sessionCancelled) {
       await ensureOwned()
@@ -246,6 +269,7 @@ async function handleImport(
 
     if (sourcePage?.hasMore) {
       await ensureOwned()
+      orchestrationStep('commit_checkpoint', { fetched: sourcePage.checkpoint.fetched })
       await sourcePage.commit()
       await updateImportJobProgress(job.id, sourcePage.checkpoint.fetched, { ...aggregate, skippedCount: aggregateSkippedCount, validRows: (job.validRows ?? 0) + validation.validRowNumbers.length, invalidRows: (job.invalidRows ?? 0) + invalidRowCount, warningCount: (job.warningCount ?? 0) + validation.warningCount }, sourcePage.checkpoint.fetched)
       await ensureOwned()
@@ -275,7 +299,9 @@ async function handleImport(
           durationMs: Date.now() - new Date(job.startedAt ?? Date.now()).getTime(),
         })
       }
+      orchestrationStep('enqueue_continuation')
       await enqueueJob({ jobType: 'QUICKBOOKS_IMPORT_STEP', companyId, payload: { importJobId: job.id, moduleKey, companyId, userId: user.id } })
+      orchestrationStep('continuation_enqueued')
       trace.finish({ fetched: sourcePage.checkpoint.fetched, imported: aggregate.importedCount, updated: aggregate.updatedCount, skipped: aggregate.skippedCount, failed: aggregate.failedCount })
       return Response.json({
         jobId: job.id,
@@ -297,6 +323,7 @@ async function handleImport(
         : 'completed'
 
     await ensureOwned()
+    orchestrationStep('finalize', { status })
     const finalized = await trace.measure('report_generation', () => finalizeImportJob(job.id, {
       status,
       importedCount: aggregate.importedCount,
@@ -316,6 +343,7 @@ async function handleImport(
       startedAt: job.startedAt,
     }))
 
+    orchestrationStep('finalized', { status: finalized.status })
     trace.finish({ fetched:mappedRows.length, imported:finalized.importedCount, updated:finalized.updatedCount, skipped:finalized.skippedCount, failed:finalized.failedCount })
     return Response.json({
       jobId: finalized.id,
@@ -424,11 +452,16 @@ export async function runImportJobStep(jobId: string, companyId: string, userId:
       return Response.json({ jobId: job.id, status: 'cancelled' })
     }
     await setImportJobStatus(job.id, 'processing')
-    let progressWrite: Promise<void> = Promise.resolve()
+    const progressWrites = createProgressWriteQueue({
+      importJobId: job.id,
+      companyId,
+      platformJobId: ownership?.platformJobId,
+      attempt: ownership?.attempt,
+    })
     const trace = new MigrationTrace(job.moduleKey, undefined, {
       initialActiveProcessingMs: Number(job.progressSnapshot?.activeProcessingMs ?? 0),
       onEvent: (event, snapshot) => {
-        progressWrite = progressWrite.then(async () => {
+        progressWrites.enqueue(async () => {
           if (ownership?.isLost()) {
             logger.info('quickbooks.import_job.progress.stale_ignored', {
               importJobId: job.id,
@@ -488,7 +521,7 @@ export async function runImportJobStep(jobId: string, companyId: string, userId:
         ownership,
       ),
     )
-    await progressWrite
+    await progressWrites.drain()
     if (ownership) await ownership.assertOwned()
     return response
   })
