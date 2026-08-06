@@ -37,27 +37,6 @@ async function clearQuickBooksStaging(
   throw lastError instanceof Error ? lastError : new Error(`Unable to clear QuickBooks staging for ${resourceKey}.`, { cause: lastError })
 }
 
-async function historicalTransactionExchangeRates(tenantId:string,realmId:string,source:QuickBooksImportAdapter):Promise<NormalizedImportResource>{
-  const db=createAdminClient(),records:Array<Record<string,unknown>>=[]
-  for(let from=0;;from+=1000){
-    const page=await db.from('quickbooks_migration_records').select('currency_code,exchange_rate,source_payload').eq('company_id',tenantId).eq('realm_id',realmId).not('currency_code','is',null).not('exchange_rate','is',null).range(from,from+999)
-    if(page.error)throw page.error
-    records.push(...(page.data??[]))
-    if((page.data?.length??0)<1000)break
-  }
-  const company=await db.from('companies').select('currency').eq('id',tenantId).single()
-  if(company.error)throw company.error
-  const home=String(company.data.currency??'').toUpperCase(),unique=new Map<string,Record<string,unknown>>()
-  for(const record of records){
-    const payload=record.source_payload&&typeof record.source_payload==='object'?record.source_payload as Record<string,unknown>:{}
-    const currency=String(record.currency_code??'').toUpperCase(),date=String(payload.TxnDate??payload.TxnDateTime??'').slice(0,10),rate=Number(record.exchange_rate)
-    if(!currency||currency===home||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(rate)||rate<=0)continue
-    unique.set(`${currency}:${home}:${date}`,{SourceCurrencyCode:currency,TargetCurrencyCode:home,AsOfDate:date,Rate:rate})
-  }
-  const resource=source.resources.find(item=>item.key==='exchange-rates')!
-  return {...resource,rows:source.normalizeRecords('exchange-rates',[...unique.values()],realmId),totalCount:unique.size,countAccuracy:'exact'}
-}
-
 export interface SourcePreviewSession {
   source: ImportSourceAdapter
   fetchResource: (resourceKey: string) => Promise<NormalizedImportResource>
@@ -83,15 +62,6 @@ async function fetchWithCheckpoint(tenantId: string, source: ImportSourceAdapter
   if (source.key !== 'quickbooks') return source.fetchResource(provider, context, resourceKey)
   const trace = new MigrationTrace(resourceKey)
   const db = createAdminClient()
-  if(resourceKey==='exchange-rates'&&source instanceof QuickBooksImportAdapter){
-    try{
-      const result=await withExternalRequestDiagnostics({correlationId:trace.correlationId,module:resourceKey,onRequest:trace.request},()=>trace.measure('extraction',()=>historicalTransactionExchangeRates(tenantId,context.realmId,source)))
-      const completed=await db.from('quickbooks_migration_checkpoints').upsert({company_id:tenantId,realm_id:context.realmId,resource_key:resourceKey,extraction_mode:'full',partition_start:null,partition_end:null,next_start_position:1,status:'completed',extracted_count:result.rows.length,last_error:null,updated_at:new Date().toISOString()},{onConflict:'company_id,realm_id,resource_key'});if(completed.error)throw completed.error
-      await trace.measure('staging_cleanup',()=>clearQuickBooksStaging(db,tenantId,context.realmId,resourceKey))
-      trace.finish({fetched:result.rows.length})
-      return result
-    }catch(error){trace.finish();throw error}
-  }
   const existing = await trace.measure('module_scheduling', () => runStage('checkpoint_lookup', resourceKey, diagnostics, async () => {
     const result = await db.from('quickbooks_migration_checkpoints').select('*').eq('company_id',tenantId).eq('realm_id',context.realmId).eq('resource_key',resourceKey).maybeSingle()
     if (result.error) throw result.error

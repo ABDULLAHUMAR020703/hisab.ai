@@ -129,11 +129,15 @@ test('staged extraction avoids retaining a second provider copy and records each
   assert.match(registry,/await write\(progress\)/)
 })
 
-test('exchange-rate extraction uses transaction-authoritative rates instead of paginating the global rate universe',()=>{
+test('exchange-rate extraction requests current rates instead of paginating the global rate universe',()=>{
   const registry=file('src/lib/import-export/sources/source-registry.ts')
-  assert.match(registry,/historicalTransactionExchangeRates/)
-  assert.match(registry,/resourceKey,extraction_mode:'full'/)
+  const adapter=file('src/lib/import-export/sources/quickbooks.adapter.ts')
+  // Historical rates are out of scope, so neither path may derive per-date rows.
+  assert.doesNotMatch(registry,/historicalTransactionExchangeRates/)
   assert.match(registry,/from\('quickbooks_extraction_staging'\)[\s\S]*?\.delete\(\)/)
+  assert.match(adapter,/resolveExchangeRateQuery/)
+  assert.match(adapter,/latestExchangeRateRows/)
+  assert.match(file('src/lib/import-export/quickbooks/exchange-rates.ts'),/asofdate = '\$\{asOfDate\}'/)
 })
 
 test('trusted background migrations resolve the explicit tenant without request cookies',()=>{

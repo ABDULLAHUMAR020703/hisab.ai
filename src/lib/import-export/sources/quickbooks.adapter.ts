@@ -1,7 +1,15 @@
 import { createHash } from 'node:crypto'
-import type { AccountingProvider, ProviderAccessContext } from '@/integrations/accounting/contracts/accounting-provider'
+import type { AccountingProvider, ProviderAccessContext, ProviderEntityFetchOptions } from '@/integrations/accounting/contracts/accounting-provider'
 import { quickBooksErrorStatus } from '@/integrations/accounting/providers/quickbooks/quickbooks-integration.service'
 import { extractQuickBooksPaymentRelationships } from '../quickbooks/payment-relationships'
+import {
+  companyCurrencyCodes,
+  currentExchangeRateAsOfDate,
+  exchangeRateAsOfDate,
+  exchangeRateCurrencyPair,
+  latestExchangeRateRows,
+  quickBooksExchangeRateWhere,
+} from '../quickbooks/exchange-rates'
 import type { ImportSourceAdapter, ImportSourceFetchOptions, ImportSourceResource, NormalizedImportResource } from './types'
 
 type JsonRecord = Record<string, unknown>
@@ -92,6 +100,30 @@ export const QUICKBOOKS_ENTITY_BY_RESOURCE: Record<string, string> = {
   'tax-configurations': 'TaxCode', preferences:'Preferences', 'fixed-assets': 'Item',
 }
 
+// Current rates cover one row per enabled currency, so a single provider page
+// holds the whole resource and the module needs no continuation chain.
+const EXCHANGE_RATE_PAGE_SIZE = 1000
+
+/**
+ * Resolves the current-rate predicate for the ExchangeRate entity. Returns null
+ * when the company has no queryable currencies, which means there is nothing to
+ * import rather than a full historical extraction.
+ */
+async function resolveExchangeRateQuery(
+  provider: AccountingProvider,
+  context: ProviderAccessContext,
+  signal?: AbortSignal,
+): Promise<{ where: string; currencies: string[] } | null> {
+  if (!provider.getEntityRecords) return null
+  const currencies = companyCurrencyCodes(await provider.getEntityRecords(context, 'CompanyCurrency', {
+    pageSize: EXCHANGE_RATE_PAGE_SIZE,
+    maxRecords: EXCHANGE_RATE_PAGE_SIZE,
+    signal,
+  }))
+  const where = quickBooksExchangeRateWhere(currencies, currentExchangeRateAsOfDate())
+  return where ? { where, currencies } : null
+}
+
 const PARTITIONED_RESOURCES = new Set([
   'invoices','bills','expenses','journal-entries','sales-receipts','purchase-orders','vendor-credits','estimates','customer-payments','vendor-payments',
   'credit-memos','deposits','transfers','inventory-adjustments',
@@ -120,7 +152,7 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
     const resource = this.resources.find((item) => item.key === resourceKey)
     if (!resource) throw new Error(`Unsupported QuickBooks import resource: ${resourceKey}`)
     let hasMore = false
-    const fetchEntity = async (entity:string,fallback:()=>Promise<unknown[]>) => provider.getEntityRecords
+    const fetchEntity = async (entity:string,fallback:()=>Promise<unknown[]>,overrides?:Pick<ProviderEntityFetchOptions,'where'|'pageSize'>) => provider.getEntityRecords
       ? provider.getEntityRecords(context,entity,{
           includeInactive:true,
           partitioned:PARTITIONED_RESOURCES.has(resourceKey),
@@ -128,7 +160,8 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
           partitionStart:options?.partitionStart?new Date(options.partitionStart):undefined,
           partitionEnd:options?.partitionEnd?new Date(options.partitionEnd):undefined,
           maxPages: options?.boundedPage ? 1 : undefined,
-          pageSize: options?.boundedPage ? 100 : undefined,
+          pageSize: overrides?.pageSize ?? (options?.boundedPage ? 100 : undefined),
+          where: overrides?.where,
           retainRows:!options?.onBatch || options?.boundedPage,
           signal:options?.signal,
           onCheckpoint:options?.onCheckpoint?async checkpoint=>{hasMore=Boolean(checkpoint.hasMore||checkpoint.partitionComplete);return options.onCheckpoint!({...checkpoint,fetched:checkpoint.extractedCount})}:undefined,
@@ -145,6 +178,27 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
       }
       const entity = QUICKBOOKS_ENTITY_BY_RESOURCE[resourceKey]
       if (!entity || !provider.getEntityRecords) return { ...resource, rows: [], totalCount: 0, countAccuracy: 'exact', sampled: true }
+      if (resourceKey === 'exchange-rates') {
+        const query = await resolveExchangeRateQuery(provider, context, options.signal)
+        if (!query) return { ...resource, rows: [], totalCount: 0, countAccuracy: 'exact', sampled: true }
+        const rateCacheKey = `ExchangeRate:${query.where}:${sampleSize}`
+        let pendingRates = options.preview.cache?.get(rateCacheKey)
+        if (!pendingRates) {
+          // QuickBooks rejects COUNT(*) for ExchangeRate, so the enabled
+          // currency list is the count: one current rate per currency.
+          pendingRates = provider.getEntityRecords(context, entity, { pageSize: sampleSize, maxRecords: sampleSize, where: query.where, signal: options.signal })
+            .then((sample) => ({ count: query.currencies.length, rows: latestExchangeRateRows(sample) }))
+          options.preview.cache?.set(rateCacheKey, pendingRates)
+        }
+        const rates = await pendingRates
+        return {
+          ...resource,
+          rows: this.normalizeRecords(resourceKey, rates.rows.slice(0, sampleSize), context.realmId),
+          totalCount: rates.count,
+          countAccuracy: 'upper-bound',
+          sampled: true,
+        }
+      }
       const where = resourceKey === 'projects' ? 'Job = true'
         : resourceKey === 'customers' ? 'Job = false'
         : resourceKey === 'fixed-assets' ? "Type = 'FixedAsset'"
@@ -190,6 +244,20 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
       case 'customer-payments': sourceRows = await fetchEntity('Payment',()=>provider.getCustomerPayments?.(context)??Promise.resolve([])); break
       case 'vendor-payments': sourceRows = await fetchEntity('BillPayment',()=>provider.getVendorPayments?.(context)??Promise.resolve([])); break
       case 'preferences': sourceRows = provider.getPreferences ? await provider.getPreferences(context) : []; break
+      case 'exchange-rates': {
+        const query = await resolveExchangeRateQuery(provider, context, options?.signal)
+        if (!query) {
+          // Nothing to extract. Report a terminal checkpoint so a resumed page
+          // cursor cannot keep the continuation chain alive.
+          const terminal = { startPosition: options?.resumeStartPosition ?? 1, fetched: 0, hasMore: false, partitionComplete: false }
+          await options?.onBatch?.([], terminal)
+          await options?.onCheckpoint?.(terminal)
+          sourceRows = []
+          break
+        }
+        sourceRows = await fetchEntity('ExchangeRate', async () => [], { where: query.where, pageSize: EXCHANGE_RATE_PAGE_SIZE })
+        break
+      }
       default: {
         const entity = QUICKBOOKS_ENTITY_BY_RESOURCE[resourceKey]
         if (!entity || !provider.getEntityRecords) sourceRows = []
@@ -313,6 +381,9 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
 }
 
 function filterResourceRows(resourceKey: string, sourceRows: unknown[]): unknown[] {
+  // Historical rates are never imported, so anything older than the newest row
+  // for a pair is dropped before staging even if QuickBooks returns a series.
+  if (resourceKey === 'exchange-rates') return latestExchangeRateRows(sourceRows)
   if (!['projects','customers','fixed-assets','items'].includes(resourceKey)) return sourceRows
   return sourceRows.filter(item => {
     const row = object(item)
@@ -338,10 +409,9 @@ export function stableQuickBooksSourceId(resourceKey: string, source: JsonRecord
   if (nativeId) return nativeId
   if (resourceKey === 'preferences') return 'Preferences'
   if (resourceKey === 'exchange-rates') {
-    const from = value(source.SourceCurrencyCode ?? object(source.SourceCurrencyRef).value ?? source.FromCurrency).toUpperCase()
-    const to = value(source.TargetCurrencyCode ?? object(source.TargetCurrencyRef).value ?? source.ToCurrency).toUpperCase()
-    const date = value(source.AsOfDate ?? source.EffectiveDate ?? source.Date).slice(0, 10)
-    if (from && to && date) return `ExchangeRate:${from}:${to}:${date}`
+    const pair = exchangeRateCurrencyPair(source)
+    const date = exchangeRateAsOfDate(source)
+    if (pair && date) return `ExchangeRate:${pair.from}:${pair.to}:${date}`
   }
   const digest = createHash('sha256').update(`${resourceKey}:${stableJson(source)}`).digest('hex')
   return `${resourceKey}:${digest}`
