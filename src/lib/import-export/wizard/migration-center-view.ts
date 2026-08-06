@@ -19,6 +19,7 @@ import {
   deriveMigrationTiming,
   ETA_ESTIMATING_LABEL,
   formatTimingDuration,
+  type MigrationTimingWaterfallEntry,
 } from './migration-timing'
 import {
   buildMigrationActivityTimeline,
@@ -46,8 +47,13 @@ export interface MigrationCenterView {
   totalBatches: number | null
   elapsedMs: number
   activeProcessingMs: number
+  queueWaitMs: number
+  idleMs: number
+  databaseWaitMs: number
+  apiWaitMs: number
   remainingMs: number | null
   etaLabel: string
+  timingWaterfall: MigrationTimingWaterfallEntry[]
   completedModules: ModuleLifecycleEntry[]
   cancelledModules: ModuleLifecycleEntry[]
   remainingModules: ModuleLifecycleEntry[]
@@ -134,7 +140,9 @@ function fallbackExecutionHealth(
 export function buildMigrationCenterView(
   session: HydratedMigrationSession,
   nowMs: number = Date.now(),
+  options: { includeHeavy?: boolean } = {},
 ): MigrationCenterView {
+  const includeHeavy = options.includeHeavy !== false
   const modules = orderedModules(session.lifecycle)
   const overall = deriveOverallProgress(session.lifecycle)
   const current = activeModule(session.lifecycle)
@@ -142,13 +150,15 @@ export function buildMigrationCenterView(
   const timing = deriveMigrationTiming(session, nowMs)
 
   const rawLogs: MigrationActivityEvent[] = []
-  for (const entry of modules) {
-    for (const event of entry.progress?.activityEvents ?? []) {
-      rawLogs.push({ ...event, module: event.module ?? entry.label })
+  if (includeHeavy) {
+    for (const entry of modules) {
+      for (const event of entry.progress?.activityEvents ?? []) {
+        rawLogs.push({ ...event, module: event.module ?? entry.label })
+      }
     }
+    rawLogs.sort((left, right) => Date.parse(right.at) - Date.parse(left.at))
   }
-  rawLogs.sort((left, right) => Date.parse(right.at) - Date.parse(left.at))
-  const activityTimeline = buildMigrationActivityTimeline(session)
+  const activityTimeline = includeHeavy ? buildMigrationActivityTimeline(session) : []
 
   const snapshot = progress?.progressSnapshot ?? {}
   const startedAt = timing.startedAt
@@ -194,7 +204,7 @@ export function buildMigrationCenterView(
     ? moduleExecutionHealth[executionModule.key] ?? fallbackExecutionHealth(executionModule, session.config.state)
     : fallbackExecutionHealth(null, session.config.state)
   const workerStatus = executionHealth?.state ?? 'idle'
-  const finalReport = terminal
+  const finalReport = includeHeavy && terminal
     ? buildMigrationReport({
       source: session.config.sourceLabel ?? 'QuickBooks',
       companyName: session.config.companyName,
@@ -236,8 +246,13 @@ export function buildMigrationCenterView(
     totalBatches: progress?.totalBatches ?? null,
     elapsedMs: timing.elapsedMs,
     activeProcessingMs: timing.activeProcessingMs,
+    queueWaitMs: timing.queueWaitMs,
+    idleMs: timing.idleMs,
+    databaseWaitMs: timing.databaseTimeMs,
+    apiWaitMs: timing.apiTimeMs,
     remainingMs: timing.remainingMs,
     etaLabel: timing.etaLabel,
+    timingWaterfall: timing.waterfall,
     completedModules: modules.filter((entry) =>
       entry.phase === 'completed' || entry.phase === 'completed_with_warnings'),
     cancelledModules: cancelledAfterExecution,

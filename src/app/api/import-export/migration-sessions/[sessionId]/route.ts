@@ -39,10 +39,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ sess
 
     if (url.searchParams.get('poll') === '1') {
       const includeStatic = url.searchParams.get('static') !== '0'
+      const includeActivityEvents = url.searchParams.get('activity') !== '0'
       const previousLiveFingerprint = request.headers.get('x-migration-live-fingerprint')
       const { poll } = await pollQuickBooksMigrationSession({
         sessionId,
         includeStatic,
+        includeActivityEvents,
         activityCursors: parseActivityCursors(request, url),
         previousLiveFingerprint,
       })

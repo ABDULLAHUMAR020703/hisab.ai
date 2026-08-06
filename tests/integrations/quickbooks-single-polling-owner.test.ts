@@ -6,6 +6,7 @@ const read = (path: string) => readFileSync(path, 'utf8')
 
 const providerPath = 'src/components/import-export/MigrationSessionProvider.tsx'
 const centerPath = 'src/app/(dashboard)/migration-center/[sessionId]/page.tsx'
+const centerIndexPath = 'src/app/(dashboard)/migration-center/page.tsx'
 const historyPath = 'src/app/(dashboard)/migration-history/page.tsx'
 const wizardPagePath = 'src/app/(dashboard)/migration-wizard/page.tsx'
 const wizardFlowPath = 'src/components/import-export/steps/ConnectedSourceFlow.tsx'
@@ -15,6 +16,7 @@ test('MigrationSessionProvider is the only migration polling owner', () => {
   const provider = read(providerPath)
   const children = [
     read(centerPath),
+    read(centerIndexPath),
     read(historyPath),
     read(wizardPagePath),
     read(wizardFlowPath),
@@ -23,7 +25,7 @@ test('MigrationSessionProvider is the only migration polling owner', () => {
 
   assert.equal(provider.match(/window\.setInterval\(/g)?.length, 1)
   assert.match(provider, /POLL_INTERVAL_MS = 1_500/)
-  assert.match(provider, /const timer = window\.setInterval\(\(\) => \{\n {6}void refresh\(\)/)
+  assert.match(provider, /timer = window\.setInterval\(\(\) => \{\n {8}void refresh\(\)/)
 
   for (const child of children) {
     assert.doesNotMatch(child, /setInterval\(/)
@@ -98,13 +100,14 @@ test('route changes select the provider polling target without adding an interva
   assert.match(provider, /usePathname\(\)/)
   assert.match(provider, /migrationSessionIdFromPathname\(pathname\)/)
   assert.match(provider, /previousPolledSessionIdRef\.current === polledSessionId/)
-  assert.match(provider, /void refresh\(\)\.catch/)
+  assert.match(provider, /void refresh\(/)
   assert.equal(provider.match(/window\.setInterval\(/g)?.length, 1)
 })
 
 test('reopening Center, History, or Wizard cannot create another polling loop', () => {
   const routes = [
     read(centerPath),
+    read(centerIndexPath),
     read(historyPath),
     read(wizardPagePath),
   ]

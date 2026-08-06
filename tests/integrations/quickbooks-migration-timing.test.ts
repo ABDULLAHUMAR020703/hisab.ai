@@ -350,11 +350,174 @@ test('completed throughput drives ETA and ignores queued preview estimates', () 
   assert.ok(timing.elapsedMs > timing.remainingMs!)
 })
 
-test('Migration Center renders both elapsed and active processing metrics', () => {
+test('Migration Center renders elapsed, active, queue, idle, and database wait metrics', () => {
   const center = read('src/components/import-export/MigrationCenter.tsx')
   assert.match(center, /Elapsed Time/)
-  assert.match(center, /Active Processing Time/)
+  assert.match(center, /Active Processing/)
+  assert.match(center, /Queue Wait/)
+  assert.match(center, /Waiting \/ Idle/)
+  assert.match(center, /Database Wait/)
   assert.match(center, /view\.activeProcessingMs/)
+  assert.match(center, /view\.queueWaitMs/)
+  assert.match(center, /view\.idleMs/)
+  assert.match(center, /data-migration-timing-waterfall/)
   assert.match(center, /ETA/)
   assert.doesNotMatch(center, /Calculating…/)
+})
+
+test('queue wait explains wall-clock elapsed far above active processing', () => {
+  const lifecycle: ModuleLifecycleState = {
+    accounts: entry({
+      key: 'accounts',
+      label: 'Chart of Accounts',
+      order: 0,
+      phase: 'completed',
+      jobId: 'job-coa',
+      durationMs: 5_000,
+      progress: {
+        processedRows: 120,
+        totalRows: 120,
+        importedCount: 120,
+        updatedCount: 0,
+        skippedCount: 0,
+        failedCount: 0,
+        progressPercent: 100,
+        currentStage: null,
+        currentRecord: null,
+        currentBatch: 1,
+        totalBatches: 1,
+        elapsedMs: 5_000,
+        throughput: 24,
+        averageThroughput: 24,
+        estimatedRemaining: 0,
+        estimatedRemainingSeconds: 0,
+        estimatedCompletionAt: null,
+        activityEvents: [
+          {
+            id: 'e-extract',
+            at: '2026-08-05T10:07:01.000Z',
+            type: 'stage_completed',
+            message: 'Completed extraction',
+            stage: 'extraction',
+            durationMs: 1_200,
+          },
+          {
+            id: 'e-materialize',
+            at: '2026-08-05T10:07:05.000Z',
+            type: 'stage_completed',
+            message: 'Completed materialization',
+            stage: 'materialization',
+            durationMs: 3_000,
+          },
+        ],
+        progressSnapshot: {
+          startedAt: '2026-08-05T10:07:00.000Z',
+          activeProcessingMs: 5_000,
+          databaseTimeMs: 2_400,
+          apiTimeMs: 1_800,
+        },
+        createdAt: '2026-08-05T10:00:00.000Z',
+        startedAt: '2026-08-05T10:07:00.000Z',
+        updatedAt: '2026-08-05T10:07:05.000Z',
+      },
+    }),
+  }
+
+  const session = sessionFrom(lifecycle, 'completed')
+  session.updatedAt = '2026-08-05T10:07:05.000Z'
+  session.jobs = {
+    accounts: {
+      id: 'job-coa',
+      moduleKey: 'accounts',
+      status: 'completed',
+      createdAt: '2026-08-05T10:00:00.000Z',
+      startedAt: '2026-08-05T10:07:00.000Z',
+      updatedAt: '2026-08-05T10:07:05.000Z',
+      ...lifecycle.accounts.progress!,
+    },
+  }
+
+  const timing = deriveMigrationTiming(session, Date.parse('2026-08-05T10:07:05.000Z'))
+  // Session started 10:00, finished 10:07:05 => ~7m05s wall clock.
+  assert.equal(timing.elapsedMs, 7 * 60_000 + 5_000)
+  assert.equal(timing.activeProcessingMs, 5_000)
+  assert.equal(timing.queueWaitMs, 7 * 60_000)
+  assert.equal(timing.idleMs, timing.elapsedMs - timing.activeProcessingMs)
+  assert.equal(timing.databaseTimeMs, 2_400)
+  assert.equal(timing.apiTimeMs, 1_800)
+  assert.ok(timing.waterfall.some((span) => span.kind === 'queue_wait' && span.durationMs >= 7 * 60_000))
+  assert.ok(timing.waterfall.every((span) => span.durationMs >= 100))
+  // ETA still from completed active throughput, not wall clock.
+  assert.equal(timing.completedThroughput, 120 / 5)
+})
+
+test('ETA rejects wall-clock elapsed and uses active completed throughput only', () => {
+  const lifecycle: ModuleLifecycleState = {
+    accounts: entry({
+      key: 'accounts',
+      label: 'Accounts',
+      order: 0,
+      phase: 'completed',
+      jobId: 'job-1',
+      progress: {
+        processedRows: 100,
+        totalRows: 100,
+        importedCount: 100,
+        updatedCount: 0,
+        skippedCount: 0,
+        failedCount: 0,
+        progressPercent: 100,
+        currentStage: null,
+        currentRecord: null,
+        currentBatch: 1,
+        totalBatches: 1,
+        elapsedMs: 10_000,
+        throughput: 10,
+        averageThroughput: 10,
+        estimatedRemaining: 0,
+        estimatedRemainingSeconds: 0,
+        estimatedCompletionAt: null,
+        activityEvents: [],
+        progressSnapshot: { activeProcessingMs: 10_000 },
+        createdAt: '2026-08-05T10:00:00.000Z',
+        startedAt: '2026-08-05T10:00:00.000Z',
+      },
+    }),
+    invoices: entry({
+      key: 'invoices',
+      label: 'Invoices',
+      order: 1,
+      phase: 'queued',
+      estimate: { records: 50, batches: 1, durationMs: 999_000 },
+      progress: {
+        processedRows: 0,
+        totalRows: 50,
+        importedCount: 0,
+        updatedCount: 0,
+        skippedCount: 0,
+        failedCount: 0,
+        progressPercent: 0,
+        currentStage: null,
+        currentRecord: null,
+        currentBatch: 1,
+        totalBatches: 1,
+        elapsedMs: 0,
+        throughput: null,
+        averageThroughput: null,
+        estimatedRemaining: 50,
+        estimatedRemainingSeconds: null,
+        estimatedCompletionAt: null,
+        activityEvents: [],
+        progressSnapshot: {},
+        createdAt: '2026-08-05T10:00:05.000Z',
+      },
+    }),
+  }
+
+  const timing = deriveMigrationTiming(sessionFrom(lifecycle), NOW)
+  assert.equal(timing.completedThroughput, 10)
+  // 50 remaining at 10 r/s => 5s — not based on the multi-hour elapsed wall clock.
+  assert.equal(timing.remainingMs, 5_000)
+  assert.ok(timing.elapsedMs > 60_000)
+  assert.ok(timing.remainingMs! < timing.elapsedMs)
 })

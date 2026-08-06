@@ -2,15 +2,17 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { RefreshCw } from 'lucide-react'
-import { MigrationCenter } from '@/components/import-export/MigrationCenter'
+import { MigrationCenter, MigrationCenterSkeleton } from '@/components/import-export/MigrationCenter'
 import { useMigrationSession } from '@/components/import-export/MigrationSessionProvider'
 import { migrationCancelConfirmMessage } from '@/lib/import-export/wizard/migration-cancel'
+import { canPaintCachedMigrationSession } from '@/lib/import-export/wizard/migration-restore-timing'
 
 /**
  * Persistent Migration Center page.
  * The layout provider is the sole polling and hydration owner. This page only
  * renders the provider snapshot for the session encoded in the route.
+ * The shell/skeleton paints immediately; heavy timeline/report sections defer
+ * inside MigrationCenter after the core session view is ready.
  */
 export default function MigrationCenterPage() {
   const params = useParams<{ sessionId: string }>()
@@ -24,6 +26,10 @@ export default function MigrationCenterPage() {
     cancelSession,
   } = useMigrationSession()
   const session = contextSession?.id === sessionId ? contextSession : null
+  const canPaint = canPaintCachedMigrationSession({
+    routeSessionId: sessionId,
+    cachedSessionId: contextSession?.id,
+  })
   const [actionError, setActionError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -54,15 +60,9 @@ export default function MigrationCenterPage() {
     }
   }
 
-  if (sessionLoading || (!session && !sessionError)) {
-    return (
-      <div className="flex min-h-[50vh] items-center justify-center p-6">
-        <div className="text-center">
-          <RefreshCw className="mx-auto mb-3 animate-spin text-indigo-500" />
-          <p className="text-sm text-slate-600">Restoring migration from persisted session…</p>
-        </div>
-      </div>
-    )
+  // Skeleton paints immediately while the provider hydrates; never block the whole viewport on a spinner-only screen.
+  if (!session && !sessionError && (sessionLoading || !canPaint)) {
+    return <MigrationCenterSkeleton />
   }
 
   if (sessionError || !session) {

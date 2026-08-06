@@ -44,6 +44,12 @@ import {
   migrationPollLiveFingerprint,
   type MigrationPollEnvelope,
 } from '@/lib/import-export/wizard/migration-poll-payload'
+import {
+  canPaintCachedMigrationSession,
+  createMigrationRestoreTimer,
+  formatMigrationRestoreBreakdown,
+  shouldDeferActivityOnRestore,
+} from '@/lib/import-export/wizard/migration-restore-timing'
 import type {
   HydratedMigrationSession,
   MigrationHistorySummary,
@@ -163,6 +169,10 @@ export function MigrationSessionProvider({ children }: { children: ReactNode }) 
   const mountedRef = useRef(true)
   const pendingNavigationRef = useRef<string | null>(null)
   const navigationTimerRef = useRef<number | null>(null)
+  /** Tracks whether the current scope still needs a lean (activity-deferred) first poll. */
+  const pendingLeanActivityRef = useRef(true)
+  const activityHydratedRef = useRef(false)
+  const restoreTimerRef = useRef(createMigrationRestoreTimer())
 
   const releaseNavigationLatch = useCallback(() => {
     if (navigationTimerRef.current !== null) {
@@ -231,7 +241,7 @@ export function MigrationSessionProvider({ children }: { children: ReactNode }) 
 
   const closeViewer = useCallback(() => setViewerOpen(false), [])
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options: { deferActivity?: boolean } = {}) => {
     refreshControllerRef.current?.abort()
     const controller = new AbortController()
     refreshControllerRef.current = controller
@@ -241,11 +251,23 @@ export function MigrationSessionProvider({ children }: { children: ReactNode }) 
     const needStatic = !hasStaticRef.current
       || !sessionRef.current
       || (sessionId != null && sessionRef.current.id !== sessionId)
+    const hasCachedActivity = activityHydratedRef.current
+      || Object.values(sessionRef.current?.jobs ?? {}).some(
+        (job) => (job.activityEvents?.length ?? 0) > 0,
+      )
+    const deferActivity = options.deferActivity
+      ?? shouldDeferActivityOnRestore({
+        isInitialScopeHydrate: pendingLeanActivityRef.current,
+        hasCachedActivity,
+      })
     let nextSession: HydratedMigrationSession | null = null
+    const timer = restoreTimerRef.current
+    timer.begin('client_fetch')
     try {
       const params = new URLSearchParams({ poll: '1' })
       if (!sessionId) params.set('includeLatest', 'true')
       if (!needStatic) params.set('static', '0')
+      if (deferActivity) params.set('activity', '0')
       const endpoint = sessionId
         ? `/api/import-export/migration-sessions/${encodeURIComponent(sessionId)}?${params}`
         : `/api/import-export/migration-sessions?${params}`
@@ -253,11 +275,11 @@ export function MigrationSessionProvider({ children }: { children: ReactNode }) 
         'Cache-Control': 'no-cache',
         Pragma: 'no-cache',
       }
-      const cursors = extractActivityCursors(sessionRef.current)
+      const cursors = deferActivity ? {} : extractActivityCursors(sessionRef.current)
       if (Object.keys(cursors).length > 0) {
         headers['x-migration-activity-cursors'] = JSON.stringify(cursors)
       }
-      if (liveFingerprintRef.current) {
+      if (liveFingerprintRef.current && !deferActivity) {
         headers['x-migration-live-fingerprint'] = liveFingerprintRef.current
       }
       const response = await fetch(endpoint, {
@@ -266,33 +288,42 @@ export function MigrationSessionProvider({ children }: { children: ReactNode }) 
         signal: controller.signal,
       })
       if (response.status === 404) {
+        timer.end('client_fetch')
         nextSession = null
         hasStaticRef.current = false
         liveFingerprintRef.current = null
+        activityHydratedRef.current = false
       } else {
         if (!response.ok) throw new Error(await readApiError(response))
         const payload = await response.json() as {
           poll?: MigrationPollEnvelope | null
           session?: HydratedMigrationSession | null
         }
+        timer.end('client_fetch')
+        timer.begin('client_merge')
         if (payload.poll) {
           if (payload.poll.kind === 'noop') {
             nextSession = sessionRef.current
           } else {
             nextSession = mergeMigrationPollPayload(sessionRef.current, payload.poll)
             if (payload.poll.static) hasStaticRef.current = true
+            if (!deferActivity) activityHydratedRef.current = true
           }
         } else if (payload.poll === null) {
           nextSession = null
           hasStaticRef.current = false
           liveFingerprintRef.current = null
+          activityHydratedRef.current = false
         } else {
           // Backward-compatible full session responses (create/retry/patch callers).
           nextSession = payload.session ?? null
           hasStaticRef.current = Boolean(nextSession)
+          activityHydratedRef.current = Boolean(nextSession)
         }
+        timer.end('client_merge')
       }
     } catch (error) {
+      timer.end('client_fetch')
       if (controller.signal.aborted) return
       throw error
     } finally {
@@ -315,6 +346,16 @@ export function MigrationSessionProvider({ children }: { children: ReactNode }) 
     setSessionError(nextSession ? null : polledSessionIdRef.current ? 'Migration session not found' : null)
     setHydratedScope(requestScope)
     setSessionLoading(false)
+    pendingLeanActivityRef.current = false
+    if (deferActivity && nextSession) {
+      // Follow-up loads timeline/activity after the core Center can paint.
+      // Await so interval polling starts only after restore completes.
+      await refresh({ deferActivity: false })
+    } else if (typeof window !== 'undefined' && sessionId) {
+      const report = timer.finalize()
+      console.info(`[migration-restore] ${formatMigrationRestoreBreakdown(report)}`)
+      restoreTimerRef.current = createMigrationRestoreTimer()
+    }
   }, [])
 
   const patchSession = useCallback(async (
@@ -492,26 +533,33 @@ export function MigrationSessionProvider({ children }: { children: ReactNode }) 
 
   useEffect(() => {
     mountedRef.current = true
-    void refresh().catch((error) => {
+    restoreTimerRef.current = createMigrationRestoreTimer()
+    restoreTimerRef.current.mark('route_mount')
+    let timer: number | null = null
+    // Interval starts only after the first hydrate so restore is not racing a second poll.
+    void refresh().then(() => {
+      if (!mountedRef.current) return
+      timer = window.setInterval(() => {
+        void refresh().catch(() => undefined)
+        // A failed cycle is retried once per poll tick, never in a tight loop.
+        if (coordinationFailedRef.current) setCoordinationAttempt((attempt) => attempt + 1)
+      }, POLL_INTERVAL_MS)
+    }).catch((error) => {
       if (!mountedRef.current) return
       const message = error instanceof Error ? error.message : 'Unable to load migration status.'
       setActionError(message)
       setSessionError(message)
       setSessionLoading(false)
     })
-    const timer = window.setInterval(() => {
-      void refresh().catch(() => undefined)
-      // A failed cycle is retried once per poll tick, never in a tight loop.
-      if (coordinationFailedRef.current) setCoordinationAttempt((attempt) => attempt + 1)
-    }, POLL_INTERVAL_MS)
     const handleSessionChanged = () => {
       forceCoordinationCycle()
-      void refresh().catch(() => undefined)
+      pendingLeanActivityRef.current = false
+      void refresh({ deferActivity: false }).catch(() => undefined)
     }
     window.addEventListener('quickbooks-migration-session-changed', handleSessionChanged)
     return () => {
       mountedRef.current = false
-      window.clearInterval(timer)
+      if (timer !== null) window.clearInterval(timer)
       releaseNavigationLatch()
       refreshControllerRef.current?.abort()
       historyControllerRef.current?.abort()
@@ -522,8 +570,32 @@ export function MigrationSessionProvider({ children }: { children: ReactNode }) 
   useEffect(() => {
     if (previousPolledSessionIdRef.current === polledSessionId) return
     previousPolledSessionIdRef.current = polledSessionId
+    restoreTimerRef.current = createMigrationRestoreTimer()
+    restoreTimerRef.current.mark('route_mount')
+
+    // Paint immediately from cache when navigating into a session we already hold.
+    if (
+      canPaintCachedMigrationSession({
+        routeSessionId: polledSessionId ?? '',
+        cachedSessionId: sessionRef.current?.id,
+      })
+    ) {
+      hasStaticRef.current = true
+      pendingLeanActivityRef.current = false
+      setHydratedScope(polledSessionId)
+      setSessionLoading(false)
+      void refresh({ deferActivity: !activityHydratedRef.current }).catch((error) => {
+        if (!mountedRef.current) return
+        setSessionError(error instanceof Error ? error.message : 'Unable to restore migration session.')
+        setSessionLoading(false)
+      })
+      return
+    }
+
     hasStaticRef.current = false
     liveFingerprintRef.current = null
+    activityHydratedRef.current = false
+    pendingLeanActivityRef.current = true
     void refresh().catch((error) => {
       if (!mountedRef.current) return
       setSessionError(error instanceof Error ? error.message : 'Unable to restore migration session.')
@@ -564,25 +636,31 @@ export function MigrationSessionProvider({ children }: { children: ReactNode }) 
 
   const handleWizardSuccess = useCallback((createdSessionId?: string) => {
     forceCoordinationCycle()
-    void refresh()
+    void refresh({ deferActivity: false })
     if (createdSessionId) {
       setViewerOpen(false)
       navigateOnce(migrationCenterPath(createdSessionId))
     }
   }, [forceCoordinationCycle, navigateOnce, refresh])
 
+  const cachedMatchesRoute = canPaintCachedMigrationSession({
+    routeSessionId: polledSessionId ?? '',
+    cachedSessionId: session?.id,
+  })
   const value = useMemo<MigrationSessionContextValue>(() => ({
     session,
-    sessionLoading: sessionLoading || hydratedScope !== pollScope,
+    // Do not block Center paint when the matching session is already in memory.
+    sessionLoading: sessionLoading || (hydratedScope !== pollScope && !cachedMatchesRoute),
     sessionError,
     viewerOpen,
     openViewer,
     closeViewer,
     openMigrationCenter,
-    refresh,
+    refresh: () => refresh({ deferActivity: false }),
     retrySession,
     cancelSession,
   }), [
+    cachedMatchesRoute,
     cancelSession,
     closeViewer,
     hydratedScope,

@@ -212,13 +212,15 @@ test('dashboard restoration derives overview from hydrated session only', () => 
   assert.equal(view.queueStatus.nextLabel, 'Vendors')
 
   const page = read('src/app/(dashboard)/migration-center/[sessionId]/page.tsx')
+  const center = read('src/components/import-export/MigrationCenter.tsx')
   const provider = read('src/components/import-export/MigrationSessionProvider.tsx')
   assert.match(page, /session: contextSession/)
   assert.doesNotMatch(page, /fetch\(/)
   assert.match(provider, /\/api\/import-export\/migration-sessions\/\$\{encodeURIComponent\(sessionId\)\}\?\$\{params\}/)
   assert.match(provider, /poll: '1'/)
   assert.match(provider, /cache: 'no-store'/)
-  assert.match(page, /Restoring migration from persisted session/)
+  assert.match(page, /MigrationCenterSkeleton/)
+  assert.match(center, /Restoring migration from persisted session/)
   assert.doesNotMatch(page, /useState\(\{[\s\S]*percent/)
 })
 

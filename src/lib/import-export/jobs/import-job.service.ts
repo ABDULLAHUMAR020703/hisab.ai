@@ -108,20 +108,64 @@ export async function getImportJob(jobId: string, companyIdOverride?: string): P
   return data ? mapJobRow(data) : null
 }
 
-export async function getImportJobsByIds(jobIds: string[], companyIdOverride?: string): Promise<ImportJobRecord[]> {
+/** Columns needed to hydrate Migration Center progress without pulling unused blobs. */
+const IMPORT_JOB_POLL_COLUMNS = [
+  'id',
+  'company_id',
+  'user_id',
+  'module_key',
+  'filename',
+  'file_format',
+  'duplicate_strategy',
+  'status',
+  'total_rows',
+  'imported_count',
+  'updated_count',
+  'skipped_count',
+  'failed_count',
+  'processed_rows',
+  'valid_rows',
+  'invalid_rows',
+  'warning_count',
+  'started_at',
+  'completed_at',
+  'duration_ms',
+  'mapping_snapshot',
+  'validation_summary',
+  'error_summary',
+  'created_at',
+  'updated_at',
+  'batch_size',
+  'batch_cursor',
+  'retry_count',
+  'paused_at',
+  'last_heartbeat_at',
+  'progress_snapshot',
+  'skip_summary',
+].join(',')
+
+export async function getImportJobsByIds(
+  jobIds: string[],
+  companyIdOverride?: string,
+  options: { includeActivityEvents?: boolean } = {},
+): Promise<ImportJobRecord[]> {
   const unique = [...new Set(jobIds.filter(Boolean))]
   if (unique.length === 0) return []
   await assertImportJobSchemaCompatibility()
   const db = supabaseDb()
   const companyId = companyIdOverride ?? await resolveCompanyId()
+  const includeActivity = options.includeActivityEvents !== false
+  const columns = includeActivity
+    ? `${IMPORT_JOB_POLL_COLUMNS},activity_events`
+    : IMPORT_JOB_POLL_COLUMNS
   const { data, error } = await db
     .from('import_jobs')
-    .select('*')
+    .select(columns)
     .eq('company_id', companyId)
     .in('id', unique)
 
   if (error) throw error
-  return (data ?? []).map((row) => mapJobRow(row))
+  return (data ?? []).map((row) => mapJobRow(row as unknown as Record<string, unknown>))
 }
 
 export async function updateImportJobProgress(

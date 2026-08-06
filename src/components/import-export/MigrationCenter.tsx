@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, type ReactNode } from 'react'
+import { startTransition, useEffect, useMemo, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import {
   Activity,
@@ -70,6 +70,41 @@ function ModuleChipList({ title, modules }: { title: string; modules: ModuleLife
   )
 }
 
+function SkeletonBlock({ className }: { className?: string }) {
+  return <div className={`animate-pulse rounded-xl bg-slate-100 ${className ?? ''}`} />
+}
+
+/** Immediate shell while the provider hydrates the session for this route. */
+export function MigrationCenterSkeleton() {
+  return (
+    <div className="mx-auto max-w-[1600px] space-y-5 p-6" data-migration-center-skeleton aria-busy="true" aria-label="Loading Migration Center">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="space-y-2">
+          <SkeletonBlock className="h-3 w-40" />
+          <SkeletonBlock className="h-8 w-64" />
+          <SkeletonBlock className="h-4 w-48" />
+        </div>
+        <div className="flex gap-2">
+          <SkeletonBlock className="h-9 w-24" />
+          <SkeletonBlock className="h-9 w-32" />
+        </div>
+      </div>
+      <SkeletonBlock className="h-36 w-full rounded-2xl" />
+      <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
+        <SkeletonBlock className="h-80 w-full rounded-2xl" />
+        <div className="space-y-4">
+          <SkeletonBlock className="h-48 w-full rounded-2xl" />
+          <div className="grid gap-4 md:grid-cols-2">
+            <SkeletonBlock className="h-40 w-full rounded-2xl" />
+            <SkeletonBlock className="h-40 w-full rounded-2xl" />
+          </div>
+        </div>
+      </div>
+      <p className="text-center text-sm text-slate-500">Restoring migration from persisted session…</p>
+    </div>
+  )
+}
+
 export function MigrationCenter({
   session,
   onRetry,
@@ -83,7 +118,19 @@ export function MigrationCenter({
   actionError?: string | null
   busy?: boolean
 }) {
-  const view = useMemo(() => buildMigrationCenterView(session), [session])
+  // Core overview paints first; timeline / logs / final report build after commit.
+  const [includeHeavy, setIncludeHeavy] = useState(false)
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      startTransition(() => setIncludeHeavy(true))
+    }, 0)
+    return () => window.clearTimeout(handle)
+  }, [session.id])
+
+  const view = useMemo(
+    () => buildMigrationCenterView(session, Date.now(), { includeHeavy }),
+    [session, includeHeavy],
+  )
   const progress = view.currentModule?.progress ?? null
   const snapshot = progress?.progressSnapshot ?? {}
   const stageRows = Object.entries(snapshot.stages ?? {})
@@ -215,19 +262,51 @@ export function MigrationCenter({
         <div className="mt-4 h-3 overflow-hidden rounded-full bg-slate-100">
           <div className="h-full rounded-full bg-indigo-600 transition-all duration-700" style={{ width: `${view.overall.percent}%` }} />
         </div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <Metric label="Elapsed Time" value={formatMigrationDuration(view.elapsedMs)} icon={<Clock3 size={15} />} />
-          <Metric label="Active Processing Time" value={formatMigrationDuration(view.activeProcessingMs)} icon={<Gauge size={15} />} />
+          <Metric label="Active Processing" value={formatMigrationDuration(view.activeProcessingMs)} icon={<Gauge size={15} />} />
+          <Metric label="Queue Wait" value={formatMigrationDuration(view.queueWaitMs)} icon={<ListOrdered size={15} />} />
+          <Metric label="Waiting / Idle" value={formatMigrationDuration(view.idleMs)} icon={<Clock3 size={15} />} />
+          <Metric label="Database Wait" value={formatMigrationDuration(view.databaseWaitMs)} icon={<Database size={15} />} />
           <Metric label="ETA" value={view.etaLabel} icon={<Activity size={15} />} />
+        </div>
+        <p className="mt-2 text-[11px] text-slate-400">
+          Elapsed is wall-clock from migration start (includes queue and idle). Active Processing and ETA use worker execution only.
+          Database Wait is time spent awaiting DB inside the worker and is already part of Active Processing.
+        </p>
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Metric label="Average speed" value={view.performance.averageThroughput == null ? '—' : `${view.performance.averageThroughput.toFixed(1)} rows/s`} icon={<Gauge size={15} />} />
           <Metric label="Current Batch" value={view.currentBatch == null ? '—' : `${view.currentBatch}${view.totalBatches ? ` / ${view.totalBatches}` : ''}`} icon={<Database size={15} />} />
-        </div>
-        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Metric label="API wait" value={formatMigrationDuration(view.apiWaitMs)} />
           <Metric label="Imported" value={view.overall.importedCount.toLocaleString()} />
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
           <Metric label="Updated" value={view.overall.updatedCount.toLocaleString()} />
           <Metric label="Skipped" value={view.overall.skippedCount.toLocaleString()} />
           <Metric label="Failed" value={view.overall.failedCount.toLocaleString()} />
         </div>
+        {view.timingWaterfall.length > 0 && (
+          <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50/80 p-3" data-migration-timing-waterfall>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              Timing waterfall (gaps ≥ 100ms)
+            </p>
+            <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto text-xs">
+              {view.timingWaterfall.map((span) => (
+                <li
+                  key={span.id}
+                  data-waterfall-kind={span.kind}
+                  className="grid grid-cols-[5.5rem_1fr_auto] gap-2 rounded-lg px-2 py-1.5 hover:bg-white"
+                >
+                  <span className="font-medium tabular-nums text-slate-500">
+                    {formatMigrationDuration(span.durationMs)}
+                  </span>
+                  <span className="min-w-0 truncate text-slate-700" title={span.label}>{span.label}</span>
+                  <span className="text-[10px] uppercase tracking-wide text-slate-400">{span.kind.replaceAll('_', ' ')}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </section>
 
       <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
@@ -322,7 +401,9 @@ export function MigrationCenter({
                 <h3 className="font-semibold text-slate-800">Activity Timeline</h3>
               </div>
               <div className="max-h-96 space-y-1 overflow-y-auto" data-migration-activity-timeline>
-                {view.activityTimeline.length ? view.activityTimeline.map((event) => (
+                {!includeHeavy ? (
+                  <p className="text-sm text-slate-400" data-timeline-loading>Loading activity…</p>
+                ) : view.activityTimeline.length ? view.activityTimeline.map((event) => (
                   <div
                     key={event.id}
                     data-activity-type={event.type}

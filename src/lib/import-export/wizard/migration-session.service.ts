@@ -47,6 +47,7 @@ import {
   DEFAULT_MIGRATION_SESSION_STALE_MS,
   resolveMigrationSessionReconciliation,
 } from './migration-session-reconcile'
+import { shouldIncludeQueueHealthOnHydrate } from './migration-restore-timing'
 import { logger } from '@/lib/ops/logger'
 
 function configuredThreshold(value: string | undefined, fallback: number, minimum: number): number {
@@ -86,15 +87,26 @@ function mapSessionRow(row: Record<string, unknown>): MigrationSessionRecord {
 
 async function hydrateSession(
   session: MigrationSessionRecord,
-  options: { includeQueueHealth?: boolean } = {},
+  options: {
+    includeQueueHealth?: boolean
+    includeActivityEvents?: boolean
+  } = {},
 ): Promise<HydratedMigrationSession> {
+  const hydrateStarted = Date.now()
   const jobIds = importJobIdsFromConfig(session.config)
+  const includeQueueHealth = options.includeQueueHealth
+    ?? shouldIncludeQueueHealthOnHydrate(session.config.state)
+  const includeActivityEvents = options.includeActivityEvents !== false
+
+  const jobsStarted = Date.now()
   const [jobs, queueRows] = await Promise.all([
-    getImportJobsByIds(jobIds, session.companyId),
-    options.includeQueueHealth === false
-      ? Promise.resolve([])
-      : getMigrationQueueJobs(jobIds, session.companyId),
+    getImportJobsByIds(jobIds, session.companyId, { includeActivityEvents }),
+    includeQueueHealth
+      ? getMigrationQueueJobs(jobIds, session.companyId)
+      : Promise.resolve([]),
   ])
+  const jobsMs = Date.now() - jobsStarted
+
   const jobsByKey: HydratedMigrationSession['jobs'] = {}
   const queueJobsByKey: NonNullable<HydratedMigrationSession['queueJobs']> = {}
   const queueHealthByKey: NonNullable<HydratedMigrationSession['queueHealth']> = {}
@@ -109,7 +121,7 @@ async function hydrateSession(
     if (job) jobsByKey[card.key] = jobRecordToProgressSnapshot(job)
   }
 
-  if (options.includeQueueHealth !== false) {
+  if (includeQueueHealth) {
     for (const [resourceKey, job] of Object.entries(jobsByKey)) {
       const queueJob = selectCurrentQueueJob(queueRows, job.id)
       if (queueJob) queueJobsByKey[resourceKey] = queueJob
@@ -120,6 +132,16 @@ async function hydrateSession(
       })
     }
   }
+
+  logger.debug('migration.session.hydrate', {
+    sessionId: session.id,
+    companyId: session.companyId,
+    jobCount: jobIds.length,
+    includeQueueHealth,
+    includeActivityEvents,
+    jobsMs,
+    durationMs: Date.now() - hydrateStarted,
+  })
 
   return {
     ...session,
@@ -342,7 +364,11 @@ export async function listQuickBooksMigrationSessions(input?: {
   return { items, total, page, limit }
 }
 
-export async function getQuickBooksMigrationSession(sessionId: string, companyIdOverride?: string): Promise<HydratedMigrationSession | null> {
+export async function getQuickBooksMigrationSession(
+  sessionId: string,
+  companyIdOverride?: string,
+  options: { includeQueueHealth?: boolean; includeActivityEvents?: boolean } = {},
+): Promise<HydratedMigrationSession | null> {
   const client = createAdminClient()
   const companyId = companyIdOverride ?? await resolveCompanyId()
   const { data, error } = await client
@@ -354,7 +380,7 @@ export async function getQuickBooksMigrationSession(sessionId: string, companyId
   if (error) throw error
   if (!data) return null
   if (!isQuickBooksMigrationConfig(data.config)) return null
-  return hydrateSession(mapSessionRow(data))
+  return hydrateSession(mapSessionRow(data), options)
 }
 
 /** Compact poll projection for MigrationSessionProvider. Existing full APIs remain unchanged. */
@@ -362,24 +388,38 @@ export async function pollQuickBooksMigrationSession(input: {
   sessionId?: string | null
   includeLatest?: boolean
   includeStatic?: boolean
+  includeActivityEvents?: boolean
   activityCursors?: MigrationActivityCursors
   previousLiveFingerprint?: string | null
 }): Promise<{ session: HydratedMigrationSession | null; poll: MigrationPollEnvelope | null }> {
+  const pollStarted = Date.now()
+  const hydrateOptions = {
+    includeActivityEvents: input.includeActivityEvents !== false,
+  }
   const found = input.sessionId
-    ? await getQuickBooksMigrationSession(input.sessionId)
+    ? await getQuickBooksMigrationSession(input.sessionId, undefined, hydrateOptions)
     : input.includeLatest
       ? await findLatestQuickBooksMigrationSession()
       : await findActiveQuickBooksMigrationSession()
   if (!found) return { session: null, poll: null }
+  const reconcileStarted = Date.now()
   const session = await reconcileQuickBooksMigrationSession(found)
-  return {
-    session,
-    poll: projectMigrationPollPayload(session, {
-      includeStatic: input.includeStatic ?? true,
-      activityCursors: input.activityCursors,
-      previousLiveFingerprint: input.previousLiveFingerprint,
-    }),
-  }
+  const reconcileMs = Date.now() - reconcileStarted
+  const poll = projectMigrationPollPayload(session, {
+    includeStatic: input.includeStatic ?? true,
+    activityCursors: input.activityCursors,
+    previousLiveFingerprint: input.previousLiveFingerprint,
+  })
+  logger.debug('migration.session.poll', {
+    sessionId: session.id,
+    companyId: session.companyId,
+    includeStatic: input.includeStatic ?? true,
+    includeActivityEvents: hydrateOptions.includeActivityEvents,
+    reconcileMs,
+    durationMs: Date.now() - pollStarted,
+    pollKind: poll.kind,
+  })
+  return { session, poll }
 }
 
 export async function createQuickBooksMigrationSession(input: {
