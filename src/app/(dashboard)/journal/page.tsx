@@ -47,7 +47,13 @@ export default function JournalPage() {
       fetch('/api/accounts'),
       fetch('/api/cost-centers'),
     ])
-    if (entRes.ok) setEntries(await entRes.json())
+    if (entRes.ok) {
+      setEntries(await entRes.json())
+      setError('')
+    } else {
+      setEntries([])
+      setError(await readApiError(entRes))
+    }
     if (accRes.ok) setAccounts(await accRes.json())
     if (ccRes.ok) setCostCenters(await ccRes.json())
     setLoading(false)

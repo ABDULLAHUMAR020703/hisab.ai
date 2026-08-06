@@ -32,6 +32,24 @@ export async function requireRole(roles: CompanyRole[]) {
   return { ...user, companyId, role: data.role as CompanyRole }
 }
 
+function serializeAuthzError(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) return error.message
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>
+    for (const key of ['message', 'error', 'details', 'hint'] as const) {
+      const value = record[key]
+      if (typeof value === 'string' && value.trim()) return value.trim()
+    }
+    try {
+      return JSON.stringify(error)
+    } catch {
+      // fall through
+    }
+  }
+  const text = String(error)
+  return text === '[object Object]' ? 'Unexpected server error' : text
+}
+
 export function authzErrorResponse(error: unknown) {
   if (error instanceof Error && error.message === 'Unauthorized') {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
@@ -39,5 +57,5 @@ export function authzErrorResponse(error: unknown) {
   if (error instanceof ForbiddenError) {
     return Response.json({ error: 'Forbidden' }, { status: 403 })
   }
-  return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 })
+  return Response.json({ error: serializeAuthzError(error) }, { status: 500 })
 }

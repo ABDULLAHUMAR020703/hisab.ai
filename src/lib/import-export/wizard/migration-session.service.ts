@@ -3,10 +3,14 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveCompanyId } from '@/lib/tenant'
 import {
   cancelImportJob,
+  createImportJob,
   getImportJobsByIds,
   incrementImportJobRetry,
+  setImportJobStatus,
 } from '@/lib/import-export/jobs/import-job.service'
+import { enqueueJob } from '@/lib/platform/jobs/queue'
 import { FrameworkBadRequestError, FrameworkNotFoundError } from '@/lib/import-export/errors'
+import { planMigrationStartBootstrap } from './migration-session-bootstrap'
 import {
   buildSessionConfig,
   importJobIdsFromConfig,
@@ -29,9 +33,8 @@ import {
   planGracefulMigrationCancel,
   planResumeAfterCancellation,
 } from './migration-cancel'
-import type { ModuleLifecycleState } from './module-lifecycle'
+import { applyJobCreated, type ModuleLifecycleState, type SelectableResource } from './module-lifecycle'
 import type { DuplicateStrategy } from '../types'
-import type { SelectableResource } from './module-lifecycle'
 import {
   detectMigrationQueueHealth,
   type MigrationQueueHealthThresholds,
@@ -462,7 +465,110 @@ export async function createQuickBooksMigrationSession(input: {
     .single()
 
   if (error) throw error
-  return hydrateSession(mapSessionRow(data))
+  const created = await hydrateSession(mapSessionRow(data))
+  // Job + queue row must exist before the response returns. The browser
+  // coordinator is a fallback for later modules / resume — not the start path.
+  return bootstrapQuickBooksMigrationQueue({
+    session: created,
+    userId: input.userId,
+    companyIdOverride: companyId,
+  })
+}
+
+/**
+ * Creates the first import job (if needed) and inserts its queue row. Clicking
+ * Migrate must not wait on React effects, polling, or a second browser round
+ * trip before the worker can claim work.
+ */
+export async function bootstrapQuickBooksMigrationQueue(input: {
+  session: HydratedMigrationSession
+  userId: string
+  companyIdOverride?: string
+}): Promise<HydratedMigrationSession> {
+  const plan = planMigrationStartBootstrap(input.session)
+  if (plan.type === 'none') return input.session
+
+  const companyId = input.companyIdOverride ?? input.session.companyId ?? await resolveCompanyId()
+  let session = input.session
+  let importJobId = plan.module.jobId
+  const moduleKey = plan.module.moduleKey
+
+  if (plan.type === 'create-and-enqueue') {
+    const module = plan.module
+    const filename = `${session.config.sourceLabel ?? 'QuickBooks'} - ${module.label}`
+    const duplicateStrategy = session.config.duplicateStrategy
+    const created = await createImportJob({
+      userId: input.userId,
+      moduleKey: module.moduleKey,
+      filename,
+      fileFormat: 'csv',
+      duplicateStrategy,
+      totalRows: 0,
+      mappingSnapshot: {},
+      payloadSnapshot: {
+        sourceKey: session.config.provider,
+        resourceKey: module.key,
+        filename,
+        fileFormat: 'csv',
+        duplicateStrategy,
+      },
+    })
+    await setImportJobStatus(created.id, 'pending')
+    importJobId = created.id
+
+    const lifecycle = applyJobCreated(session.lifecycle, module.key, created.id)
+    session = await updateQuickBooksMigrationSession({
+      sessionId: session.id,
+      lifecycle,
+      step: 'import',
+      state: 'running',
+      companyIdOverride: companyId,
+    })
+
+    logger.info('quickbooks.migration_session.bootstrap.job_created', {
+      sessionId: session.id,
+      companyId,
+      importJobId: created.id,
+      module: module.key,
+    })
+  }
+
+  if (!importJobId) return session
+
+  const client = createAdminClient()
+  const { data: activeQueueJob, error: activeQueueError } = await client
+    .from('job_queue')
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('job_type', 'QUICKBOOKS_IMPORT_STEP')
+    .in('status', ['PENDING', 'RUNNING'])
+    .contains('payload', { importJobId })
+    .limit(1)
+    .maybeSingle()
+  if (activeQueueError) throw activeQueueError
+  if (activeQueueJob) return session
+
+  const queued = await enqueueJob({
+    jobType: 'QUICKBOOKS_IMPORT_STEP',
+    companyId,
+    createdById: input.userId,
+    payload: {
+      importJobId,
+      moduleKey,
+      companyId,
+      userId: input.userId,
+    },
+  })
+
+  logger.info('quickbooks.migration_session.bootstrap.enqueued', {
+    sessionId: session.id,
+    companyId,
+    importJobId,
+    platformJobId: String(queued.id),
+    module: plan.module.key,
+  })
+
+  return session
 }
 
 export async function updateQuickBooksMigrationSession(input: {

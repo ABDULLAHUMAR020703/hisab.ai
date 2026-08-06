@@ -63,8 +63,28 @@ test('completed migration indicator links to the persisted Migration Center repo
   assert.match(provider, /View Report/)
   assert.match(provider, /state === 'completed'/)
   assert.match(provider, /openMigrationCenter/)
+  assert.match(provider, /openCompletedReport/)
   assert.match(center, /Final Report/)
   assert.match(center, /buildMigrationCenterView/)
+})
+
+test('completed migration indicator auto-dismisses like a success toast', () => {
+  const provider = read('src/components/import-export/MigrationSessionProvider.tsx')
+
+  assert.match(provider, /COMPLETED_TOAST_VISIBLE_MS = 9_000/)
+  assert.match(provider, /COMPLETED_TOAST_EXIT_MS = 280/)
+  assert.match(provider, /liveCompletedToastSessionIds/)
+  assert.match(provider, /dismissedCompletedToastSessionIds/)
+  assert.match(provider, /data-dismiss-completed-toast/)
+  assert.match(provider, /Dismiss migration notification/)
+  assert.match(provider, /dismissCompletedToast\('immediate'\)/)
+  assert.match(provider, /dismissCompletedToast\('animate'\)/)
+  assert.match(provider, /data-completed-toast/)
+  assert.match(provider, /translate-y-2 opacity-0/)
+  assert.match(provider, /if \(completed && completedToast === 'hidden'\) return null/)
+  assert.match(provider, /liveCompletedToastSessionIds\.add\(session\.id\)/)
+  assert.match(provider, /dismissedCompletedToastSessionIds\.add\(session\.id\)/)
+  assert.match(provider, /setCompletedToast\(liveCompletedToastSessionIds\.has\(session\.id\) \? 'visible' : 'hidden'\)/)
 })
 
 test('failed migration indicator exposes resume, retry, and logs actions', () => {
@@ -94,6 +114,9 @@ test('indicator state persists through refresh and session completion', () => {
   assert.match(provider, /poll: '1'/)
   assert.match(provider, /cache: 'no-store'/)
   assert.match(provider, /quickbooks-migration-session-changed/)
+  assert.match(provider, /liveCompletedToastSessionIds/)
+  assert.match(provider, /if \(state !== 'completed'\) return 'hidden'/)
+  assert.match(provider, /if \(liveCompletedToastSessionIds\.has\(session\.id\)\) return 'visible'/)
   assert.match(route, /includeLatest/)
   assert.match(route, /findLatestQuickBooksMigrationSession/)
   assert.match(service, /including completed or failed sessions/)

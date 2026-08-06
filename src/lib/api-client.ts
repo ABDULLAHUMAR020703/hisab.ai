@@ -20,8 +20,17 @@ export async function readApiError(response: Response): Promise<string> {
   const contentType = response.headers.get('content-type') ?? ''
   if (contentType.includes('application/json')) {
     try {
-      const data = await response.json()
+      const data = await response.json() as Record<string, unknown>
       if (typeof data?.error === 'string' && data.error.trim()) return data.error
+      if (data?.error && typeof data.error === 'object') {
+        const nested = data.error as Record<string, unknown>
+        if (typeof nested.message === 'string' && nested.message.trim()) return nested.message.trim()
+        try {
+          return JSON.stringify(data.error).slice(0, 300)
+        } catch {
+          // fall through
+        }
+      }
       if (typeof data?.message === 'string' && data.message.trim()) return data.message
     } catch {
       return `Request failed with status ${response.status}`

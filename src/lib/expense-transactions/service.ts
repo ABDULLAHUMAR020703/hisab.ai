@@ -28,31 +28,40 @@ function accountName(lines: unknown) {
 
 function num(value: unknown) { return Number(value ?? 0) }
 
-function mapRows(rows: { bills?: Record<string, unknown>[]; expenses?: Record<string, unknown>[]; purchaseOrders?: Record<string, unknown>[]; supplierCredits?: Record<string, unknown>[]; cheques?: Record<string, unknown>[] }): ExpenseTransaction[] {
+function mapRows(
+  rows: {
+    bills?: Record<string, unknown>[]
+    expenses?: Record<string, unknown>[]
+    purchaseOrders?: Record<string, unknown>[]
+    supplierCredits?: Record<string, unknown>[]
+    cheques?: Record<string, unknown>[]
+  },
+  fallbackCurrency: string,
+): ExpenseTransaction[] {
   return [
     ...(rows.bills ?? []).map((row): ExpenseTransaction => ({
-      id: String(row.id), type: 'BILL', date: String(row.date), reference: String(row.reference ?? row.notes ?? ''),
+      id: String(row.id), type: 'BILL', date: String(row.date), reference: String(row.reference ?? row.notes ?? row.bill_no ?? ''),
       payee: (row.vendor as { name?: string } | null)?.name ?? '—', category: accountName(row.lines), subtotal: num(row.subtotal), taxAmount: num(row.tax_amount), total: num(row.total),
-      currency: String(row.currency ?? 'SAR'), status: String(row.status), canMarkPaid: num(row.balance) > 0, sourceHref: '/bills',
+      currency: String(row.currency ?? fallbackCurrency), status: String(row.status), canMarkPaid: num(row.balance) > 0, sourceHref: '/bills',
     })),
     ...(rows.expenses ?? []).map((row): ExpenseTransaction => ({
-      id: String(row.id), type: 'EXPENSE', date: String(row.date), reference: String(row.description ?? ''), payee: '—',
+      id: String(row.id), type: 'EXPENSE', date: String(row.date), reference: String(row.description ?? row.expense_no ?? ''), payee: '—',
       category: accountName(row.lines) !== '—' ? accountName(row.lines) : String(row.category ?? '—'), subtotal: num(row.total) - num(row.tax_amount), taxAmount: num(row.tax_amount), total: num(row.total),
-      currency: String(row.currency ?? 'SAR'), status: String(row.status), canMarkPaid: false, sourceHref: '/expenses',
+      currency: String(row.currency ?? fallbackCurrency), status: String(row.status), canMarkPaid: false, sourceHref: '/expenses',
     })),
     ...(rows.purchaseOrders ?? []).map((row): ExpenseTransaction => ({
-      id: String(row.id), type: 'PURCHASE_ORDER', date: String(row.date), reference: String(row.notes ?? ''),
+      id: String(row.id), type: 'PURCHASE_ORDER', date: String(row.date), reference: String(row.notes ?? row.po_no ?? ''),
       payee: (row.vendor as { name?: string } | null)?.name ?? '—', category: accountName(row.lines), subtotal: num(row.subtotal), taxAmount: num(row.tax_amount), total: num(row.total),
-      currency: String(row.currency ?? 'SAR'), status: String(row.status), canMarkPaid: false, sourceHref: '/purchase-orders',
+      currency: String(row.currency ?? fallbackCurrency), status: String(row.status), canMarkPaid: false, sourceHref: '/purchase-orders',
     })),
     ...(rows.supplierCredits ?? []).map((row): ExpenseTransaction => ({
-      id: String(row.id), type: 'SUPPLIER_CREDIT', date: String(row.date), reference: String(row.notes ?? ''),
+      id: String(row.id), type: 'SUPPLIER_CREDIT', date: String(row.date), reference: String(row.notes ?? row.credit_no ?? ''),
       payee: (row.vendor as { name?: string } | null)?.name ?? '—', category: '—', subtotal: num(row.subtotal), taxAmount: num(row.tax_amount), total: num(row.total),
-      currency: String(row.currency ?? 'SAR'), status: String(row.status), canMarkPaid: false, sourceHref: '/vendor-credits',
+      currency: String(row.currency ?? fallbackCurrency), status: String(row.status), canMarkPaid: false, sourceHref: '/vendor-credits',
     })),
     ...(rows.cheques ?? []).map((row): ExpenseTransaction => ({
       id: String(row.id), type: 'CHEQUE', date: String(row.issue_date), reference: String(row.cheque_no ?? ''), payee: String(row.payee ?? '—'), category: '—',
-      subtotal: num(row.amount), taxAmount: 0, total: num(row.amount), currency: String((row.bank_account as { currency?: string } | null)?.currency ?? 'SAR'),
+      subtotal: num(row.amount), taxAmount: 0, total: num(row.amount), currency: String((row.bank_account as { currency?: string } | null)?.currency ?? fallbackCurrency),
       status: String(row.status), canMarkPaid: false, sourceHref: '/banking?tab=cheques',
     })),
   ]
@@ -64,18 +73,51 @@ const SORTS: Record<string, (a: ExpenseTransaction, b: ExpenseTransaction) => nu
   taxAmount: (a, b) => a.taxAmount - b.taxAmount, total: (a, b) => a.total - b.total,
 }
 
+/** Prefer PostgREST message fields over String(error) → "[object Object]". */
+export function formatExpenseTransactionsError(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) return error.message
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>
+    for (const key of ['message', 'error', 'details', 'hint'] as const) {
+      const value = record[key]
+      if (typeof value === 'string' && value.trim()) return value.trim()
+    }
+    try {
+      return JSON.stringify(error)
+    } catch {
+      // fall through
+    }
+  }
+  const text = String(error)
+  return text === '[object Object]' ? 'Unexpected error while loading expense transactions' : text
+}
+
 export async function listExpenseTransactions(companyId: string, requestUrl: string) {
   const params = new URL(requestUrl).searchParams
   const client = createAdminClient()
+  const companyRes = await client.from('companies').select('currency').eq('id', companyId).maybeSingle()
+  if (companyRes.error) throw companyRes.error
+  const fallbackCurrency = String(companyRes.data?.currency ?? 'SAR')
+
+  // Do not select bills.currency / expenses.currency — some environments never applied
+  // 022_transaction_currency.sql, and selecting a missing column fails the whole list.
   const [bills, expenses, purchaseOrders, supplierCredits, cheques] = await Promise.all([
-    client.from('bills').select('id,date,reference,notes,subtotal,tax_amount,total,currency,status,balance,vendor:vendors(name),lines:bill_lines(account:chart_of_accounts(name))').eq('company_id', companyId).is('deleted_at', null).limit(1000),
-    client.from('expenses').select('id,date,description,category,total,tax_amount,currency,status,lines:expense_lines(account:chart_of_accounts(name))').eq('company_id', companyId).is('deleted_at', null).limit(1000),
-    client.from('purchase_orders').select('id,date,notes,subtotal,tax_amount,total,currency,status,vendor:vendors(name),lines:purchase_order_lines(account:chart_of_accounts(name))').eq('company_id', companyId).is('deleted_at', null).limit(1000),
-    client.from('vendor_credits').select('id,date,notes,subtotal,tax_amount,total,currency,status,vendor:vendors(name)').eq('company_id', companyId).is('deleted_at', null).limit(1000),
+    client.from('bills').select('id,date,bill_no,reference,notes,subtotal,tax_amount,total,status,balance,vendor:vendors(name),lines:bill_lines(account:chart_of_accounts(name))').eq('company_id', companyId).is('deleted_at', null).limit(1000),
+    client.from('expenses').select('id,date,expense_no,description,category,total,tax_amount,status,lines:expense_lines(account:chart_of_accounts(name))').eq('company_id', companyId).is('deleted_at', null).limit(1000),
+    client.from('purchase_orders').select('id,date,po_no,notes,subtotal,tax_amount,total,currency,status,vendor:vendors(name),lines:purchase_order_lines(account:chart_of_accounts(name))').eq('company_id', companyId).is('deleted_at', null).limit(1000),
+    client.from('vendor_credits').select('id,date,credit_no,notes,subtotal,tax_amount,total,currency,status,vendor:vendors(name)').eq('company_id', companyId).is('deleted_at', null).limit(1000),
     client.from('cheques').select('id,issue_date,cheque_no,payee,amount,status,bank_account:bank_accounts(currency)').eq('company_id', companyId).is('deleted_at', null).limit(1000),
   ])
-  for (const result of [bills, expenses, purchaseOrders, supplierCredits, cheques]) if (result.error) throw result.error
-  let items = mapRows({ bills: bills.data ?? [], expenses: expenses.data ?? [], purchaseOrders: purchaseOrders.data ?? [], supplierCredits: supplierCredits.data ?? [], cheques: cheques.data ?? [] })
+  for (const result of [bills, expenses, purchaseOrders, supplierCredits, cheques]) {
+    if (result.error) throw result.error
+  }
+  let items = mapRows({
+    bills: bills.data ?? [],
+    expenses: expenses.data ?? [],
+    purchaseOrders: purchaseOrders.data ?? [],
+    supplierCredits: supplierCredits.data ?? [],
+    cheques: cheques.data ?? [],
+  }, fallbackCurrency)
   const type = params.get('type')
   const search = params.get('search')?.trim().toLowerCase()
   const payee = params.get('payee')?.trim().toLowerCase()

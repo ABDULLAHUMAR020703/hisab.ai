@@ -18,6 +18,7 @@ import {
   ChevronRight,
   Clock3,
   RefreshCw,
+  X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { readApiError } from '@/lib/api-client'
@@ -60,6 +61,12 @@ import { ConnectedSourceFlow } from './steps/ConnectedSourceFlow'
 const POLL_INTERVAL_MS = 1_500
 /** Releases a navigation latch whose transition never committed, so retries stay possible. */
 const NAVIGATION_LATCH_MS = 5_000
+/** Completion toast: visible long enough to notice, then auto-dismiss like a success toast. */
+const COMPLETED_TOAST_VISIBLE_MS = 9_000
+const COMPLETED_TOAST_EXIT_MS = 280
+/** Browser-tab memory only — cleared on full reload so refresh never restores a completed toast. */
+const liveCompletedToastSessionIds = new Set<string>()
+const dismissedCompletedToastSessionIds = new Set<string>()
 
 function currentNavigationTarget(): string {
   if (typeof window === 'undefined') return ''
@@ -734,17 +741,99 @@ function MigrationIndicator({
       ? null
       : Object.values(session.queueHealth ?? {}).find((health) => health.warning)
 
+  const prevSessionIdRef = useRef(session.id)
+  const prevStateRef = useRef(state)
+  const [completedToast, setCompletedToast] = useState<'hidden' | 'visible' | 'exiting'>(() => {
+    if (state !== 'completed') return 'hidden'
+    if (dismissedCompletedToastSessionIds.has(session.id)) return 'hidden'
+    if (liveCompletedToastSessionIds.has(session.id)) return 'visible'
+    return 'hidden'
+  })
+
+  useEffect(() => {
+    if (prevSessionIdRef.current !== session.id) {
+      prevSessionIdRef.current = session.id
+      prevStateRef.current = state
+      if (state !== 'completed') {
+        setCompletedToast('hidden')
+        return
+      }
+      if (dismissedCompletedToastSessionIds.has(session.id)) {
+        setCompletedToast('hidden')
+        return
+      }
+      setCompletedToast(liveCompletedToastSessionIds.has(session.id) ? 'visible' : 'hidden')
+      return
+    }
+
+    const previous = prevStateRef.current
+    prevStateRef.current = state
+    if (state === 'completed' && previous !== 'completed') {
+      liveCompletedToastSessionIds.add(session.id)
+      if (!dismissedCompletedToastSessionIds.has(session.id)) {
+        setCompletedToast('visible')
+      }
+    }
+  }, [session.id, state])
+
+  const dismissCompletedToast = useCallback((mode: 'animate' | 'immediate' = 'animate') => {
+    if (state !== 'completed') return
+    dismissedCompletedToastSessionIds.add(session.id)
+    if (mode === 'immediate') {
+      setCompletedToast('hidden')
+      return
+    }
+    setCompletedToast((currentPhase) => (currentPhase === 'hidden' ? 'hidden' : 'exiting'))
+  }, [session.id, state])
+
+  useEffect(() => {
+    if (!completed || completedToast !== 'visible') return
+    const timer = window.setTimeout(() => dismissCompletedToast('animate'), COMPLETED_TOAST_VISIBLE_MS)
+    return () => window.clearTimeout(timer)
+  }, [completed, completedToast, dismissCompletedToast])
+
+  useEffect(() => {
+    if (completedToast !== 'exiting') return
+    const timer = window.setTimeout(() => setCompletedToast('hidden'), COMPLETED_TOAST_EXIT_MS)
+    return () => window.clearTimeout(timer)
+  }, [completedToast])
+
+  const openCompletedReport = useCallback(() => {
+    dismissCompletedToast('immediate')
+    onOpen()
+  }, [dismissCompletedToast, onOpen])
+
+  if (completed && completedToast === 'hidden') return null
+
+  const exiting = completed && completedToast === 'exiting'
+
   return (
     <aside
       aria-label="QuickBooks migration status"
       aria-live="polite"
       data-global-migration-indicator={state}
-      className="fixed bottom-4 right-4 z-40 w-[calc(100%-2rem)] max-w-sm overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-900/15 sm:bottom-6 sm:right-6"
+      data-completed-toast={completed ? completedToast : undefined}
+      className={`relative fixed bottom-4 right-4 z-40 w-[calc(100%-2rem)] max-w-sm overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-900/15 transition-[opacity,transform] duration-300 ease-out sm:bottom-6 sm:right-6 ${
+        exiting ? 'translate-y-2 opacity-0' : 'translate-y-0 opacity-100'
+      }`}
     >
+      {completed && (
+        <button
+          type="button"
+          aria-label="Dismiss migration notification"
+          data-dismiss-completed-toast
+          onClick={() => dismissCompletedToast('animate')}
+          className="absolute right-2 top-2 z-10 rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+        >
+          <X size={14} />
+        </button>
+      )}
       <button
         type="button"
-        onClick={onOpen}
-        className="flex min-h-14 w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500"
+        onClick={completed ? openCompletedReport : onOpen}
+        className={`flex min-h-14 w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500 ${
+          completed ? 'pr-9' : ''
+        }`}
       >
         <span className={`flex h-10 w-10 flex-none items-center justify-center rounded-xl ${
           completed ? 'bg-emerald-100 text-emerald-700'
@@ -795,7 +884,9 @@ function MigrationIndicator({
               Cancel Migration
             </Button>
           )}
-          <Button size="sm" onClick={onOpen}>{completed ? 'View Report' : failed ? 'Resume' : 'View Progress'}</Button>
+          <Button size="sm" onClick={completed ? openCompletedReport : onOpen}>
+            {completed ? 'View Report' : failed ? 'Resume' : 'View Progress'}
+          </Button>
         </div>
       </div>
       {error && <p role="alert" className="border-t border-red-100 bg-red-50 px-4 py-2 text-xs text-red-700">{error}</p>}

@@ -308,7 +308,7 @@ test('provider runs a single coordination cycle and discards stale refreshes', (
   assert.match(source, /const forceCoordinationCycle = useCallback/)
   assert.match(source, /issuedActionsRef\.current\.clear\(\)/)
   assert.match(source, /window\.addEventListener\('quickbooks-migration-session-changed', handleSessionChanged\)/)
-  assert.match(source, /forceCoordinationCycle\(\)[\s\S]{0,40}void refresh\(\)/)
+  assert.match(source, /forceCoordinationCycle\(\)[\s\S]{0,120}void refresh\(/)
 
   // Polling itself stays a single interval that never bumps coordination on success.
   assert.match(source, /POLL_INTERVAL_MS = 1_500/)
