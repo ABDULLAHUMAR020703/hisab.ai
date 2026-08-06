@@ -42,6 +42,12 @@ import {
   type MigrationActivityCursors,
   type MigrationPollEnvelope,
 } from './migration-poll-payload'
+import {
+  collectMigrationSessionActivity,
+  DEFAULT_MIGRATION_SESSION_STALE_MS,
+  resolveMigrationSessionReconciliation,
+} from './migration-session-reconcile'
+import { logger } from '@/lib/ops/logger'
 
 function configuredThreshold(value: string | undefined, fallback: number, minimum: number): number {
   const parsed = Number(value)
@@ -173,6 +179,86 @@ function selectCurrentQueueJob(
     ?? null
 }
 
+const SESSION_STALE_MS = configuredThreshold(
+  process.env.MIGRATION_SESSION_STALE_MS,
+  DEFAULT_MIGRATION_SESSION_STALE_MS,
+  60_000,
+)
+
+/**
+ * Closes a running session that no longer has any queue job or worker behind it.
+ *
+ * Session completion used to be decided only by the browser that started the
+ * migration, so a closed tab left the row IN_PROGRESS forever. This runs the
+ * same decision server-side against persisted state, and is safe to call from
+ * any read path: it is a no-op unless the session is provably finished or
+ * abandoned.
+ */
+export async function reconcileQuickBooksMigrationSession(
+  session: HydratedMigrationSession,
+  options: { ignoreQueueJobIds?: readonly string[] } = {},
+): Promise<HydratedMigrationSession> {
+  const activity = collectMigrationSessionActivity(session, options)
+  const resolution = resolveMigrationSessionReconciliation(session, activity, {
+    stalledAfterMs: SESSION_STALE_MS,
+  })
+  if (!resolution) return session
+
+  logger.info('quickbooks.migration_session.reconciled', {
+    sessionId: session.id,
+    companyId: session.companyId,
+    state: resolution.state,
+    reason: resolution.reason,
+    lastActivityAt: activity.lastActivityAt,
+  })
+
+  return updateQuickBooksMigrationSession({
+    sessionId: session.id,
+    companyIdOverride: session.companyId,
+    lifecycle: session.lifecycle,
+    step: resolution.step,
+    state: resolution.state,
+  })
+}
+
+/**
+ * Worker-side entry point: after an import job reaches a terminal state, close
+ * the owning session if nothing else is left to run. Never throws into the job
+ * handler — a reconciliation failure must not fail a completed import.
+ */
+export async function reconcileMigrationSessionForImportJob(
+  importJobId: string,
+  companyId: string,
+  options: { ignoreQueueJobIds?: readonly string[] } = {},
+): Promise<void> {
+  try {
+    const client = createAdminClient()
+    const { data, error } = await client
+      .from('migration_wizard_sessions')
+      .select('*')
+      .eq('company_id', companyId)
+      .eq('status', 'IN_PROGRESS')
+      .order('updated_at', { ascending: false })
+      .limit(40)
+    if (error) throw error
+
+    for (const row of data ?? []) {
+      if (!isQuickBooksMigrationConfig(row.config)) continue
+      if (!importJobIdsFromConfig(row.config).includes(importJobId)) continue
+      await reconcileQuickBooksMigrationSession(await hydrateSession(mapSessionRow(row)), options)
+      return
+    }
+  } catch (error) {
+    logger.error('quickbooks.migration_session.reconcile_failed', {
+      importJobId,
+      companyId,
+      error: error instanceof Error
+        ? { name: error.name, message: error.message }
+        : { message: String(error) },
+    })
+  }
+}
+
 /** Returns the company's active QuickBooks migration session, if any. Never creates one. */
 export async function findActiveQuickBooksMigrationSession(companyIdOverride?: string): Promise<HydratedMigrationSession | null> {
   const client = createAdminClient()
@@ -194,7 +280,8 @@ export async function findActiveQuickBooksMigrationSession(companyIdOverride?: s
     }
   })
   if (!match) return null
-  return hydrateSession(mapSessionRow(match))
+  const hydrated = await reconcileQuickBooksMigrationSession(await hydrateSession(mapSessionRow(match)))
+  return isActiveMigrationSession(hydrated) ? hydrated : null
 }
 
 /** Returns the latest QuickBooks session, including completed or failed sessions. */
@@ -278,12 +365,13 @@ export async function pollQuickBooksMigrationSession(input: {
   activityCursors?: MigrationActivityCursors
   previousLiveFingerprint?: string | null
 }): Promise<{ session: HydratedMigrationSession | null; poll: MigrationPollEnvelope | null }> {
-  const session = input.sessionId
+  const found = input.sessionId
     ? await getQuickBooksMigrationSession(input.sessionId)
     : input.includeLatest
       ? await findLatestQuickBooksMigrationSession()
       : await findActiveQuickBooksMigrationSession()
-  if (!session) return { session: null, poll: null }
+  if (!found) return { session: null, poll: null }
+  const session = await reconcileQuickBooksMigrationSession(found)
   return {
     session,
     poll: projectMigrationPollPayload(session, {

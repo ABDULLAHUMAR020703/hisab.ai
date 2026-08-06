@@ -113,9 +113,18 @@ export async function processImport(
       let createdId: string | undefined
       let recordStage = 'source_check'
       try {
-        recordStage='source_hash_check'
-        const sourceUnchanged=await measure('source_hash_check',()=>isQuickBooksRecordUnchanged(input.ctx.companyId,row.mapped))
         const duplicate = duplicateMap.get(row.rowNumber)
+        const selectedAction = applyDuplicateStrategy(input.duplicateStrategy, Boolean(duplicate))
+        // QuickBooks source identity is canonical. "Create duplicate" is a
+        // merge/update for a source record that already exists locally.
+        const action = selectedAction === 'create' && typeof row.mapped._realmId === 'string' ? 'update' : selectedAction
+        recordStage='source_hash_check'
+        // Replaying an unchanged, fully materialized record is a no-op only when
+        // the chosen strategy skips duplicates. An explicit update must always
+        // reach updateRecord so the user sees it counted as updated.
+        const sourceUnchanged = action === 'skip'
+          ? await measure('source_hash_check',()=>isQuickBooksRecordUnchanged(input.ctx.companyId,row.mapped))
+          : false
         recordStage='materialization_status_check'
         const priorMaterialization=sourceUnchanged&&duplicate&&tracksQuickBooksMaterialization(input.module.key)?await measure('materialization_status_lookup',()=>getQuickBooksMaterializationStatus(input.ctx.companyId,input.module.key,duplicate.existingId,row.mapped)):null
         if(sourceUnchanged&&duplicate&&(!tracksQuickBooksMaterialization(input.module.key)||priorMaterialization==='completed')){
@@ -133,11 +142,6 @@ export async function processImport(
         // Parsers coerce business fields; protected provider metadata remains
         // authoritative and must accompany the parsed record to materializers.
         const record = { ...row.mapped, ...parser(row.mapped as Record<string, unknown>) }
-        const hasDuplicate = Boolean(duplicate)
-        const selectedAction = applyDuplicateStrategy(input.duplicateStrategy, hasDuplicate)
-        // QuickBooks source identity is canonical. "Create duplicate" is a
-        // merge/update for a source record that already exists locally.
-        const action = selectedAction === 'create' && typeof row.mapped._realmId === 'string' ? 'update' : selectedAction
 
         if (action === 'skip') {
           recordStage='source_link_verification'
