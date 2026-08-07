@@ -28,8 +28,29 @@ NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 APP_SECRET=
+INTEGRATION_TOKEN_ENCRYPTION_KEY=
+QB_CLIENT_ID=
+QB_CLIENT_SECRET=
+QB_REDIRECT_URI=http://localhost:3000/api/integrations/quickbooks/callback
+QB_ENVIRONMENT=sandbox
 ZATCA_CREDENTIAL_ENCRYPTION_KEY=
 ```
+
+QuickBooks OAuth credentials are configured in the Intuit Developer dashboard. Use
+`QB_ENVIRONMENT=sandbox` for development and register the exact `QB_REDIRECT_URI`
+shown above. Replace the URI with the deployed application callback URL in production;
+never commit real client credentials.
+
+QuickBooks Accounting Certification is temporarily frozen for production and
+defaults to disabled. See [the certification feature-freeze documentation](QUICKBOOKS_CERTIFICATION_FEATURE_FREEZE.md)
+for the single flag used to enable it for local development or later releases.
+
+After connecting QuickBooks under **Settings > Integrations**, choose **Import** to run
+the existing Import Wizard against QuickBooks Online. Phase 3 supports read-only
+provider imports for Chart of Accounts, Customers, Vendors, Products & Services,
+Tax Codes, and Payment Terms. The wizard previews normalized records, detects
+duplicates, and applies the selected Skip, Update, or Create strategy. It does not
+push changes back to QuickBooks or run background synchronization.
 
 Apply SQL migrations from `supabase/migrations/` in order against your Supabase project.
 
@@ -79,6 +100,12 @@ npm run test:production
 - Configurable prefix, next number, padding (e.g. `INV-000091`)
 - Atomic allocation for concurrent invoice creation
 - Settings → Document Numbering
+
+### Provider imports
+
+- One provider-agnostic Import Wizard for file and connected accounting sources
+- QuickBooks records normalized into existing Hisab AI module models before persistence
+- Source adapters isolate provider models so future Xero, Zoho Books, and Sage support does not change the workflow
 
 ## Project layout
 

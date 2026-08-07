@@ -2,6 +2,7 @@ import 'server-only'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveCompanyId } from '@/lib/tenant'
 import type { FiscalPeriodRecord } from './types'
+import { fiscalPeriodForDate } from './fiscal-calendar'
 
 function mapPeriod(row: Record<string, unknown>): FiscalPeriodRecord {
   return {
@@ -54,9 +55,12 @@ export async function closeFiscalPeriod(
 
 export async function ensureCurrentFiscalPeriod(companyId: string): Promise<void> {
   const client = createAdminClient()
-  const year = new Date().getFullYear()
-  const periodStart = new Date(year, 0, 1)
-  const periodEnd = new Date(year, 11, 31, 23, 59, 59)
+  const company = await client.from('companies').select('fiscal_year_start').eq('id', companyId).single()
+  if (company.error) throw company.error
+  const { start: periodStart, end: periodEnd, fiscalYear } = fiscalPeriodForDate(
+    new Date(),
+    String(company.data.fiscal_year_start ?? '01-01'),
+  )
 
   const { data: existing } = await client
     .from('fiscal_periods')
@@ -70,7 +74,7 @@ export async function ensureCurrentFiscalPeriod(companyId: string): Promise<void
 
   await client.from('fiscal_periods').insert({
     company_id: companyId,
-    name: `${year} Fiscal Year`,
+    name: `${fiscalYear} Fiscal Year`,
     period_start: periodStart.toISOString(),
     period_end: periodEnd.toISOString(),
     status: 'OPEN',

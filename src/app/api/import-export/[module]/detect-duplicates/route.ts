@@ -20,13 +20,13 @@ export async function POST(
     const rows = Array.isArray(body.rows) ? body.rows : []
     const mapping = body.mapping && typeof body.mapping === 'object' ? body.mapping : {}
 
-    const module = getModuleDefinition(moduleKey)
+    const definition = getModuleDefinition(moduleKey)
     const mappedRows = coerceMappedRows(
       applyColumnMapping(rows, mapping),
-      module.fields,
+      definition.fields,
     )
     const companyId = await resolveCompanyId()
-    const duplicates = await detectDuplicates(module, mappedRows, { companyId, userId: user.id })
+    const duplicates = await detectDuplicates(definition, mappedRows, { companyId, userId: user.id })
 
     return Response.json({ duplicates })
   } catch (error) {

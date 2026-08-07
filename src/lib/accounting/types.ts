@@ -30,6 +30,15 @@ export type LedgerSourceType =
   | 'REALIZED_FX'
   | 'UNREALIZED_FX'
   | 'INVENTORY'
+  | 'REFUND_RECEIPT'
+  | 'REFUND_RECEIPT_VOID'
+  | 'CREDIT_CARD_PAYMENT'
+  | 'TAX_PAYMENT'
+  | 'TAX_REFUND'
+  | 'BANK_TRANSFER'
+  | 'DEPOSIT'
+  | 'SUPPLIER_CREDIT'
+  | 'SALES_RECEIPT'
 
 export interface LedgerEntryRecord {
   id: string

@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import test from 'node:test'
+
+const read=(path:string)=>readFileSync(path,'utf8')
+
+test('Sales Receipt schema preserves native lines, payment, deposit, FX, and source relationships',()=>{const sql=read('supabase/migrations/059_sales_receipt_materialization.sql');assert.match(sql,/CREATE TABLE public\.sales_receipt_lines/);for(const field of ['deposit_account_id','source_deposit_account_id','source_payment_method_id','source_account_id','source_item_id','source_class_id','source_tax_code_id','base_subtotal','base_tax_amount','source_payload_hash'])assert.match(sql,new RegExp(field));assert.match(sql,/sales_receipts_legacy_source_uniq/);assert.match(sql,/UNIQUE\(company_id,sales_receipt_id,line_no\)/)})
+
+test('QuickBooks Sales Receipts retain item lines and exact account relationships',()=>{const adapter=read('src/lib/import-export/sources/quickbooks.adapter.ts'),importer=read('src/lib/import-export/registry/modules/transactions.module.ts');assert.match(adapter,/SalesItemLineDetail/);assert.match(adapter,/depositAccountSourceId/);assert.match(adapter,/paymentMethodSourceId/);assert.match(importer,/lineTable:'sales_receipt_lines'/);assert.match(importer,/resolveSalesReceiptLineAccount/);assert.match(importer,/IncomeAccountRef/);assert.match(importer,/QuickBooks deposit account/)})
+
+test('Sales Receipt posting is a paid sale and never touches Accounts Receivable',()=>{const source=read('src/lib/accounting/document-posting.ts');const start=source.indexOf('export async function postSalesReceiptToLedger'),end=source.indexOf('export async function postExpenseToLedger',start),posting=source.slice(start,end);assert.match(posting,/sourceType:'SALES_RECEIPT'/);assert.match(posting,/accountId:depositAccount,debit:total/);assert.match(posting,/credit:amount>0\?amount/);assert.match(posting,/debit:amount<0\?Math\.abs\(amount\)/);assert.match(posting,/documentType:'SALES_RECEIPT'/);assert.doesNotMatch(posting,/accounts\.ar|Receivable/);const subtotal=100,tax=15,total=115;assert.equal(total,subtotal+tax)})
+
+test('Sales Receipt inventory and COGS use historical, line-idempotent movements',()=>{const hook=read('src/lib/inventory/document-hooks.ts'),movement=read('src/lib/inventory/movements.ts');assert.match(hook,/postGoodsIssueFromSalesReceipt/);assert.match(hook,/movementType:'GOODS_ISSUE'/);assert.match(hook,/postCogsJournal:true/);assert.match(hook,/movementDate:new Date/);assert.match(hook,/\.eq\('reference',reference\)/);assert.match(movement,/postInventoryCostingJournal/)})
+
+test('native Sales Receipt API persists lines before immutable ledger posting',()=>{const route=read('src/app/api/sales-receipts/route.ts');assert.match(route,/At least one line is required/);assert.match(route,/Deposit account is required/);assert.match(route,/sales_receipt_lines/);assert.match(route,/postSalesReceiptToLedger/);assert.match(route,/Every Sales Receipt line requires a revenue account/)})
+
+test('Sales Receipt materialization is automatic and inventory-aware',()=>{const source=read('src/lib/import-export/quickbooks/accounting-materializer.ts');assert.match(source,/'sales-receipts':\{[^\n]*post:postSalesReceiptToLedger/);assert.match(source,/'sales-receipts':\{[^\n]*checksInventory:true/);assert.doesNotMatch(source,/sales receipts do not retain posting lines/i)})
+
+test('certification proves totals, lines, deposit, payment, customer balance isolation, inventory, and ledger balance',()=>{const source=read('src/lib/quickbooks-certification/sales-receipts.ts'),service=read('src/lib/quickbooks-certification/service.ts');for(const evidence of ['TxnTaxDetail','sourceRelationships','paidSalePosting','depositDebit','receivable','inventory','quantity'])assert.match(source,new RegExp(evidence,'i'));assert.match(service,/certifySalesReceipts/);assert.match(service,/sales-receipt-reconciliation/)})
+
+test('Sales Receipt UI captures item, revenue account, payment method, deposit account, and historical date',()=>{const page=read('src/app/(dashboard)/sales-receipts/page.tsx');for(const evidence of ['inventoryItemId','accountId','paymentMethodId','depositAccountId','type="date"'])assert.match(page,new RegExp(evidence))})

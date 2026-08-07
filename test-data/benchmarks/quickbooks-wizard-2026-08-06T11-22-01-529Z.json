@@ -1,0 +1,385 @@
+{
+  "event": "quickbooks_wizard_benchmark",
+  "mode": "wizard_worker_orchestration",
+  "note": "Uses the same create-session → create-job → enqueue → worker continuation path as Migration Wizard UI. Browser UI was not automated; orchestration is identical.",
+  "companyId": "00000000-0000-4000-8000-000000000001",
+  "realmId": "9341457612363747",
+  "sessionId": "9c0ff43f-5401-4cf9-af28-b23b759310b8",
+  "strategy": "update",
+  "modules": [
+    {
+      "key": "accounts",
+      "label": "Chart of Accounts",
+      "phase": "completed",
+      "jobId": "2e11b564-9cd9-41ff-9d91-b5799ca809fb",
+      "jobStatus": "completed",
+      "timestamps": {
+        "queued": "2026-08-06T11:15:22.168732+00:00",
+        "workerClaimed": "2026-08-06T11:15:21.053+00:00",
+        "extraction": {
+          "startedAt": "2026-08-06T11:15:27.437Z",
+          "completedAt": "2026-08-06T11:15:35.057Z",
+          "durationMs": 7620.24530000001
+        },
+        "validation": {
+          "startedAt": "2026-08-06T11:15:35.059Z",
+          "completedAt": "2026-08-06T11:15:35.079Z",
+          "durationMs": 20.09179999999469
+        },
+        "duplicate_detection": {
+          "startedAt": "2026-08-06T11:15:35.079Z",
+          "completedAt": "2026-08-06T11:15:35.467Z",
+          "durationMs": 387.7698000000091
+        },
+        "materialization": {
+          "startedAt": "2026-08-06T11:15:35.468Z",
+          "completedAt": "2026-08-06T11:20:21.547Z",
+          "durationMs": 286078.84979999997
+        },
+        "checkpoint": null,
+        "completion": "2026-08-06T11:20:24.31047+00:00"
+      },
+      "metrics": {
+        "totalElapsedMs": 302142,
+        "queueWaitMs": 0,
+        "activeProcessingMs": 294605.2786,
+        "databaseWaitMs": 294842.9394999995,
+        "apiWaitMs": 5248.729199999943,
+        "cpuMs": 0,
+        "rowsProcessed": 90,
+        "rowsPerSecond": 0.3054935078817695,
+        "imported": 0,
+        "updated": 90,
+        "skipped": 0,
+        "failed": 0
+      },
+      "stageDurationsMs": {
+        "module_scheduling": 0.4967000000178814,
+        "extraction": 7620.24530000001,
+        "validation": 20.09179999999469,
+        "duplicate_detection": 387.7698000000091,
+        "materialization": 286078.84979999997
+      }
+    },
+    {
+      "key": "customers",
+      "label": "Customers",
+      "phase": "completed",
+      "jobId": "8ded29fc-b52a-4c6f-8be8-6503e8c0c485",
+      "jobStatus": "completed",
+      "timestamps": {
+        "queued": "2026-08-06T11:20:25.460143+00:00",
+        "workerClaimed": "2026-08-06T11:20:24.354+00:00",
+        "extraction": {
+          "startedAt": "2026-08-06T11:20:32.515Z",
+          "completedAt": "2026-08-06T11:20:36.599Z",
+          "durationMs": 4083.9842000000644
+        },
+        "validation": {
+          "startedAt": "2026-08-06T11:20:36.600Z",
+          "completedAt": "2026-08-06T11:20:36.612Z",
+          "durationMs": 12.519700000062585
+        },
+        "duplicate_detection": {
+          "startedAt": "2026-08-06T11:20:36.612Z",
+          "completedAt": "2026-08-06T11:20:37.095Z",
+          "durationMs": 482.48239999997895
+        },
+        "materialization": {
+          "startedAt": "2026-08-06T11:20:37.095Z",
+          "completedAt": "2026-08-06T11:21:56.818Z",
+          "durationMs": 79723.33510000003
+        },
+        "checkpoint": null,
+        "completion": "2026-08-06T11:21:59.609384+00:00"
+      },
+      "metrics": {
+        "totalElapsedMs": 94149,
+        "queueWaitMs": 0,
+        "activeProcessingMs": 84778.14949999994,
+        "databaseWaitMs": 89038.66430000192,
+        "apiWaitMs": 2389.021300000022,
+        "cpuMs": 0,
+        "rowsProcessed": 29,
+        "rowsPerSecond": 0.3420692734039921,
+        "imported": 0,
+        "updated": 26,
+        "skipped": 0,
+        "failed": 0
+      },
+      "stageDurationsMs": {
+        "module_scheduling": 0.5916000000433996,
+        "extraction": 4083.9842000000644,
+        "validation": 12.519700000062585,
+        "duplicate_detection": 482.48239999997895,
+        "materialization": 79723.33510000003
+      }
+    }
+  ],
+  "wall": {
+    "startedAt": "2026-08-06T11:15:20.310Z",
+    "finishedAt": "2026-08-06T11:22:01.529Z",
+    "durationMs": 401218
+  },
+  "sessionTiming": {
+    "startedAt": "2026-08-06T11:15:20.540Z",
+    "completedAt": "2026-08-06T11:21:59.385+00:00",
+    "elapsedMs": 398845,
+    "activeProcessingMs": 379383.42809999996,
+    "queueWaitMs": 0,
+    "idleMs": 19461.57190000004,
+    "databaseTimeMs": 383881.60380000144,
+    "apiTimeMs": 7637.7504999999655,
+    "completedThroughput": 0.3136668372574074,
+    "remainingRecords": 0,
+    "remainingMs": 0,
+    "etaLabel": "0m 00s",
+    "waterfall": [
+      {
+        "id": "gap:session:start:accounts:claimed",
+        "label": "Idle gap · Migration started → Worker claimed Chart of Accounts",
+        "moduleKey": "accounts",
+        "kind": "idle_gap",
+        "startedAt": "2026-08-06T11:15:20.540Z",
+        "endedAt": "2026-08-06T11:15:21.053+00:00",
+        "durationMs": 513
+      },
+      {
+        "id": "accounts:active",
+        "label": "Active processing · Chart of Accounts",
+        "moduleKey": "accounts",
+        "kind": "worker",
+        "startedAt": "2026-08-06T11:15:21.053+00:00",
+        "endedAt": "2026-08-06T11:20:24.31047+00:00",
+        "durationMs": 294605.2786
+      },
+      {
+        "id": "734f7e00-1137-4b6d-a083-8ffac89aabd2:stage",
+        "label": "Chart of Accounts · extraction",
+        "moduleKey": "accounts",
+        "kind": "stage",
+        "startedAt": "2026-08-06T11:15:27.436Z",
+        "endedAt": "2026-08-06T11:15:35.057Z",
+        "durationMs": 7620.24530000001
+      },
+      {
+        "id": "2c06dae7-6520-4b44-a205-77efd2b0abfa:stage",
+        "label": "Chart of Accounts · duplicate detection",
+        "moduleKey": "accounts",
+        "kind": "stage",
+        "startedAt": "2026-08-06T11:15:35.079Z",
+        "endedAt": "2026-08-06T11:15:35.467Z",
+        "durationMs": 387.7698000000091
+      },
+      {
+        "id": "70bbf0db-3b95-4c44-99ad-e4c162bd2bc7:stage",
+        "label": "Chart of Accounts · materialization",
+        "moduleKey": "accounts",
+        "kind": "stage",
+        "startedAt": "2026-08-06T11:15:35.468Z",
+        "endedAt": "2026-08-06T11:20:21.547Z",
+        "durationMs": 286078.84979999997
+      },
+      {
+        "id": "customers:active",
+        "label": "Active processing · Customers",
+        "moduleKey": "customers",
+        "kind": "worker",
+        "startedAt": "2026-08-06T11:20:24.354+00:00",
+        "endedAt": "2026-08-06T11:21:59.609384+00:00",
+        "durationMs": 84778.14949999994
+      },
+      {
+        "id": "bd7314fe-1aa2-48cd-b68b-016e025d678b:stage",
+        "label": "Customers · extraction",
+        "moduleKey": "customers",
+        "kind": "stage",
+        "startedAt": "2026-08-06T11:20:32.515Z",
+        "endedAt": "2026-08-06T11:20:36.599Z",
+        "durationMs": 4083.9842000000644
+      },
+      {
+        "id": "aa837453-29bd-4af4-a5b5-817be154744f:stage",
+        "label": "Customers · duplicate detection",
+        "moduleKey": "customers",
+        "kind": "stage",
+        "startedAt": "2026-08-06T11:20:36.612Z",
+        "endedAt": "2026-08-06T11:20:37.095Z",
+        "durationMs": 482.48239999997895
+      },
+      {
+        "id": "eec4390d-d24d-43d9-ab89-34a10576c861:stage",
+        "label": "Customers · materialization",
+        "moduleKey": "customers",
+        "kind": "stage",
+        "startedAt": "2026-08-06T11:20:37.094Z",
+        "endedAt": "2026-08-06T11:21:56.818Z",
+        "durationMs": 79723.33510000003
+      }
+    ]
+  },
+  "comparisons": [
+    {
+      "key": "accounts",
+      "cli": {
+        "activeProcessingMs": 189646,
+        "rowsPerSecond": 0.47,
+        "rows": 90,
+        "databaseWaitMs": 183524,
+        "apiWaitMs": 2408
+      },
+      "wizard": {
+        "totalElapsedMs": 302142,
+        "queueWaitMs": 0,
+        "activeProcessingMs": 294605.2786,
+        "databaseWaitMs": 294842.9394999995,
+        "apiWaitMs": 5248.729199999943,
+        "cpuMs": 0,
+        "rowsProcessed": 90,
+        "rowsPerSecond": 0.3054935078817695,
+        "imported": 0,
+        "updated": 90,
+        "skipped": 0,
+        "failed": 0
+      },
+      "deltas": {
+        "activeProcessingPct": 55.34484175780139,
+        "rowsPerSecondPct": -35.00138130175117,
+        "databaseWaitPct": 60.65633895294322,
+        "apiWaitPct": 117.9704817275724
+      }
+    },
+    {
+      "key": "customers",
+      "cli": {
+        "activeProcessingMs": 61530,
+        "rowsPerSecond": 0.42,
+        "rows": 26,
+        "databaseWaitMs": 54742,
+        "apiWaitMs": 2571
+      },
+      "wizard": {
+        "totalElapsedMs": 94149,
+        "queueWaitMs": 0,
+        "activeProcessingMs": 84778.14949999994,
+        "databaseWaitMs": 89038.66430000192,
+        "apiWaitMs": 2389.021300000022,
+        "cpuMs": 0,
+        "rowsProcessed": 29,
+        "rowsPerSecond": 0.3420692734039921,
+        "imported": 0,
+        "updated": 26,
+        "skipped": 0,
+        "failed": 0
+      },
+      "deltas": {
+        "activeProcessingPct": 37.78343816024694,
+        "rowsPerSecondPct": -18.554934903811397,
+        "databaseWaitPct": 62.651463775532356,
+        "apiWaitPct": -7.0781291326323545
+      }
+    }
+  ],
+  "checks": {
+    "sessionCompleted": true,
+    "allImportJobsCompleted": true,
+    "noOrphanQueueJobs": false,
+    "noOrphanInProgressSessions": true,
+    "importJobCount": 4,
+    "historyWouldShow": {
+      "sessionStatus": "completed",
+      "moduleCount": 2,
+      "imported": 0
+    },
+    "timingConsistent": {
+      "elapsedGteActive": true,
+      "idleEqualsElapsedMinusActive": true,
+      "queueWaitLteIdle": true,
+      "databaseWaitLteActive": false
+    },
+    "staleCheckpoints": []
+  },
+  "waterfallGapsOver100ms": [
+    {
+      "id": "gap:session:start:accounts:claimed",
+      "label": "Idle gap · Migration started → Worker claimed Chart of Accounts",
+      "moduleKey": "accounts",
+      "kind": "idle_gap",
+      "startedAt": "2026-08-06T11:15:20.540Z",
+      "endedAt": "2026-08-06T11:15:21.053+00:00",
+      "durationMs": 513
+    },
+    {
+      "id": "accounts:active",
+      "label": "Active processing · Chart of Accounts",
+      "moduleKey": "accounts",
+      "kind": "worker",
+      "startedAt": "2026-08-06T11:15:21.053+00:00",
+      "endedAt": "2026-08-06T11:20:24.31047+00:00",
+      "durationMs": 294605.2786
+    },
+    {
+      "id": "734f7e00-1137-4b6d-a083-8ffac89aabd2:stage",
+      "label": "Chart of Accounts · extraction",
+      "moduleKey": "accounts",
+      "kind": "stage",
+      "startedAt": "2026-08-06T11:15:27.436Z",
+      "endedAt": "2026-08-06T11:15:35.057Z",
+      "durationMs": 7620.24530000001
+    },
+    {
+      "id": "2c06dae7-6520-4b44-a205-77efd2b0abfa:stage",
+      "label": "Chart of Accounts · duplicate detection",
+      "moduleKey": "accounts",
+      "kind": "stage",
+      "startedAt": "2026-08-06T11:15:35.079Z",
+      "endedAt": "2026-08-06T11:15:35.467Z",
+      "durationMs": 387.7698000000091
+    },
+    {
+      "id": "70bbf0db-3b95-4c44-99ad-e4c162bd2bc7:stage",
+      "label": "Chart of Accounts · materialization",
+      "moduleKey": "accounts",
+      "kind": "stage",
+      "startedAt": "2026-08-06T11:15:35.468Z",
+      "endedAt": "2026-08-06T11:20:21.547Z",
+      "durationMs": 286078.84979999997
+    },
+    {
+      "id": "customers:active",
+      "label": "Active processing · Customers",
+      "moduleKey": "customers",
+      "kind": "worker",
+      "startedAt": "2026-08-06T11:20:24.354+00:00",
+      "endedAt": "2026-08-06T11:21:59.609384+00:00",
+      "durationMs": 84778.14949999994
+    },
+    {
+      "id": "bd7314fe-1aa2-48cd-b68b-016e025d678b:stage",
+      "label": "Customers · extraction",
+      "moduleKey": "customers",
+      "kind": "stage",
+      "startedAt": "2026-08-06T11:20:32.515Z",
+      "endedAt": "2026-08-06T11:20:36.599Z",
+      "durationMs": 4083.9842000000644
+    },
+    {
+      "id": "aa837453-29bd-4af4-a5b5-817be154744f:stage",
+      "label": "Customers · duplicate detection",
+      "moduleKey": "customers",
+      "kind": "stage",
+      "startedAt": "2026-08-06T11:20:36.612Z",
+      "endedAt": "2026-08-06T11:20:37.095Z",
+      "durationMs": 482.48239999997895
+    },
+    {
+      "id": "eec4390d-d24d-43d9-ab89-34a10576c861:stage",
+      "label": "Customers · materialization",
+      "moduleKey": "customers",
+      "kind": "stage",
+      "startedAt": "2026-08-06T11:20:37.094Z",
+      "endedAt": "2026-08-06T11:21:56.818Z",
+      "durationMs": 79723.33510000003
+    }
+  ]
+}

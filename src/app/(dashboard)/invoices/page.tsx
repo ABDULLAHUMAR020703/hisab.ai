@@ -26,6 +26,7 @@ import { computeDueDate, toDateInputValue } from '@/lib/invoices/payment-terms'
 import { computeDisplayBusinessStatus, formatInvoiceTypeLabel, canEditInvoice, todayDateString, isFutureInvoiceDate } from '@/lib/ui/invoice-status'
 
 interface Customer { id: string; name: string }
+interface PaymentMethod { id: string; name: string }
 interface Account { id: string; accountNo: string; name: string }
 interface InvoiceLine {
   description: string
@@ -105,6 +106,7 @@ export default function InvoicesPage() {
   const [listTotal, setListTotal] = useState(0)
   const [customers, setCustomers] = useState<Customer[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
   const [appliedFilters, setAppliedFilters] = useState<InvoiceFilterValues>(DEFAULT_INVOICE_FILTERS)
   const [draftFilters, setDraftFilters] = useState<InvoiceFilterValues>(DEFAULT_INVOICE_FILTERS)
   const [filtersReady, setFiltersReady] = useState(false)
@@ -136,7 +138,7 @@ export default function InvoicesPage() {
   const [form, setForm] = useState<InvoiceFormState>(() => createEmptyForm('SAR'))
   const [dueDateManuallyEdited, setDueDateManuallyEdited] = useState(false)
   const [payForm, setPayForm] = useState({
-    amount: 0, method: 'BANK_TRANSFER', reference: '',
+    amount: 0, paymentMethodId: '', reference: '',
     date: new Date().toISOString().split('T')[0]
   })
 
@@ -195,10 +197,11 @@ export default function InvoicesPage() {
     params.set('sortDir', appliedFilters.sortDir)
     params.set('page', String(page))
     params.set('limit', String(limit))
-    const [invRes, custRes, accRes] = await Promise.all([
+    const [invRes, custRes, accRes, methodRes] = await Promise.all([
       fetch(`/api/invoices?${params}`),
       fetch('/api/customers'),
       fetch('/api/accounts'),
+      fetch('/api/product-master/payment-methods'),
     ])
     if (invRes.ok) {
       const payload = await invRes.json()
@@ -207,6 +210,11 @@ export default function InvoicesPage() {
     }
     if (custRes.ok) setCustomers(await custRes.json())
     if (accRes.ok) setAccounts(await accRes.json())
+    if (methodRes.ok) {
+      const methods = await methodRes.json()
+      setPaymentMethods(methods)
+      setPayForm(current => current.paymentMethodId || !methods.length ? current : { ...current, paymentMethodId: methods[0].id })
+    }
     setLoading(false)
   }
 
@@ -296,7 +304,7 @@ export default function InvoicesPage() {
 
   function openPay(inv: Invoice) {
     setSelectedInvoice(inv)
-    setPayForm(f => ({ ...f, amount: inv.balance }))
+    setPayForm(f => ({ ...f, amount: inv.balance, paymentMethodId: f.paymentMethodId || paymentMethods[0]?.id || '' }))
     setShowPayModal(true)
   }
 
@@ -1018,11 +1026,9 @@ export default function InvoicesPage() {
         <div className="space-y-4">
           <Input label="Amount" type="number" required value={payForm.amount} onChange={e => setPayForm({ ...payForm, amount: parseFloat(e.target.value) })} />
           <Input label="Date" type="date" required value={payForm.date} onChange={e => setPayForm({ ...payForm, date: e.target.value })} />
-          <Select label="Method" value={payForm.method} onChange={e => setPayForm({ ...payForm, method: e.target.value })}>
-            <option value="BANK_TRANSFER">Bank Transfer</option>
-            <option value="CASH">Cash</option>
-            <option value="CHEQUE">Cheque</option>
-            <option value="CARD">Card</option>
+          <Select label="Payment method" value={payForm.paymentMethodId} onChange={e => setPayForm({ ...payForm, paymentMethodId: e.target.value })}>
+            <option value="">Select</option>
+            {paymentMethods.map(method => <option key={method.id} value={method.id}>{method.name}</option>)}
           </Select>
           <Input label="Reference" value={payForm.reference} onChange={e => setPayForm({ ...payForm, reference: e.target.value })} placeholder="Transaction ID..." />
         </div>

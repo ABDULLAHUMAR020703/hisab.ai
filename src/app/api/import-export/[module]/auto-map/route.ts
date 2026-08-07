@@ -19,8 +19,8 @@ export async function POST(
       return Response.json({ error: 'Headers are required' }, { status: 400 })
     }
 
-    const module = getModuleDefinition(moduleKey)
-    const mapping = autoMapColumns(headers, module.fields)
+    const definition = getModuleDefinition(moduleKey)
+    const mapping = autoMapColumns(headers, definition.fields)
 
     return Response.json({ mapping })
   } catch (error) {

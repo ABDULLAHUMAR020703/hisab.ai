@@ -16,10 +16,10 @@ interface Vendor { id: string; name: string }
 interface Bill { id: string; billNo: string }
 interface VendorCredit {
   id: string; creditNo: string; vendor?: { name: string }; bill?: { billNo: string }
-  date: string; total: number; status: string; currency?: string; notes?: string
+  date: string; total: number; appliedAmount?: number; balance?: number; status: string; currency?: string; notes?: string
 }
 
-const STATUSES = ['OPEN', 'APPLIED', 'VOID']
+const STATUSES = ['OPEN', 'PARTIAL', 'CLOSED', 'VOID']
 
 export default function VendorCreditsPage() {
   const formatPrimary = useFormatCurrency()
@@ -52,6 +52,8 @@ export default function VendorCreditsPage() {
     setLoading(false)
   }
 
+  // The filter change is the external event that refreshes this server-backed list.
+  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
   useEffect(() => { load() }, [search, statusFilter])
 
   const total = Number(form.subtotal) + Number(form.taxAmount)
@@ -93,16 +95,16 @@ export default function VendorCreditsPage() {
         <table className="w-full data-table">
           <thead>
             <tr className="border-b border-slate-100">
-              {['Credit #', 'Supplier', 'Bill', 'Date', 'Total', 'Status'].map((h) => (
+              {['Credit #', 'Supplier', 'Bill', 'Date', 'Total', 'Applied', 'Remaining', 'Status'].map((h) => (
                 <th key={h} className="px-4 py-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wider text-left">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
             {loading ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">Loading...</td></tr>
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">Loading...</td></tr>
             ) : credits.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-16 text-center text-slate-400 text-sm">No supplier credits found.</td></tr>
+              <tr><td colSpan={8} className="px-4 py-16 text-center text-slate-400 text-sm">No supplier credits found.</td></tr>
             ) : credits.map((credit) => (
               <tr key={credit.id} className="hover:bg-slate-50/60 transition-colors">
                 <td className="px-4 py-3 font-mono text-xs font-semibold text-indigo-600">{credit.creditNo}</td>
@@ -110,6 +112,8 @@ export default function VendorCreditsPage() {
                 <td className="px-4 py-3 text-xs text-slate-500">{credit.bill?.billNo ?? '—'}</td>
                 <td className="px-4 py-3 text-xs text-slate-500">{formatDate(credit.date)}</td>
                 <td className="px-4 py-3 text-sm font-semibold text-emerald-600 tabular">{formatCreditAmount(credit, credit.total)}</td>
+                <td className="px-4 py-3 text-sm tabular text-slate-600">{formatCreditAmount(credit, credit.appliedAmount ?? 0)}</td>
+                <td className="px-4 py-3 text-sm font-semibold tabular text-indigo-600">{formatCreditAmount(credit, credit.balance ?? credit.total)}</td>
                 <td className="px-4 py-3"><Badge status={credit.status} /></td>
               </tr>
             ))}

@@ -1,16 +1,21 @@
 import 'server-only'
 import { prisma } from '@/lib/prisma'
 import { ageBucket } from './aging-utils'
+import { resolveCompanyId } from '@/lib/tenant'
 
 export async function buildAgedReceivablesReport(asOf: Date) {
-  const invoices = await prisma.invoice.findMany({
+  const companyId=await resolveCompanyId()
+  const [invoices,overpayments,credits] = await Promise.all([prisma.invoice.findMany({
     where: {
       balance: { gt: 0 },
       status: { in: ['SENT', 'PAID', 'PARTIAL'] },
+      date: { lte: asOf },
+      companyId,
+      invoiceType: { not: 'CREDIT_NOTE' },
     },
     include: { customer: { select: { id: true, name: true } } },
     orderBy: { dueDate: 'asc' },
-  })
+  }),prisma.payment.findMany({where:{companyId,unappliedAmount:{gt:0},date:{lte:asOf}},include:{customer:{select:{id:true,name:true}}},orderBy:{date:'asc'}}),prisma.invoice.findMany({where:{companyId,invoiceType:'CREDIT_NOTE',balance:{gt:0},date:{lte:asOf}},include:{customer:{select:{id:true,name:true}}},orderBy:{date:'asc'}})])
 
   const buckets: Record<string, { total: number; count: number }> = {
     current: { total: 0, count: 0 },
@@ -20,7 +25,7 @@ export async function buildAgedReceivablesReport(asOf: Date) {
     '90+': { total: 0, count: 0 },
   }
 
-  const details = invoices.map((inv: {
+  const details: Array<Record<string,unknown>&{balance:number}> = invoices.map((inv: {
     id: string; invoiceNo: string; date: Date; dueDate: Date; total: number; balance: number
     customer: { id: string; name: string } | null
   }) => {
@@ -42,6 +47,8 @@ export async function buildAgedReceivablesReport(asOf: Date) {
       bucket,
     }
   })
+  for(const payment of (overpayments as Array<{id:string;paymentNo:string;date:Date;unappliedAmount:number;customer:{id:string;name:string}|null}>).filter(item=>item.customer)){const balance=-Number(payment.unappliedAmount);buckets.current.total+=balance;buckets.current.count+=1;details.push({id:payment.id,invoiceNo:payment.paymentNo,customer:payment.customer,customerName:payment.customer?.name??'',date:payment.date,dueDate:payment.date,total:0,balance,amount:balance,daysPastDue:0,bucket:'current',sourceType:'OVERPAYMENT'})}
+  for(const credit of credits as Array<{id:string;invoiceNo:string;date:Date;balance:number;customer:{id:string;name:string}|null}>){const balance=-Number(credit.balance);buckets.current.total+=balance;buckets.current.count+=1;details.push({id:credit.id,invoiceNo:credit.invoiceNo,customer:credit.customer,customerName:credit.customer?.name??'',date:credit.date,dueDate:credit.date,total:0,balance,amount:balance,daysPastDue:0,bucket:'current',sourceType:'CREDIT_NOTE'})}
 
   const grandTotal = details.reduce((s: number, d: { balance: number }) => s + d.balance, 0)
 
@@ -55,14 +62,17 @@ export async function buildAgedReceivablesReport(asOf: Date) {
 }
 
 export async function buildAgedPayablesReport(asOf: Date) {
-  const bills = await prisma.bill.findMany({
+  const companyId=await resolveCompanyId()
+  const [bills,overpayments,credits] = await Promise.all([prisma.bill.findMany({
     where: {
       balance: { gt: 0 },
       status: { in: ['RECEIVED', 'PAID', 'PARTIAL'] },
+      date: { lte: asOf },
+      companyId,
     },
     include: { vendor: { select: { id: true, name: true } } },
     orderBy: { dueDate: 'asc' },
-  })
+  }),prisma.payment.findMany({where:{companyId,unappliedAmount:{gt:0},date:{lte:asOf}},include:{vendor:{select:{id:true,name:true}}},orderBy:{date:'asc'}}),prisma.vendorCredit.findMany({where:{companyId,balance:{gt:0},date:{lte:asOf}},include:{vendor:{select:{id:true,name:true}}},orderBy:{date:'asc'}})])
 
   const buckets: Record<string, { total: number; count: number }> = {
     current: { total: 0, count: 0 },
@@ -72,7 +82,7 @@ export async function buildAgedPayablesReport(asOf: Date) {
     '90+': { total: 0, count: 0 },
   }
 
-  const details = bills.map((bill: {
+  const details: Array<Record<string,unknown>&{balance:number}> = bills.map((bill: {
     id: string; billNo: string; date: Date; dueDate: Date; total: number; balance: number
     vendor: { id: string; name: string } | null
   }) => {
@@ -94,6 +104,8 @@ export async function buildAgedPayablesReport(asOf: Date) {
       bucket,
     }
   })
+  for(const payment of (overpayments as Array<{id:string;paymentNo:string;date:Date;unappliedAmount:number;vendor:{id:string;name:string}|null}>).filter(item=>item.vendor)){const balance=-Number(payment.unappliedAmount);buckets.current.total+=balance;buckets.current.count+=1;details.push({id:payment.id,billNo:payment.paymentNo,vendor:payment.vendor,vendorName:payment.vendor?.name??'',date:payment.date,dueDate:payment.date,total:0,balance,amount:balance,daysPastDue:0,bucket:'current',sourceType:'OVERPAYMENT'})}
+  for(const credit of credits as Array<{id:string;creditNo:string;date:Date;balance:number;vendor:{id:string;name:string}|null}>){const balance=-Number(credit.balance);buckets.current.total+=balance;buckets.current.count+=1;details.push({id:credit.id,billNo:credit.creditNo,vendor:credit.vendor,vendorName:credit.vendor?.name??'',date:credit.date,dueDate:credit.date,total:0,balance,amount:balance,daysPastDue:0,bucket:'current',sourceType:'VENDOR_CREDIT'})}
 
   const grandTotal = details.reduce((s: number, d: { balance: number }) => s + d.balance, 0)
 

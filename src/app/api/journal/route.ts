@@ -1,30 +1,58 @@
 ﻿import { requireAuth } from '@/lib/auth'
+import { toCamel } from '@/lib/api/db-transform'
 import { prisma } from '@/lib/prisma'
 import { getNextSequence } from '@/lib/sequences'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveCompanyId } from '@/lib/tenant'
 import { maybeStartWorkflow } from '@/lib/workflow/integration'
 
+/**
+ * List journals the same way Recent Activity does: tenant-scoped + soft-delete aware.
+ * The Prisma shim's findMany does not implement AND/OR and does not inject company_id,
+ * so the previous listing query failed and the page silently showed an empty list.
+ */
 export async function GET(request: Request) {
   try {
     await requireAuth()
+    const companyId = await resolveCompanyId()
     const { searchParams } = new URL(request.url)
-    const search = searchParams.get('search') ?? ''
-    const status = searchParams.get('status') ?? ''
+    const search = (searchParams.get('search') ?? '').trim()
+    const status = (searchParams.get('status') ?? '').trim()
+    const client = createAdminClient()
 
-    const entries = await prisma.journalEntry.findMany({
-      where: {
-        AND: [
-          search ? {
-            OR: [
-              { entryNo: { contains: search } },
-              { description: { contains: search } },
-            ],
-          } : {},
-          status ? { status } : {},
-        ],
-      },
-      include: { createdBy: { select: { name: true } }, lines: { include: { account: true } } },
-      orderBy: { date: 'desc' },
+    let query = client
+      .from('journal_entries')
+      .select(`
+        *,
+        created_by:profiles!created_by_id(full_name),
+        lines:journal_lines(
+          *,
+          account:chart_of_accounts(*),
+          cost_center:cost_centers(*)
+        )
+      `)
+      .eq('company_id', companyId)
+      .is('deleted_at', null)
+      .order('date', { ascending: false })
+
+    if (status) query = query.eq('status', status)
+    if (search) {
+      // Strip PostgREST or()-filter metacharacters so user input cannot break the filter.
+      const safe = search.replace(/[%_,.()]/g, ' ').replace(/\s+/g, ' ').trim()
+      if (safe) {
+        query = query.or(`entry_no.ilike.%${safe}%,description.ilike.%${safe}%`)
+      }
+    }
+
+    const { data, error } = await query
+    if (error) throw error
+
+    const entries = (toCamel(data ?? []) as Array<Record<string, unknown>>).map((row) => {
+      const createdBy = row.createdBy as { fullName?: string; name?: string } | null | undefined
+      return {
+        ...row,
+        createdBy: { name: createdBy?.name ?? createdBy?.fullName ?? '' },
+      }
     })
 
     return Response.json(entries)

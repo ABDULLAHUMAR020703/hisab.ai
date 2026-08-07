@@ -25,6 +25,34 @@ export async function buildInventoryValuationReport(options?: {
   const companyId = options?.companyId ?? await resolveCompanyId()
   const client = createAdminClient()
 
+  if (options?.asOf && options.asOf.getTime() < Date.now() - 60_000) {
+    const { data: movements, error: movementError } = await client
+      .from('stock_movements')
+      .select('inventory_item_id,warehouse_id,quantity,unit_cost,item:inventory_items(id,item_code,name,costing_method,standard_cost),warehouse:warehouses(id,name)')
+      .eq('company_id', companyId)
+      .lte('date', options.asOf.toISOString())
+      .order('date', { ascending: true })
+    if (movementError) throw movementError
+    const grouped = new Map<string, ValuationRow>()
+    for (const movement of movements ?? []) {
+      if (options.warehouseId && movement.warehouse_id !== options.warehouseId) continue
+      const key = `${movement.inventory_item_id}:${movement.warehouse_id ?? ''}`
+      const itemValue = Array.isArray(movement.item) ? movement.item[0] : movement.item
+      const warehouseValue = Array.isArray(movement.warehouse) ? movement.warehouse[0] : movement.warehouse
+      const item = itemValue as Record<string, unknown> | null
+      const warehouse = warehouseValue as Record<string, unknown> | null
+      const current = grouped.get(key) ?? { inventoryItemId:String(movement.inventory_item_id),itemCode:String(item?.item_code??''),itemName:String(item?.name??''),warehouseId:String(movement.warehouse_id??''),warehouseName:String(warehouse?.name??''),costingMethod:String(item?.costing_method??'WEIGHTED_AVERAGE'),quantityOnHand:0,quantityReserved:0,quantityAvailable:0,unitCost:0,totalValue:0 }
+      const quantity = Number(movement.quantity ?? 0); const unitCost = Number(movement.unit_cost ?? 0)
+      current.quantityOnHand = roundCost(current.quantityOnHand + quantity)
+      current.totalValue = roundCost(current.totalValue + quantity * unitCost)
+      current.unitCost = Math.abs(current.quantityOnHand) > 0.0001 ? roundCost(current.totalValue / current.quantityOnHand) : 0
+      current.quantityAvailable = current.quantityOnHand
+      grouped.set(key,current)
+    }
+    const rows=[...grouped.values()].filter(row=>Math.abs(row.quantityOnHand)>0.0001||Math.abs(row.totalValue)>0.0001)
+    return {asOf:options.asOf.toISOString(),rows,summary:{itemCount:rows.length,totalQuantity:roundCost(rows.reduce((sum,row)=>sum+row.quantityOnHand,0)),totalValue:roundCost(rows.reduce((sum,row)=>sum+row.totalValue,0))}}
+  }
+
   let query = client
     .from('warehouse_stock')
     .select(`

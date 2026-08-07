@@ -1,0 +1,6 @@
+-- Superseded before deployment by 048_accounting_integrations_namespaced.sql.
+--
+-- QuickBooks OAuth persistence is created with the rest of the namespaced
+-- accounting integration schema in migration 048. This migration is retained
+-- as an intentional no-op so it never alters the generic platform
+-- public.integration_connections table created by migration 037.

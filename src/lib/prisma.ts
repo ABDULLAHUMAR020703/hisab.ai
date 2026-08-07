@@ -30,6 +30,7 @@ const MODEL_TABLES: Record<string, string> = {
   taxRate: 'tax_rates',
   user: 'profiles',
   vendor: 'vendors',
+  vendorCredit: 'vendor_credits',
   zatcaAuditLog: 'zatca_audit_logs',
   zatcaCredential: 'zatca_credentials',
   zatcaOnboardingRequest: 'zatca_onboarding_requests',
@@ -62,6 +63,12 @@ const RELATIONS: Record<string, Record<string, { table: string; local: string; f
   payment: {
     invoice: { table: 'invoices', local: 'invoice_id', foreign: 'id' },
     bill: { table: 'bills', local: 'bill_id', foreign: 'id' },
+    customer: { table: 'customers', local: 'customer_id', foreign: 'id' },
+    vendor: { table: 'vendors', local: 'vendor_id', foreign: 'id' },
+    allocations: { table: 'payment_allocations', local: 'id', foreign: 'payment_id', many: true },
+  },
+  vendorCredit: {
+    vendor: { table: 'vendors', local: 'vendor_id', foreign: 'id' },
   },
   payrollEntry: {
     employee: { table: 'employees', local: 'employee_id', foreign: 'id' },

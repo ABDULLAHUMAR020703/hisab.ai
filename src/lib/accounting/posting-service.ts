@@ -144,10 +144,16 @@ export async function postSourceDocumentToLedger(options: {
     return
   }
 
-  const seq = Number((await client.rpc('next_posting_sequence', { p_company_id: options.companyId })).data ?? 0)
+  const grouped=new Map<string,PostingLine>()
+  for(const line of options.lines.filter((item)=>(item.debit??0)>0||(item.credit??0)>0)){
+    const direction=(line.debit??0)>0?'debit':'credit',key=`${line.accountId}:${direction}`
+    const prior=grouped.get(key)
+    if(prior){prior.debit=(prior.debit??0)+(line.debit??0);prior.credit=(prior.credit??0)+(line.credit??0);if(prior.costCenterId!==line.costCenterId)prior.costCenterId=null}
+    else grouped.set(key,{...line})
+  }
 
   const rows = []
-  for (const line of options.lines.filter((l) => (l.debit ?? 0) > 0 || (l.credit ?? 0) > 0)) {
+  for (const line of grouped.values()) {
     const fx = await resolveFxAmounts({
       debit: line.debit,
       credit: line.credit,
@@ -158,10 +164,7 @@ export async function postSourceDocumentToLedger(options: {
     })
 
     rows.push({
-      company_id: options.companyId,
       account_id: line.accountId,
-      source_type: options.sourceType,
-      source_id: options.sourceId,
       entry_date: options.entryDate.toISOString(),
       description: line.description ?? options.description,
       debit: fx.transactionDebit,
@@ -175,33 +178,19 @@ export async function postSourceDocumentToLedger(options: {
       reporting_debit: fx.reportingDebit,
       reporting_credit: fx.reportingCredit,
       cost_center_id: line.costCenterId ?? null,
-      posting_sequence: seq,
     })
   }
 
   if (rows.length === 0) return
 
-  const { error: insertError } = await client.from('ledger_entries').insert(rows)
-  if (insertError) throw insertError
-
-  for (const line of rows) {
-    const net = (line.base_debit ?? line.debit) - (line.base_credit ?? line.credit)
-    const { data: acc } = await client
-      .from('chart_of_accounts')
-      .select('balance')
-      .eq('id', line.account_id)
-      .eq('company_id', options.companyId)
-      .single()
-
-    const current = Number(acc?.balance ?? 0)
-    const { error: balanceError } = await client
-      .from('chart_of_accounts')
-      .update({ balance: current + net, updated_at: new Date().toISOString() })
-      .eq('id', line.account_id)
-      .eq('company_id', options.companyId)
-
-    if (balanceError) throw balanceError
-  }
+  const { data: sequence, error: postError } = await client.rpc('post_source_document_lines', {
+    p_company_id: options.companyId,
+    p_source_type: options.sourceType,
+    p_source_id: options.sourceId,
+    p_lines: rows,
+  })
+  if (postError) throw postError
+  const seq = Number(sequence ?? 0)
 
   await logPostingAudit({
     action: 'DOCUMENT_POSTED',

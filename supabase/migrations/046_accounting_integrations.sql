@@ -1,0 +1,7 @@
+-- Superseded before deployment by 048_accounting_integrations_namespaced.sql.
+--
+-- The original version of this migration attempted to create
+-- public.integration_connections, which is owned by the generic platform
+-- integration framework introduced in migration 037. This migration is kept as
+-- an intentional no-op so migration ordering remains stable without touching
+-- the existing platform integration tables.

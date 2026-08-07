@@ -2,33 +2,7 @@ import { requireAuth } from '@/lib/auth'
 import { toCamel } from '@/lib/api/db-transform'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveCompanyId } from '@/lib/tenant'
-
-async function adjustAccountBalance(
-  client: ReturnType<typeof createAdminClient>,
-  companyId: string,
-  accountId: string,
-  delta: number,
-) {
-  const { data: account, error } = await client
-    .from('bank_accounts')
-    .select('current_balance')
-    .eq('id', accountId)
-    .eq('company_id', companyId)
-    .single()
-
-  if (error) throw error
-
-  const { error: updateError } = await client
-    .from('bank_accounts')
-    .update({
-      current_balance: Number(account.current_balance) + delta,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', accountId)
-    .eq('company_id', companyId)
-
-  if (updateError) throw updateError
-}
+import { recordBankTransaction } from '@/lib/banking/transactions'
 
 export async function GET(request: Request) {
   try {
@@ -79,30 +53,7 @@ export async function POST(request: Request) {
 
     const txnType = type ?? 'DEBIT'
     const txnAmount = Math.abs(Number(amount))
-    const client = createAdminClient()
-
-    const { data, error } = await client
-      .from('bank_transactions')
-      .insert({
-        company_id: companyId,
-        bank_account_id: bankAccountId,
-        transaction_date: new Date(transactionDate).toISOString(),
-        description,
-        reference: reference ?? null,
-        amount: txnAmount,
-        type: txnType,
-        status: status ?? 'UNMATCHED',
-        payment_id: paymentId ?? null,
-        imported_from: null,
-      })
-      .select('*, bank_account:bank_accounts(name, currency)')
-      .single()
-
-    if (error) throw error
-
-    const balanceDelta = txnType === 'CREDIT' ? txnAmount : -txnAmount
-    await adjustAccountBalance(client, companyId, bankAccountId, balanceDelta)
-
+    const data=await recordBankTransaction({companyId,bankAccountId,transactionDate:new Date(transactionDate),description,reference,amount:txnAmount,type:txnType,status,paymentId})
     return Response.json(toCamel(data), { status: 201 })
   } catch (error) {
     if (error instanceof Error && error.message === 'Unauthorized') {

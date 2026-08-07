@@ -16,12 +16,12 @@ export async function POST(
     resolveModuleParam(moduleKey)
 
     const body = await request.json()
-    const module = getModuleDefinition(moduleKey)
-    const { mappedRows, validation } = buildMappedImportPayload(module, body)
+    const definition = getModuleDefinition(moduleKey)
+    const { mappedRows, validation } = buildMappedImportPayload(definition, body)
 
     const companyId = await resolveCompanyId()
     const validRows = mappedRows.filter((row) => validation.validRowNumbers.includes(row.rowNumber))
-    const duplicates = await detectDuplicates(module, validRows, { companyId, userId: user.id })
+    const duplicates = await detectDuplicates(definition, validRows, { companyId, userId: user.id })
 
     const issuesWithDuplicates = [...validation.issues]
     for (const duplicate of duplicates) {

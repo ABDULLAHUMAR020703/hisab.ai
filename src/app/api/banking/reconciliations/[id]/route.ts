@@ -12,7 +12,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
     const { data, error } = await client
       .from('bank_reconciliations')
-      .select('*, bank_account:bank_accounts(name, currency, current_balance)')
+      .select('*, bank_account:bank_accounts(name, currency, current_balance), items:bank_reconciliation_items(*, bank_transaction:bank_transactions(*))')
       .eq('id', id)
       .eq('company_id', companyId)
       .maybeSingle()
@@ -47,14 +47,19 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     if (!existing) return Response.json({ error: 'Not found' }, { status: 404 })
 
     const nextStatus = body.status ?? existing.status
+    if(nextStatus==='COMPLETED'){
+      const transactionIds=Array.isArray(body.transactionIds)?body.transactionIds.map(String):null
+      const completed=await client.rpc('complete_bank_reconciliation',{p_company_id:companyId,p_reconciliation_id:id,p_transaction_ids:transactionIds})
+      if(completed.error)throw completed.error
+      const result=await client.from('bank_reconciliations').select('*, bank_account:bank_accounts(name, currency, current_balance), items:bank_reconciliation_items(*, bank_transaction:bank_transactions(*))').eq('id',id).eq('company_id',companyId).single()
+      if(result.error)throw result.error
+      return Response.json(toCamel(result.data))
+    }
     const patch: Record<string, unknown> = {}
     if (body.statementDate !== undefined) patch.statement_date = new Date(body.statementDate).toISOString()
     if (body.statementBalance !== undefined) patch.statement_balance = Number(body.statementBalance)
     if (body.reconciledBalance !== undefined) patch.reconciled_balance = Number(body.reconciledBalance)
     if (body.status !== undefined) patch.status = body.status
-    if (nextStatus === 'COMPLETED' && existing.status !== 'COMPLETED') {
-      patch.completed_at = new Date().toISOString()
-    }
 
     const { data, error } = await client
       .from('bank_reconciliations')
@@ -65,15 +70,6 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       .single()
 
     if (error) throw error
-
-    if (nextStatus === 'COMPLETED') {
-      await client
-        .from('bank_transactions')
-        .update({ status: 'RECONCILED' })
-        .eq('company_id', companyId)
-        .eq('bank_account_id', existing.bank_account_id)
-        .eq('status', 'MATCHED')
-    }
 
     return Response.json(toCamel(data))
   } catch (error) {

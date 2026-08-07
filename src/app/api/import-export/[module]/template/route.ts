@@ -27,9 +27,9 @@ export async function GET(
       return Response.json({ error: 'Invalid format' }, { status: 400 })
     }
 
-    const module = getModuleDefinition(moduleKey)
+    const definition = getModuleDefinition(moduleKey)
     const templateId = searchParams.get('templateId')
-    const official = getOfficialTemplateById(module.officialTemplates, templateId)
+    const official = getOfficialTemplateById(definition.officialTemplates, templateId)
 
     if (official) {
       const payload = serializeOfficialTemplate(format, official)
@@ -41,9 +41,9 @@ export async function GET(
       })
     }
 
-    const headers = getExportHeaders(module.fields)
-    const labels = getExportLabels(module.fields)
-    const rows = buildTemplateRows(module.fields)
+    const headers = getExportHeaders(definition.fields)
+    const labels = getExportLabels(definition.fields)
+    const rows = buildTemplateRows(definition.fields)
     const payload = serializeExport(format, headers, rows, labels)
 
     return new Response(payload.content, {

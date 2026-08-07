@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1
+
+FROM node:22-alpine
+
+WORKDIR /app
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 worker
+
+COPY package.json package-lock.json* ./
+# Temporary dependency diagnostics: keep this until the Coolify build confirms
+# the lockfile contains every optional @emnapi package needed by sharp/Tailwind.
+RUN echo '--- package.json ---' && cat package.json && \
+    echo '--- @emnapi/sharp lock entries ---' && \
+    node -e "const l=require('./package-lock.json'); for(const [k,v] of Object.entries(l.packages||{})){if(k.includes('@emnapi')||k.includes('sharp-wasm32')) console.log(k, JSON.stringify({version:v.version,resolved:v.resolved,dependencies:v.dependencies,optionalDependencies:v.optionalDependencies}, null, 2));}"
+RUN npm ci
+COPY --chown=worker:nodejs . .
+
+USER worker
+
+CMD ["npm", "run", "worker"]

@@ -1,0 +1,220 @@
+{
+  "event": "quickbooks_cli_benchmark",
+  "module": "customers",
+  "moduleKey": "customers",
+  "companyId": "00000000-0000-4000-8000-000000000001",
+  "realmId": "9341457612363747",
+  "duplicateStrategy": "update",
+  "batchSize": 100,
+  "startedAt": "2026-08-06T06:52:29.296Z",
+  "finishedAt": "2026-08-06T06:53:27.304Z",
+  "totals": {
+    "durationMs": 58007,
+    "rowsFetched": 26,
+    "validRows": 26,
+    "invalidRows": 0,
+    "imported": 0,
+    "updated": 26,
+    "skipped": 0,
+    "failed": 0,
+    "rowsPerSecond": 0.45,
+    "instrumentationOverheadMs": 6
+  },
+  "stages": [
+    {
+      "name": "fetch",
+      "durationMs": 4809,
+      "percentOfTotal": 8.29
+    },
+    {
+      "name": "mapping",
+      "durationMs": 1,
+      "percentOfTotal": 0
+    },
+    {
+      "name": "validation",
+      "durationMs": 15,
+      "percentOfTotal": 0.03
+    },
+    {
+      "name": "duplicate_detection",
+      "durationMs": 231,
+      "percentOfTotal": 0.4
+    },
+    {
+      "name": "import_processing",
+      "durationMs": 52949,
+      "percentOfTotal": 91.28
+    },
+    {
+      "name": "finalize",
+      "durationMs": 1,
+      "percentOfTotal": 0
+    }
+  ],
+  "stageDetail": {
+    "authenticationMs": 692,
+    "authTokenRequests": 0,
+    "authTokenMs": 0,
+    "quickBooksApiMs": 2435,
+    "stagingWriteMs": 979,
+    "stagingWriteCalls": 4,
+    "checkpointMs": 677,
+    "checkpointCalls": 3,
+    "fetchOverheadMs": 718,
+    "persistenceDbMs": 52626,
+    "persistenceDbCalls": 234,
+    "persistenceOverheadMs": 323
+  },
+  "throughput": {
+    "fetchRowsPerSecond": 5.41,
+    "mappingRowsPerSecond": 41282.95,
+    "validationRowsPerSecond": 1741.24,
+    "persistenceRowsPerSecond": 0.49,
+    "totalRowsPerSecond": 0.45
+  },
+  "api": {
+    "calls": 1,
+    "totalMs": 2435,
+    "averageMs": 2435,
+    "slowestMs": 2435,
+    "totalBytes": 30417,
+    "perEntity": [
+      {
+        "entity": "Customer",
+        "calls": 1,
+        "totalMs": 2435,
+        "averageMs": 2435,
+        "slowestMs": 2435,
+        "rowsReturned": 29,
+        "averageRowsPerCall": 29,
+        "totalBytes": 30417,
+        "largestPayloadBytes": 30417
+      }
+    ]
+  },
+  "database": {
+    "calls": 247,
+    "totalMs": 55767,
+    "perTable": [
+      {
+        "table": "quickbooks_migration_records",
+        "calls": 78,
+        "totalMs": 17605,
+        "averageMs": 226
+      },
+      {
+        "table": "customers",
+        "calls": 53,
+        "totalMs": 11899,
+        "averageMs": 225
+      },
+      {
+        "table": "company_currencies",
+        "calls": 52,
+        "totalMs": 11683,
+        "averageMs": 225
+      },
+      {
+        "table": "quickbooks_migration_local_links",
+        "calls": 52,
+        "totalMs": 11667,
+        "averageMs": 224
+      },
+      {
+        "table": "quickbooks_extraction_staging",
+        "calls": 4,
+        "totalMs": 979,
+        "averageMs": 245
+      },
+      {
+        "table": "accounting_integration_connections",
+        "calls": 3,
+        "totalMs": 699,
+        "averageMs": 233
+      },
+      {
+        "table": "quickbooks_migration_checkpoints",
+        "calls": 3,
+        "totalMs": 677,
+        "averageMs": 226
+      },
+      {
+        "table": "accounting_integration_providers",
+        "calls": 2,
+        "totalMs": 558,
+        "averageMs": 279
+      }
+    ]
+  },
+  "operations": [
+    {
+      "name": "source_link_archive",
+      "calls": 26,
+      "totalMs": 17685.085799999993,
+      "maxMs": 696.3583999999973,
+      "failed": 0,
+      "averageMs": 680.1956076923075,
+      "percentage": 33.25487133504489
+    },
+    {
+      "name": "source_archive",
+      "calls": 26,
+      "totalMs": 11801.496000000017,
+      "maxMs": 477.96700000000055,
+      "failed": 0,
+      "averageMs": 453.90369230769295,
+      "percentage": 22.19142363680518
+    },
+    {
+      "name": "native_update",
+      "calls": 26,
+      "totalMs": 11758.189900000003,
+      "maxMs": 463.5806999999986,
+      "failed": 0,
+      "averageMs": 452.2380730769232,
+      "percentage": 22.10999124796582
+    },
+    {
+      "name": "source_link_verification",
+      "calls": 26,
+      "totalMs": 11689.773900000018,
+      "maxMs": 501.59159999999974,
+      "failed": 0,
+      "averageMs": 449.6066884615392,
+      "percentage": 21.981342436024068
+    },
+    {
+      "name": "dependency_validation",
+      "calls": 26,
+      "totalMs": 2.706300000012561,
+      "maxMs": 0.44239999999990687,
+      "failed": 0,
+      "averageMs": 0.10408846153894466,
+      "percentage": 0.005088901423053867
+    },
+    {
+      "name": "accounting_materialization",
+      "calls": 26,
+      "totalMs": 1.1506000000099448,
+      "maxMs": 0.5885999999991327,
+      "failed": 0,
+      "averageMs": 0.04425384615422864,
+      "percentage": 0.002163577569888486
+    },
+    {
+      "name": "accounting_verification",
+      "calls": 26,
+      "totalMs": 0.3185999999932392,
+      "maxMs": 0.21050000000104774,
+      "failed": 0,
+      "averageMs": 0.012253846153586122,
+      "percentage": 0.0005990924854388026
+    }
+  ],
+  "heap": {
+    "startBytes": 34750392,
+    "peakBytes": 34750392,
+    "finishBytes": 29194680
+  }
+}

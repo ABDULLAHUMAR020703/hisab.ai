@@ -2,6 +2,29 @@ import type { ColumnMapping, FieldDefinition } from '../types'
 import { getSynonymsForField } from './synonyms'
 import { normalizeHeader } from './normalize-header'
 
+/** Provider-owned migration metadata is transported outside user mappings. */
+export const PROTECTED_MIGRATION_FIELDS = new Set([
+  '_realmId',
+  '_quickbooksId',
+  '_quickbooksEntity',
+  '_quickbooksRaw',
+  '_quickbooksMeta',
+  '_quickbooksSyncToken',
+  '_quickbooksRelationships',
+  '_quickbooksCustomFields',
+  '_syncToken',
+  '_linkedTransactions',
+  '_customFields',
+  '_active',
+  '_deleted',
+  '_hisabAttachment',
+  'SyncToken',
+])
+
+export function isProtectedMigrationField(key: string): boolean {
+  return PROTECTED_MIGRATION_FIELDS.has(key) || key.startsWith('_quickbooks')
+}
+
 export function validateMappingConflicts(mapping: ColumnMapping): string | null {
   const targetToSource = new Map<string, string>()
   for (const [source, target] of Object.entries(mapping)) {
@@ -74,6 +97,9 @@ export function applyColumnMapping(
       if (value !== undefined) {
         mapped[targetField] = value
       }
+    }
+    for (const [key, value] of Object.entries(row)) {
+      if (isProtectedMigrationField(key)) mapped[key] = value
     }
     return { rowNumber: index + 1, source: row, mapped }
   })

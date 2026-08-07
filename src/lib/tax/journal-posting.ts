@@ -6,7 +6,7 @@ import type { ComputedTaxComponent } from './calculator'
 export interface TaxJournalContext {
   companyId: string
   documentNo: string
-  documentType: 'INVOICE' | 'BILL'
+  documentType: 'INVOICE' | 'BILL' | 'EXPENSE' | 'VENDOR_CREDIT' | 'SALES_RECEIPT'
   isSales: boolean
   components: ComputedTaxComponent[]
 }

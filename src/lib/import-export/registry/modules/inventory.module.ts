@@ -9,6 +9,7 @@ import {
 import type { DuplicateMatch, MappedRow, ModuleDefinition } from '../../types'
 import { INVENTORY_FIELDS } from './inventory.fields'
 import { INVENTORY_OFFICIAL_TEMPLATES } from './inventory.official-templates'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 export { INVENTORY_FIELDS } from './inventory.fields'
 
@@ -25,6 +26,17 @@ function parseInventoryImportRow(mapped: Record<string, unknown>) {
     minQuantity: parseNumberField(mapped.minQuantity, 0),
     isActive: parseBooleanField(mapped.isActive, true),
   }
+}
+
+async function applyQuickBooksInventoryPolicy(id:string,record:Record<string,unknown>){
+  if(typeof record._quickbooksRaw!=='string')return
+  let raw:Record<string,unknown>
+  try{raw=JSON.parse(record._quickbooksRaw) as Record<string,unknown>}catch{return}
+  if(String(raw.Type??'').toLowerCase()!=='inventory')return
+  // QuickBooks permits dated sales that temporarily drive stock negative.
+  // Preserve that source behaviour during historical replay.
+  const updated=await createAdminClient().from('inventory_items').update({allow_negative_stock:true}).eq('id',id)
+  if(updated.error)throw updated.error
 }
 
 export const inventoryModule: ModuleDefinition = {
@@ -95,12 +107,14 @@ export const inventoryModule: ModuleDefinition = {
   async createRecord(record) {
     const parsed = parseInventoryImportRow(record)
     const created = await getInventoryRepository().create(parsed)
+    await applyQuickBooksInventoryPolicy(created.id,record)
     return { id: created.id }
   },
 
   async updateRecord(id, record) {
     const parsed = parseInventoryImportRow(record)
     await getInventoryRepository().update(id, parsed)
+    await applyQuickBooksInventoryPolicy(id,record)
   },
 
   async exportRecords(filters) {

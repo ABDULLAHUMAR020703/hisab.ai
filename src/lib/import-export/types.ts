@@ -8,6 +8,7 @@ export type ImportJobStatus =
   | 'mapping'
   | 'validating'
   | 'processing'
+  | 'paused'
   | 'completed'
   | 'failed'
   | 'cancelled'
@@ -71,6 +72,8 @@ export interface ModuleDefinition {
   findDuplicate: (record: Record<string, unknown>, ctx: ImportContext) => Promise<{ id: string; matchedOn: string[] } | null>
   createRecord: (record: Record<string, unknown>, ctx: ImportContext) => Promise<{ id: string }>
   updateRecord: (id: string, record: Record<string, unknown>, ctx: ImportContext) => Promise<void>
+  /** Compensates a failed create before it can be reported as imported. */
+  rollbackCreatedRecord?: (id: string, ctx: ImportContext) => Promise<void>
   exportRecords: (filters: Record<string, string>, ctx: ImportContext) => Promise<unknown[]>
   mapExportRow: (record: unknown) => Record<string, string | number | boolean | null>
   parseImportRow?: (mapped: Record<string, unknown>) => Record<string, unknown>
@@ -123,6 +126,9 @@ export interface DuplicateMatch {
 export interface ImportContext {
   companyId: string
   userId: string
+  performance?: {
+    measureOperation<T>(name: string, operation: () => Promise<T> | T): Promise<T>
+  }
 }
 
 export interface ImportProcessorResult {
@@ -131,6 +137,19 @@ export interface ImportProcessorResult {
   skippedCount: number
   failedCount: number
   errors: ImportRowError[]
+  skippedRecords: SkippedRecordDiagnostic[]
+  paused?: boolean
+}
+
+export type SkipReason = 'duplicate' | 'inactive' | 'filtered' | 'validation_failed' | 'unsupported_type' | 'other'
+
+export interface SkippedRecordDiagnostic {
+  rowNumber: number
+  sourceId?: string
+  recordName?: string
+  reason: SkipReason
+  duplicateKey?: string
+  existingRecordId?: string
 }
 
 export interface ImportRowError {
@@ -139,6 +158,7 @@ export interface ImportRowError {
   errorCode: string
   message: string
   rawRow?: Record<string, unknown>
+  details?: import('./import/import-error').ImportErrorDetails
 }
 
 export interface ImportJobRecord {
@@ -167,6 +187,70 @@ export interface ImportJobRecord {
   errorSummary: Record<string, number> | null
   createdAt: string
   updatedAt: string
+  batchSize?: number
+  batchCursor?: number
+  retryCount?: number
+  pausedAt?: string | null
+  lastHeartbeatAt?: string | null
+  payloadSnapshot?: Record<string, unknown> | null
+  progressSnapshot?: MigrationProgressSnapshot | null
+  activityEvents?: MigrationActivityEvent[]
+  skipSummary?: Record<string, number> | null
+}
+
+export interface MigrationActivityEvent {
+  id: string
+  at: string
+  type: string
+  message: string
+  module?: string | null
+  stage?: string | null
+  batch?: number | null
+  records?: number | null
+  durationMs?: number | null
+  warningCount?: number | null
+}
+
+/** Module-level failure persisted on `import_jobs.progress_snapshot.failure`. */
+export interface ModuleFailureSnapshot {
+  message: string
+  stage: string | null
+  errorCode: string | null
+  errorType: string | null
+  correlationId: string | null
+  retryable: boolean
+  rowNumber: number | null
+  /** Present only outside production — never the primary Errors panel copy. */
+  stack: string | null
+}
+
+export interface MigrationProgressSnapshot {
+  currentModule?: string | null
+  currentStage?: string | null
+  currentBatch?: number | null
+  totalBatches?: number | null
+  currentRecord?: string | null
+  estimatedTotalRecords?: number | null
+  processedRecords?: number
+  importedCount?: number
+  updatedCount?: number
+  skippedCount?: number
+  failedCount?: number
+  throughput?: number | null
+  averageThroughput?: number | null
+  apiRequests?: number
+  databaseQueries?: number
+  databaseWrites?: number
+  databaseTimeMs?: number
+  apiTimeMs?: number
+  retryCount?: number
+  memoryBytes?: number | null
+  startedAt?: string | null
+  /** Cumulative time spent inside claimed worker steps; excludes queue and pause time. */
+  activeProcessingMs?: number
+  progressPercent?: number
+  stages?: Record<string, { status: 'pending' | 'running' | 'completed' | 'failed'; durationMs?: number; progress?: number }>
+  failure?: ModuleFailureSnapshot | null
 }
 
 export interface MappingTemplateRecord {
@@ -192,6 +276,7 @@ export const ACTIVE_JOB_STATUSES: ImportJobStatus[] = [
   'processing',
 ]
 
-export const MAX_IMPORT_ROWS = 10_000
+/** File imports are streamed/batched by the job runner; no QuickBooks-sized row ceiling. */
+export const MAX_IMPORT_ROWS = Number.MAX_SAFE_INTEGER
 export const MAX_EXPORT_ROWS = 50_000
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024

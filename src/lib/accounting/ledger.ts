@@ -79,54 +79,27 @@ export async function aggregateLedgerBalances(options: {
   const companyId = options.companyId ?? await resolveCompanyId()
   const client = createAdminClient()
 
-  let ledgerQuery = client
-    .from('ledger_entries')
-    .select('account_id, debit, credit')
-    .eq('company_id', companyId)
+  const upperBound = options.asOf ?? options.to
+  const { data: accounts, error } = await client.rpc('aggregate_ledger_balances_for_report', {
+    p_company_id: companyId,
+    p_from: options.from?.toISOString() ?? null,
+    p_to: upperBound?.toISOString() ?? null,
+  })
+  if (error) throw error
 
-  if (options.asOf) ledgerQuery = ledgerQuery.lte('entry_date', options.asOf.toISOString())
-  if (options.from) ledgerQuery = ledgerQuery.gte('entry_date', options.from.toISOString())
-  if (options.to) ledgerQuery = ledgerQuery.lte('entry_date', options.to.toISOString())
-
-  const { data: ledgerRows, error: ledgerError } = await ledgerQuery
-  if (ledgerError) throw ledgerError
-
-  let accountsQuery = client
-    .from('chart_of_accounts')
-    .select('id, account_no, name, full_name, canonical_type, normal_balance, sub_type, is_active')
-    .eq('company_id', companyId)
-    .is('deleted_at', null)
-    .neq('sub_type', 'Header')
-
-  if (options.canonicalTypes?.length) {
-    accountsQuery = accountsQuery.in('canonical_type', options.canonicalTypes)
-  }
-
-  const { data: accounts, error: accountsError } = await accountsQuery
-  if (accountsError) throw accountsError
-
-  const totals = new Map<string, { debit: number; credit: number }>()
-  for (const row of ledgerRows ?? []) {
-    const accountId = String(row.account_id)
-    const bucket = totals.get(accountId) ?? { debit: 0, credit: 0 }
-    bucket.debit += Number(row.debit ?? 0)
-    bucket.credit += Number(row.credit ?? 0)
-    totals.set(accountId, bucket)
-  }
-
-  return (accounts ?? []).map((acc) => {
-    const agg = totals.get(String(acc.id)) ?? { debit: 0, credit: 0 }
+  return (accounts ?? []).filter((acc: Record<string,unknown>) => !options.canonicalTypes?.length || options.canonicalTypes.includes(String(acc.canonical_type) as CanonicalAccountType)).map((acc: Record<string,unknown>) => {
     const canonicalType = String(acc.canonical_type ?? 'Asset') as CanonicalAccountType
     const normalBalance = String(acc.normal_balance ?? 'DEBIT') as NormalBalance
+    const debit=Number(acc.total_debit??0);const credit=Number(acc.total_credit??0)
     return {
-      accountId: String(acc.id),
+      accountId: String(acc.account_id),
       accountNo: String(acc.account_no),
-      accountName: String(acc.full_name ?? acc.name),
+      accountName: String(acc.account_name),
       canonicalType,
       normalBalance,
-      totalDebit: agg.debit,
-      totalCredit: agg.credit,
-      balance: signedBalance(agg.debit, agg.credit, normalBalance),
+      totalDebit: debit,
+      totalCredit: credit,
+      balance: signedBalance(debit,credit, normalBalance),
     }
   })
 }
@@ -147,7 +120,7 @@ export async function getGeneralLedgerReport(options: {
     .select(`
       *,
       account:chart_of_accounts!ledger_entries_account_id_fkey(account_no, name, account_type, canonical_type, normal_balance),
-      cost_center:cost_centers(name)
+      cost_center:cost_centers(name,type)
     `, { count: 'exact' })
     .eq('company_id', companyId)
     .gte('entry_date', options.from.toISOString())
@@ -186,7 +159,7 @@ export async function getGeneralLedgerReport(options: {
             accountType: account.canonical_type ?? account.account_type,
           }
         : null,
-      costCenter: costCenter ? { name: costCenter.name } : null,
+      costCenter: costCenter ? { name: costCenter.name, type: costCenter.type } : null,
     }
   })
 

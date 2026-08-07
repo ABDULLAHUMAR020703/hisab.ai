@@ -13,6 +13,8 @@ import { PreviewStep } from './steps/PreviewStep'
 import { ValidationSummary } from './ValidationSummary'
 import { DuplicateStep } from './steps/DuplicateStep'
 import { MappingTemplateDialog } from './MappingTemplateDialog'
+import { ConnectedSourceFlow } from './steps/ConnectedSourceFlow'
+import { useMigrationSession } from './MigrationSessionProvider'
 
 type WizardStep =
   | 'upload'
@@ -23,7 +25,7 @@ type WizardStep =
   | 'importing'
   | 'complete'
 
-interface ImportWizardProps {
+interface FileImportWizardProps {
   open: boolean
   onClose: () => void
   onSuccess?: () => void
@@ -32,16 +34,26 @@ interface ImportWizardProps {
   fields: FieldDefinition[]
 }
 
+interface ImportWizardProps {
+  open: boolean
+  onClose: () => void
+  onSuccess?: () => void
+  moduleKey?: string
+  moduleLabel?: string
+  fields?: FieldDefinition[]
+  initialSource?: string
+}
+
 const STEPS: WizardStep[] = ['upload', 'mapping', 'preview', 'validation', 'duplicates', 'importing', 'complete']
 
-export function ImportWizard({
+function FileImportWizard({
   open,
   onClose,
   onSuccess,
   moduleKey,
   moduleLabel,
   fields,
-}: ImportWizardProps) {
+}: FileImportWizardProps) {
   const [step, setStep] = useState<WizardStep>('upload')
   const [filename, setFilename] = useState('')
   const [fileFormat, setFileFormat] = useState<'csv' | 'xlsx'>('csv')
@@ -50,7 +62,6 @@ export function ImportWizard({
   const [mapping, setMapping] = useState<Record<string, string | null>>({})
   const [headerFingerprint, setHeaderFingerprint] = useState('')
   const [validation, setValidation] = useState<ValidationResult | null>(null)
-  const [mappedPreview, setMappedPreview] = useState<Array<{ rowNumber: number; mapped: Record<string, unknown> }>>([])
   const [duplicateMatches, setDuplicateMatches] = useState<DuplicateMatch[]>([])
   const [duplicateStrategy, setDuplicateStrategy] = useState<DuplicateStrategy>('skip')
   const [loading, setLoading] = useState(false)
@@ -77,7 +88,6 @@ export function ImportWizard({
     setMapping({})
     setHeaderFingerprint('')
     setValidation(null)
-    setMappedPreview([])
     setDuplicateMatches([])
     setDuplicateStrategy('skip')
     setLoading(false)
@@ -106,7 +116,6 @@ export function ImportWizard({
       if (!response.ok) throw new Error(await readApiError(response))
       const payload = await response.json()
       setValidation(payload.validation)
-      setMappedPreview(payload.previewRows ?? [])
       setDuplicateMatches(payload.duplicates ?? [])
       setStep('validation')
     } catch (err) {
@@ -346,4 +355,21 @@ export function ImportWizard({
       />
     </>
   )
+}
+
+export function ImportWizard(props: ImportWizardProps) {
+  const { session, cancelSession } = useMigrationSession()
+  if (!props.moduleKey || !props.moduleLabel || !props.fields) {
+    return (
+      <ConnectedSourceFlow
+        open={props.open}
+        onClose={props.onClose}
+        onSuccess={props.onSuccess}
+        persistentSession={session}
+        onCancelSession={cancelSession}
+        initialSource={props.initialSource}
+      />
+    )
+  }
+  return <FileImportWizard {...props as FileImportWizardProps} />
 }

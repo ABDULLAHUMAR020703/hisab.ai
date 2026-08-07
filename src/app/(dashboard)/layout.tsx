@@ -7,13 +7,14 @@ import {
   LayoutDashboard, BookOpen, FileText, Users, Receipt, CreditCard,
   Building2, DollarSign, UserCheck, Package, MapPin, Camera, Briefcase,
   BarChart3, Shield, UserCog, Settings, LogOut, ChevronLeft,
-  Menu, List, Bell, ChevronDown, TrendingUp, History, Database,
-  ClipboardList, ShoppingCart, Banknote, BadgePercent, Landmark, Wallet, Wand2, ArrowRightLeft, GitBranch, Cog, Hash, Repeat2
+  Menu, List, Bell, ChevronDown, TrendingUp, History, Database, Blocks,
+  ClipboardList, ShoppingCart, Banknote, BadgePercent, Landmark, Wallet, Wand2, ArrowRightLeft, GitBranch, Cog, Hash, Repeat2, Gauge
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PRODUCT_NAME } from '@/lib/brand'
 import { CompanyCurrencyProvider } from '@/hooks/use-company-currency'
 import { DEFAULT_CURRENCY, isSaudiArabia } from '@/lib/currency/constants'
+import { MigrationSessionProvider } from '@/components/import-export/MigrationSessionProvider'
 
 const NAV = [
   {
@@ -30,6 +31,7 @@ const NAV = [
       { label: 'Journal Entry', href: '/journal', icon: BookOpen },
       { label: 'Currency Revaluation', href: '/currency/revaluation', icon: ArrowRightLeft },
       { label: 'Master Data', href: '/master-data', icon: Database },
+      { label: 'Accounting Operations', href: '/accounting-operations', icon: ClipboardList },
     ]
   },
   {
@@ -102,8 +104,11 @@ const NAV = [
       { label: 'Approvals', href: '/workflows', icon: GitBranch },
       { label: 'Users', href: '/users', icon: UserCog },
       { label: 'Migration Wizard', href: '/migration-wizard', icon: Wand2 },
+      { label: 'Migration Center', href: '/migration-center', icon: Gauge },
+      { label: 'Migration History', href: '/migration-history', icon: ClipboardList },
       { label: 'Import History', href: '/import-history', icon: History },
       { label: 'Settings', href: '/settings', icon: Settings },
+      { label: 'Integrations', href: '/settings/integrations', icon: Blocks },
       { label: 'Document Numbering', href: '/settings/document-numbering', icon: Hash },
     ]
   },
@@ -381,7 +386,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   )
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: 'var(--bg)' }}>
+    <MigrationSessionProvider>
+      <div className="flex h-screen overflow-hidden" style={{ background: 'var(--bg)' }}>
 
       {/* Desktop Sidebar */}
       <aside
@@ -582,6 +588,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </main>
       </div>
-    </div>
+      </div>
+    </MigrationSessionProvider>
   )
 }

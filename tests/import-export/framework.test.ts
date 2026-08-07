@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, it } from 'node:test'
+import { fileURLToPath } from 'node:url'
 import { autoMapColumns, applyColumnMapping, validateMappingConflicts, validateRequiredMapping } from '../../src/lib/import-export/mapping/auto-mapper'
 import { parseCsv, findDuplicateHeaders } from '../../src/lib/import-export/parsers/csv-parser'
 import { parseExcel } from '../../src/lib/import-export/parsers/excel-parser'
@@ -18,7 +19,7 @@ import { EMPLOYEE_FIELDS } from '../../src/lib/import-export/registry/modules/em
 import { TAX_RATE_FIELDS } from '../../src/lib/import-export/registry/modules/tax-rates.fields'
 import { MODULE_CATALOG } from '../../src/lib/import-export/registry/module-catalog'
 
-const ROOT = path.resolve(import.meta.dirname ?? path.dirname(new URL(import.meta.url).pathname), '../..')
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const TEST_DATA = path.join(ROOT, 'test-data')
 
 const ALL_FIELDS = [
@@ -46,13 +47,15 @@ function parseFixture(moduleKey: string, size: string, format: 'csv' | 'xlsx') {
 }
 
 describe('module catalog', () => {
-  it('lists all 7 migrated modules', () => {
-    assert.equal(MODULE_CATALOG.length, 7)
+  it('lists base, transaction, and extended QuickBooks migration modules without duplicate keys', () => {
     const keys = MODULE_CATALOG.map((m) => m.key)
-    assert.deepEqual(keys, [
+    assert.deepEqual(keys.slice(0,8), [
       'customers', 'vendors', 'inventory', 'accounts',
-      'cost-centers', 'employees', 'tax-rates',
+      'cost-centers', 'employees', 'tax-rates', 'payment-terms',
     ])
+    assert.equal(new Set(keys).size,keys.length)
+    const keySet=new Set<string>(keys)
+    for (const key of ['invoices','bills','qb-projects','qb-budgets','qb-attachments','qb-preferences']) assert.equal(keySet.has(key),true)
   })
 })
 

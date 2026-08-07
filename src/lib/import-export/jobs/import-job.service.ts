@@ -1,12 +1,18 @@
 import 'server-only'
 import { resolveCompanyId, supabaseDb } from '@/lib/db/repository-utils'
+import { logger } from '@/lib/ops/logger'
+import { assertImportJobSchemaCompatibility } from '@/lib/platform/schema-compatibility'
 import type {
   DuplicateStrategy,
   FileFormat,
   ImportJobRecord,
   ImportJobStatus,
   ImportRowError,
+  MigrationActivityEvent,
+  MigrationProgressSnapshot,
+  SkippedRecordDiagnostic,
 } from '../types'
+import { finalizeProgressSnapshot, mergeImportJobProgress } from './progress-merge'
 
 function mapJobRow(row: Record<string, unknown>): ImportJobRecord {
   return {
@@ -35,6 +41,15 @@ function mapJobRow(row: Record<string, unknown>): ImportJobRecord {
     errorSummary: (row.error_summary as Record<string, number> | null) ?? null,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
+    batchSize: Number(row.batch_size ?? 250),
+    batchCursor: Number(row.batch_cursor ?? 0),
+    retryCount: Number(row.retry_count ?? 0),
+    pausedAt: row.paused_at ? String(row.paused_at) : null,
+    lastHeartbeatAt: row.last_heartbeat_at ? String(row.last_heartbeat_at) : null,
+    payloadSnapshot: (row.payload_snapshot as Record<string, unknown> | null) ?? null,
+    progressSnapshot: (row.progress_snapshot as MigrationProgressSnapshot | null) ?? null,
+    activityEvents: Array.isArray(row.activity_events) ? row.activity_events as MigrationActivityEvent[] : [],
+    skipSummary: (row.skip_summary as Record<string, number> | null) ?? null,
   }
 }
 
@@ -46,6 +61,8 @@ export async function createImportJob(input: {
   duplicateStrategy?: DuplicateStrategy
   mappingSnapshot?: Record<string, string>
   totalRows?: number
+  payloadSnapshot?: Record<string, unknown>
+  batchSize?: number
 }): Promise<ImportJobRecord> {
   const db = supabaseDb()
   const companyId = await resolveCompanyId()
@@ -64,17 +81,22 @@ export async function createImportJob(input: {
       total_rows: input.totalRows ?? 0,
       mapping_snapshot: input.mappingSnapshot ?? null,
       started_at: now,
+      payload_snapshot: input.payloadSnapshot ?? null,
+      batch_size: input.batchSize ?? 250,
+      last_heartbeat_at: now,
     })
     .select('*')
     .single()
 
   if (error) throw error
+  logger.info('quickbooks.import_job.created', { importJobId: String(data.id), companyId, userId: input.userId, status: data.status, module: input.moduleKey })
   return mapJobRow(data)
 }
 
-export async function getImportJob(jobId: string): Promise<ImportJobRecord | null> {
+export async function getImportJob(jobId: string, companyIdOverride?: string): Promise<ImportJobRecord | null> {
+  await assertImportJobSchemaCompatibility()
   const db = supabaseDb()
-  const companyId = await resolveCompanyId()
+  const companyId = companyIdOverride ?? await resolveCompanyId()
   const { data, error } = await db
     .from('import_jobs')
     .select('*')
@@ -86,18 +108,217 @@ export async function getImportJob(jobId: string): Promise<ImportJobRecord | nul
   return data ? mapJobRow(data) : null
 }
 
+/** Columns needed to hydrate Migration Center progress without pulling unused blobs. */
+const IMPORT_JOB_POLL_COLUMNS = [
+  'id',
+  'company_id',
+  'user_id',
+  'module_key',
+  'filename',
+  'file_format',
+  'duplicate_strategy',
+  'status',
+  'total_rows',
+  'imported_count',
+  'updated_count',
+  'skipped_count',
+  'failed_count',
+  'processed_rows',
+  'valid_rows',
+  'invalid_rows',
+  'warning_count',
+  'started_at',
+  'completed_at',
+  'duration_ms',
+  'mapping_snapshot',
+  'validation_summary',
+  'error_summary',
+  'created_at',
+  'updated_at',
+  'batch_size',
+  'batch_cursor',
+  'retry_count',
+  'paused_at',
+  'last_heartbeat_at',
+  'progress_snapshot',
+  'skip_summary',
+].join(',')
+
+export async function getImportJobsByIds(
+  jobIds: string[],
+  companyIdOverride?: string,
+  options: { includeActivityEvents?: boolean } = {},
+): Promise<ImportJobRecord[]> {
+  const unique = [...new Set(jobIds.filter(Boolean))]
+  if (unique.length === 0) return []
+  await assertImportJobSchemaCompatibility()
+  const db = supabaseDb()
+  const companyId = companyIdOverride ?? await resolveCompanyId()
+  const includeActivity = options.includeActivityEvents !== false
+  const columns = includeActivity
+    ? `${IMPORT_JOB_POLL_COLUMNS},activity_events`
+    : IMPORT_JOB_POLL_COLUMNS
+  const { data, error } = await db
+    .from('import_jobs')
+    .select(columns)
+    .eq('company_id', companyId)
+    .in('id', unique)
+
+  if (error) throw error
+  return (data ?? []).map((row) => mapJobRow(row as unknown as Record<string, unknown>))
+}
+
 export async function updateImportJobProgress(
   jobId: string,
   processedRows: number,
+  counts?: { importedCount?: number; updatedCount?: number; skippedCount?: number; failedCount?: number; validRows?: number; invalidRows?: number; warningCount?: number },
+  totalRows?: number,
+  observability?: { progressSnapshot?: MigrationProgressSnapshot; activityEvent?: MigrationActivityEvent },
+  companyIdOverride?: string,
 ): Promise<void> {
   const db = supabaseDb()
-  const companyId = await resolveCompanyId()
-  const { error } = await db
+  const companyId = companyIdOverride ?? await resolveCompanyId()
+  const current = await getImportJob(jobId, companyId)
+  if (!current) {
+    const missing = new Error(`Import job progress update matched no row for job ${jobId} and company ${companyId}.`)
+    logger.error('quickbooks.import_job.progress.persist_failed', {
+      importJobId: jobId,
+      companyId,
+      processedRows,
+      error: { code: 'IMPORT_JOB_NOT_FOUND', message: missing.message },
+    })
+    throw missing
+  }
+
+  const merged = mergeImportJobProgress({
+    status: current.status,
+    processedRows: current.processedRows,
+    totalRows: current.totalRows,
+    importedCount: current.importedCount,
+    updatedCount: current.updatedCount,
+    skippedCount: current.skippedCount,
+    failedCount: current.failedCount,
+    validRows: current.validRows,
+    invalidRows: current.invalidRows,
+    warningCount: current.warningCount,
+    progressSnapshot: current.progressSnapshot ?? null,
+  }, {
+    processedRows,
+    totalRows,
+    counts,
+    progressSnapshot: observability?.progressSnapshot,
+  })
+
+  if (merged === 'stale_completed') {
+    logger.info('quickbooks.import_job.progress.stale_ignored', {
+      importJobId: jobId,
+      companyId,
+      status: current.status,
+      processedRows,
+      totalRows,
+      hasProgressSnapshot: Boolean(observability?.progressSnapshot),
+      hasActivityEvent: Boolean(observability?.activityEvent),
+      reason: 'completed_job_immutable',
+    })
+    return
+  }
+
+  const events = observability?.activityEvent
+    ? [...(current.activityEvents ?? []), observability.activityEvent].slice(-100)
+    : undefined
+  const patch: Record<string, unknown> = {
+    processed_rows: merged.processedRows,
+    batch_cursor: merged.processedRows,
+    total_rows: merged.totalRows,
+    imported_count: merged.importedCount,
+    updated_count: merged.updatedCount,
+    skipped_count: merged.skippedCount,
+    failed_count: merged.failedCount,
+    valid_rows: merged.validRows,
+    invalid_rows: merged.invalidRows,
+    warning_count: merged.warningCount,
+    progress_snapshot: merged.progressSnapshot,
+    last_heartbeat_at: new Date().toISOString(),
+    ...(events ? { activity_events: events } : {}),
+  }
+
+  logger.info('quickbooks.import_job.progress.persist_attempt', {
+    importJobId: jobId,
+    companyId,
+    processedRows: merged.processedRows,
+    totalRows: merged.totalRows,
+    hasProgressSnapshot: true,
+    hasActivityEvent: Boolean(observability?.activityEvent),
+    updatePayload: patch,
+  })
+
+  const { data: persisted, error } = await db
     .from('import_jobs')
-    .update({ processed_rows: processedRows, status: 'processing' })
+    .update(patch)
     .eq('id', jobId)
     .eq('company_id', companyId)
+    .neq('status', 'completed')
+    .select('id,company_id,status,processed_rows,total_rows,progress_snapshot,activity_events,last_heartbeat_at')
+    .maybeSingle()
 
+  if (error) {
+    logger.error('quickbooks.import_job.progress.persist_failed', {
+      importJobId: jobId,
+      companyId,
+      processedRows: merged.processedRows,
+      error: { code: error.code, message: error.message, details: error.details, hint: error.hint },
+    })
+    throw error
+  }
+  if (!persisted) {
+    const latest = await getImportJob(jobId, companyId)
+    if (latest?.status === 'completed') {
+      logger.info('quickbooks.import_job.progress.stale_ignored', {
+        importJobId: jobId,
+        companyId,
+        status: latest.status,
+        processedRows: merged.processedRows,
+        reason: 'completed_job_immutable_race',
+      })
+      return
+    }
+    const missing = new Error(`Import job progress update matched no row for job ${jobId} and company ${companyId}.`)
+    logger.error('quickbooks.import_job.progress.persist_failed', {
+      importJobId: jobId,
+      companyId,
+      processedRows: merged.processedRows,
+      error: { code: 'IMPORT_JOB_NOT_FOUND', message: missing.message },
+    })
+    throw missing
+  }
+  logger.info('quickbooks.import_job.progress.persisted', {
+    importJobId: String(persisted.id),
+    companyId: String(persisted.company_id),
+    status: persisted.status,
+    processedRows: persisted.processed_rows,
+    totalRows: persisted.total_rows,
+    activityEventCount: Array.isArray(persisted.activity_events) ? persisted.activity_events.length : 0,
+    hasProgressSnapshot: Boolean(persisted.progress_snapshot && Object.keys(persisted.progress_snapshot as Record<string, unknown>).length),
+  })
+}
+
+export async function setImportJobStatus(jobId: string, status: 'processing' | 'paused' | 'pending'): Promise<ImportJobRecord | null> {
+  const current = await getImportJob(jobId)
+  if (!current || ['completed', 'failed', 'cancelled'].includes(current.status)) return current
+  const db = supabaseDb(); const companyId = await resolveCompanyId()
+  const patch: Record<string, unknown> = { status, last_heartbeat_at: new Date().toISOString(), paused_at: status === 'paused' ? new Date().toISOString() : null }
+  logger.info('quickbooks.import_job.status.persist_attempt', { importJobId: jobId, companyId, fromStatus: current.status, toStatus: status })
+  const { data, error } = await db.from('import_jobs').update(patch).eq('id', jobId).eq('company_id', companyId).select('*').maybeSingle()
+  if (error) throw error
+  if (!data) throw new Error(`Import job status update matched no row for job ${jobId} and company ${companyId}.`)
+  logger.info('quickbooks.import_job.status.persisted', { importJobId: jobId, companyId, status: data.status })
+  return data ? mapJobRow(data) : null
+}
+
+export async function incrementImportJobRetry(jobId: string): Promise<void> {
+  const job = await getImportJob(jobId); if (!job) return
+  const db = supabaseDb(); const companyId = await resolveCompanyId()
+  const { error } = await db.from('import_jobs').update({ retry_count: (job.retryCount ?? 0) + 1, status: 'pending', last_heartbeat_at: new Date().toISOString() }).eq('id', jobId).eq('company_id', companyId)
   if (error) throw error
 }
 
@@ -115,14 +336,30 @@ export async function finalizeImportJob(
     warningCount?: number
     validationSummary?: Record<string, number>
     errorSummary?: Record<string, number>
+    skipSummary?: Record<string, number>
     startedAt?: string | null
+    failure?: import('@/lib/import-export/types').ModuleFailureSnapshot | null
   },
 ): Promise<ImportJobRecord> {
   const db = supabaseDb()
   const companyId = await resolveCompanyId()
+  const existing = await getImportJob(jobId, companyId)
   const completedAt = new Date()
   const startedAt = input.startedAt ? new Date(input.startedAt) : completedAt
   const durationMs = Math.max(0, completedAt.getTime() - startedAt.getTime())
+  const processedRows = input.importedCount + input.updatedCount + input.skippedCount + input.failedCount
+  const progressSnapshot = finalizeProgressSnapshot(existing?.progressSnapshot, {
+    status: input.status,
+    processedRows,
+    totalRows: input.totalRows,
+    importedCount: input.importedCount,
+    updatedCount: input.updatedCount,
+    skippedCount: input.skippedCount,
+    failedCount: input.failedCount,
+    failure: input.failure ?? undefined,
+  })
+
+  logger.info('quickbooks.import_job.finalize.persist_attempt', { importJobId: jobId, companyId, status: input.status, totalRows: input.totalRows, processedRows })
 
   const { data, error } = await db
     .from('import_jobs')
@@ -133,12 +370,14 @@ export async function finalizeImportJob(
       skipped_count: input.skippedCount,
       failed_count: input.failedCount,
       total_rows: input.totalRows,
-      processed_rows: input.totalRows,
+      processed_rows: processedRows,
       valid_rows: input.validRows ?? null,
       invalid_rows: input.invalidRows ?? null,
       warning_count: input.warningCount ?? null,
       validation_summary: input.validationSummary ?? null,
       error_summary: input.errorSummary ?? null,
+      skip_summary: input.skipSummary ?? {},
+      progress_snapshot: progressSnapshot,
       completed_at: completedAt.toISOString(),
       duration_ms: durationMs,
     })
@@ -148,7 +387,25 @@ export async function finalizeImportJob(
     .single()
 
   if (error) throw error
+  logger.info('quickbooks.import_job.finalize.persisted', { importJobId: jobId, companyId, status: data.status, processedRows: data.processed_rows, importedCount: data.imported_count, failedCount: data.failed_count })
   return mapJobRow(data)
+}
+
+export async function saveImportJobSkips(jobId: string, skips: SkippedRecordDiagnostic[]): Promise<void> {
+  if (skips.length === 0) return
+  const db = supabaseDb()
+  const companyId = await resolveCompanyId()
+  const payload = skips.map((skip) => ({ company_id: companyId, job_id: jobId, row_number: skip.rowNumber, source_id: skip.sourceId ?? null, record_name: skip.recordName ?? null, skip_reason: skip.reason, duplicate_key: skip.duplicateKey ?? null, existing_record_id: skip.existingRecordId ?? null }))
+  const { error } = await db.from('import_job_skips').upsert(payload, { onConflict: 'job_id,row_number' })
+  if (error) throw error
+}
+
+export async function getImportJobSkips(jobId: string): Promise<SkippedRecordDiagnostic[]> {
+  const db = supabaseDb()
+  const companyId = await resolveCompanyId()
+  const { data, error } = await db.from('import_job_skips').select('row_number,source_id,record_name,skip_reason,duplicate_key,existing_record_id').eq('job_id', jobId).eq('company_id', companyId).order('row_number', { ascending: true })
+  if (error) throw error
+  return (data ?? []).map((row) => ({ rowNumber: Number(row.row_number), sourceId: row.source_id ? String(row.source_id) : undefined, recordName: row.record_name ? String(row.record_name) : undefined, reason: String(row.skip_reason) as SkippedRecordDiagnostic['reason'], duplicateKey: row.duplicate_key ? String(row.duplicate_key) : undefined, existingRecordId: row.existing_record_id ? String(row.existing_record_id) : undefined }))
 }
 
 export async function cancelImportJob(jobId: string): Promise<ImportJobRecord | null> {
@@ -193,7 +450,7 @@ export async function saveImportJobErrors(
       field_key: error.fieldKey ?? null,
       error_code: error.errorCode,
       message: error.message,
-      raw_row: error.rawRow ?? null,
+      raw_row: error.rawRow ?? (error.details ? { _importError:error.details } : null),
     }))
 
     const { error } = await db.from('import_job_errors').insert(payload)
@@ -213,16 +470,34 @@ export async function getImportJobErrors(jobId: string): Promise<ImportRowError[
 
   if (error) throw error
 
-  return (data ?? []).map((row) => ({
-    rowNumber: Number(row.row_number),
-    fieldKey: row.field_key ? String(row.field_key) : undefined,
-    errorCode: String(row.error_code),
-    message: String(row.message),
-    rawRow: (row.raw_row as Record<string, unknown> | null) ?? undefined,
-  }))
+  return (data ?? []).map((row) => {
+    const rawRow=(row.raw_row as Record<string, unknown>|null)??undefined
+    return {
+      rowNumber: Number(row.row_number),
+      fieldKey: row.field_key ? String(row.field_key) : undefined,
+      errorCode: String(row.error_code),
+      message: String(row.message),
+      rawRow,
+      details: rawRow?._importError && typeof rawRow._importError==='object' ? rawRow._importError as ImportRowError['details'] : undefined,
+    }
+  })
 }
 
 export async function isJobCancelled(jobId: string): Promise<boolean> {
   const job = await getImportJob(jobId)
   return job?.status === 'cancelled'
+}
+
+export async function isJobPaused(jobId: string): Promise<boolean> {
+  const job = await getImportJob(jobId)
+  return job?.status === 'paused'
+}
+
+/** Marks abandoned workers as resumable instead of losing their cursor. */
+export async function recoverStaleImportJobs(maxAgeMs = 5 * 60 * 1000): Promise<number> {
+  const db = supabaseDb(); const companyId = await resolveCompanyId()
+  const cutoff = new Date(Date.now() - maxAgeMs).toISOString()
+  const { data, error } = await db.from('import_jobs').update({ status: 'pending' }).eq('company_id', companyId).eq('status', 'processing').lt('last_heartbeat_at', cutoff).select('id')
+  if (error) throw error
+  return data?.length ?? 0
 }
