@@ -211,6 +211,19 @@ export interface MigrationActivityEvent {
   warningCount?: number | null
 }
 
+/** Module-level failure persisted on `import_jobs.progress_snapshot.failure`. */
+export interface ModuleFailureSnapshot {
+  message: string
+  stage: string | null
+  errorCode: string | null
+  errorType: string | null
+  correlationId: string | null
+  retryable: boolean
+  rowNumber: number | null
+  /** Present only outside production — never the primary Errors panel copy. */
+  stack: string | null
+}
+
 export interface MigrationProgressSnapshot {
   currentModule?: string | null
   currentStage?: string | null
@@ -237,6 +250,7 @@ export interface MigrationProgressSnapshot {
   activeProcessingMs?: number
   progressPercent?: number
   stages?: Record<string, { status: 'pending' | 'running' | 'completed' | 'failed'; durationMs?: number; progress?: number }>
+  failure?: ModuleFailureSnapshot | null
 }
 
 export interface MappingTemplateRecord {

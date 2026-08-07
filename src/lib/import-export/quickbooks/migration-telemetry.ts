@@ -112,7 +112,12 @@ export class MigrationTrace {
     } catch (error) {
       const durationMs = Math.max(0, performance.now() - startedAt)
       this.recordStage(stage, durationMs, true)
-      this.emitEvent('stage_failed', `Failed ${stage.replaceAll('_', ' ')}`, { stage, durationMs, warningCount: 1 })
+      const errorMessage = error instanceof Error ? error.message.trim() : String(error ?? '').trim()
+      this.emitEvent('stage_failed', errorMessage || `Failed ${stage.replaceAll('_', ' ')}`, {
+        stage,
+        durationMs,
+        warningCount: 1,
+      })
       logger.error('quickbooks.migration.stage.failed', {
         correlationId:this.correlationId,
         module:this.module,

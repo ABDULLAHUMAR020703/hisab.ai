@@ -338,6 +338,7 @@ export async function finalizeImportJob(
     errorSummary?: Record<string, number>
     skipSummary?: Record<string, number>
     startedAt?: string | null
+    failure?: import('@/lib/import-export/types').ModuleFailureSnapshot | null
   },
 ): Promise<ImportJobRecord> {
   const db = supabaseDb()
@@ -355,6 +356,7 @@ export async function finalizeImportJob(
     updatedCount: input.updatedCount,
     skippedCount: input.skippedCount,
     failedCount: input.failedCount,
+    failure: input.failure ?? undefined,
   })
 
   logger.info('quickbooks.import_job.finalize.persist_attempt', { importJobId: jobId, companyId, status: input.status, totalRows: input.totalRows, processedRows })

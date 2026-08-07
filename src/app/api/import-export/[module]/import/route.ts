@@ -24,6 +24,10 @@ import {
 } from '../../_lib/parse-import-body'
 import type { DuplicateStrategy } from '@/lib/import-export/types'
 import { normalizeImportError } from '@/lib/import-export/import/import-error'
+import {
+  buildModuleFailureFromException,
+  buildModuleFailureFromRowErrors,
+} from '@/lib/import-export/wizard/migration-failure'
 import { CORRELATION_HEADER, getCorrelationId } from '@/lib/ops/correlation'
 import { withExternalRequestDiagnostics } from '@/lib/ops/external-request-diagnostics'
 import { MigrationTrace } from '@/lib/import-export/quickbooks/migration-telemetry'
@@ -321,6 +325,11 @@ async function handleImport(
     const status = aggregate.failedCount > 0 && aggregate.importedCount === 0 && aggregate.updatedCount === 0
         ? 'failed'
         : 'completed'
+    const rowFailure = status === 'failed'
+      ? buildModuleFailureFromRowErrors(allErrors, {
+        stage: trace.snapshot().currentStage ?? 'materialization',
+      })
+      : null
 
     await ensureOwned()
     orchestrationStep('finalize', { status })
@@ -341,6 +350,7 @@ async function handleImport(
       }, {}),
       skipSummary,
       startedAt: job.startedAt,
+      failure: rowFailure,
     }))
 
     orchestrationStep('finalized', { status: finalized.status })
@@ -375,6 +385,13 @@ async function handleImport(
       try {
         if (ownership) await ownership.assertOwned()
         const existing = await getImportJob(jobId)
+        const failure = buildModuleFailureFromException(error, {
+          stage: normalized.details.stage
+            ?? existing?.progressSnapshot?.currentStage
+            ?? null,
+          correlationId: trace.correlationId,
+          includeStack: process.env.NODE_ENV !== 'production',
+        })
         await finalizeImportJob(jobId, {
           status: 'failed',
           importedCount: existing?.importedCount ?? 0,
@@ -383,13 +400,22 @@ async function handleImport(
           failedCount: existing?.failedCount ?? 0,
           totalRows: existing?.totalRows ?? 0,
           startedAt: existing?.startedAt,
+          failure,
+          errorSummary: { [failure.errorCode ?? 'IMPORT_FATAL']: 1 },
         })
         await saveImportJobErrors(jobId, [{
           rowNumber: 0,
-          errorCode: normalized.errorCode === 'IMPORT_FAILED' ? 'IMPORT_FATAL' : normalized.errorCode,
-          message: normalized.message,
-          details: normalized.details,
-          rawRow: { _importError:normalized.details },
+          errorCode: failure.errorCode ?? 'IMPORT_FATAL',
+          message: failure.message,
+          details: {
+            ...normalized.details,
+            stage: failure.stage ?? undefined,
+            code: failure.errorCode ?? undefined,
+          },
+          rawRow: {
+            _importError: normalized.details,
+            _failure: failure,
+          },
         }])
       } catch (finalizeError) {
         if (isOwnershipLostError(finalizeError)) {

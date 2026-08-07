@@ -1,4 +1,5 @@
 import type { MigrationActivityEvent, MigrationProgressSnapshot } from '../types'
+import { deriveModuleFailure } from './migration-failure'
 
 /**
  * Permanent lifecycle state for every module the user selected in the Migration
@@ -357,11 +358,15 @@ export function applyJobSnapshot(state: ModuleLifecycleState, key: string, snaps
   const incomingPhase = derivePhaseFromPersistedJob(snapshot)
   // A terminal persisted state can never be replaced by an older in-flight read.
   const phase = isTerminalPhase(entry.phase) && !isTerminalPhase(incomingPhase) ? entry.phase : incomingPhase
+  const failure = phase === 'failed' || phase === 'preview_failed'
+    ? deriveModuleFailure({ ...entry, phase }, snapshot)
+    : entry.failure
   return withQueuePositions({
     ...state,
     [key]: {
       ...entry,
       phase,
+      failure,
       progress: mergeProgress(entry.progress, snapshot),
       durationMs: snapshot.durationMs ?? entry.durationMs,
       warningCount: maxNumber(entry.warningCount, snapshot.warningCount, snapshot.invalidRows),

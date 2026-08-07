@@ -25,9 +25,15 @@ function stageLabel(stage: string): string {
 
 function normalizedMessage(event: MigrationActivityEvent): string {
   const stage = event.stage ? stageLabel(event.stage) : null
+  if (event.type === 'stage_failed' && stage) {
+    const message = event.message?.trim()
+    if (message && !/^failed[\s_]+[a-z0-9_ ]+$/i.test(message)) {
+      return `${stage}: ${message}`
+    }
+    return `${stage} failed`
+  }
   if (event.type === 'stage_completed' && stage) return `${stage} completed`
   if (event.type === 'stage_started' && stage) return `${stage} started`
-  if (event.type === 'stage_failed' && stage) return `${stage} failed`
   if (event.type === 'batch_completed' && event.stage === 'extraction' && event.records != null) {
     return `Fetched ${event.records.toLocaleString()} records`
   }
@@ -71,7 +77,13 @@ function duplicateSkipCount(summary: Record<string, number> | null | undefined):
 
 function terminalMessage(module: ModuleLifecycleEntry): string | null {
   if (module.phase === 'completed' || module.phase === 'completed_with_warnings') return 'Module completed'
-  if (module.phase === 'failed' || module.phase === 'preview_failed') return 'Module failed'
+  if (module.phase === 'failed' || module.phase === 'preview_failed') {
+    if (module.failure?.message) {
+      const stage = module.failure.stage ? stageLabel(module.failure.stage) : null
+      return stage ? `${stage}: ${module.failure.message}` : module.failure.message
+    }
+    return 'Module failed'
+  }
   if (module.phase === 'cancelled') return 'Module cancelled'
   return null
 }

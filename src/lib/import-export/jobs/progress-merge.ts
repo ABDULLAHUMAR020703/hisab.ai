@@ -162,17 +162,20 @@ export function finalizeProgressSnapshot(
     updatedCount: number
     skippedCount: number
     failedCount: number
+    failure?: MigrationProgressSnapshot['failure']
   },
 ): MigrationProgressSnapshot {
   const progressPercent = input.status === 'completed' ? 100 : computeProgressPercent(input.processedRows, input.totalRows)
-  return mergeProgressSnapshot(current, {
+  const merged = mergeProgressSnapshot(current, {
     processedRecords: input.processedRows,
     estimatedTotalRecords: input.totalRows,
     importedCount: input.importedCount,
     updatedCount: input.updatedCount,
     skippedCount: input.skippedCount,
     failedCount: input.failedCount,
-    currentStage: input.status === 'completed' ? 'report_generation' : current?.currentStage ?? null,
+    currentStage: input.status === 'completed'
+      ? 'report_generation'
+      : input.failure?.stage ?? current?.currentStage ?? null,
     progressPercent,
   }, {
     processedRows: input.processedRows,
@@ -183,4 +186,6 @@ export function finalizeProgressSnapshot(
     failedCount: input.failedCount,
     progressPercent,
   })
+  if (input.failure) return { ...merged, failure: input.failure }
+  return merged
 }

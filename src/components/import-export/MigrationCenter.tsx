@@ -519,12 +519,14 @@ export function MigrationCenter({
                 <ul className="space-y-2 text-sm text-red-700">
                   {view.errors.map((item) => (
                     <li key={`${item.module}-${item.errorCode ?? item.message}`}>
-                      <span className="font-medium">{item.module}</span>: {item.message}
-                      {(item.stage || item.errorCode) && (
-                        <span className="mt-0.5 block text-xs text-slate-500">
-                          {item.stage ?? '—'} · {item.errorCode ?? '—'}
-                        </span>
-                      )}
+                      <span className="font-medium">{item.module}</span>
+                      {item.stage ? <span className="text-slate-600"> · {item.stage.replaceAll('_', ' ')}</span> : null}
+                      <span className="mt-0.5 block">{item.message}</span>
+                      <span className="mt-0.5 block text-xs text-slate-500">
+                        {item.errorCode ?? '—'}
+                        {item.rowNumber != null && item.rowNumber > 0 ? ` · row ${item.rowNumber}` : ''}
+                        {item.retryable ? ' · retryable' : ''}
+                      </span>
                     </li>
                   ))}
                 </ul>

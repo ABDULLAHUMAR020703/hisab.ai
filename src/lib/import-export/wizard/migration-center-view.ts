@@ -4,7 +4,6 @@ import { summarizeMigrationSession } from './migration-session'
 import {
   activeModule,
   deriveOverallProgress,
-  MODULE_PHASE_LABEL,
   orderedModules,
   type ModuleLifecycleEntry,
   type OverallMigrationProgress,
@@ -83,7 +82,14 @@ export interface MigrationCenterView {
     lastQueueUpdateAt: string | null
   }
   warnings: Array<{ module: string; count: number }>
-  errors: Array<{ module: string; message: string; stage: string | null; errorCode: string | null }>
+  errors: Array<{
+    module: string
+    message: string
+    stage: string | null
+    errorCode: string | null
+    retryable: boolean
+    rowNumber: number | null
+  }>
   logs: MigrationActivityEvent[]
   finalReport: MigrationReport | null
   historySummary: MigrationHistorySummary
@@ -171,12 +177,28 @@ export function buildMigrationCenterView(
 
   const errors = modules
     .filter((entry) => entry.failure || entry.phase === 'failed' || entry.phase === 'preview_failed')
-    .map((entry) => ({
-      module: entry.label,
-      message: entry.failure?.message ?? MODULE_PHASE_LABEL[entry.phase],
-      stage: entry.failure?.stage ?? entry.progress?.currentStage ?? null,
-      errorCode: entry.failure?.errorCode ?? null,
-    }))
+    .map((entry) => {
+      const persistedFailure = entry.progress?.progressSnapshot?.failure
+      const message = entry.failure?.message
+        ?? (typeof persistedFailure?.message === 'string' ? persistedFailure.message : null)
+        ?? null
+      return {
+        module: entry.label,
+        message: message && message !== 'Failed'
+          ? message
+          : 'Module failed without a persisted error message.',
+        stage: entry.failure?.stage
+          ?? (typeof persistedFailure?.stage === 'string' ? persistedFailure.stage : null)
+          ?? entry.progress?.currentStage
+          ?? null,
+        errorCode: entry.failure?.errorCode
+          ?? (typeof persistedFailure?.errorCode === 'string' ? persistedFailure.errorCode : null)
+          ?? null,
+        retryable: entry.failure?.retryable
+          ?? (typeof persistedFailure?.retryable === 'boolean' ? persistedFailure.retryable : false),
+        rowNumber: typeof persistedFailure?.rowNumber === 'number' ? persistedFailure.rowNumber : null,
+      }
+    })
 
   const queued = modules.filter((entry) => entry.phase === 'queued')
   const cancelled = modules.filter((entry) => entry.phase === 'cancelled')
@@ -226,6 +248,17 @@ export function buildMigrationCenterView(
         failedCount: entry.progress?.failedCount ?? 0,
         durationMs: entry.durationMs
           ?? (Number(entry.progress?.progressSnapshot?.activeProcessingMs) || 0),
+        errors: entry.failure?.message
+          ? [{
+            rowNumber: entry.progress?.progressSnapshot?.failure?.rowNumber ?? 0,
+            errorCode: entry.failure.errorCode ?? 'IMPORT_FATAL',
+            message: entry.failure.message,
+            details: {
+              stage: entry.failure.stage ?? undefined,
+              code: entry.failure.errorCode ?? undefined,
+            },
+          }]
+          : undefined,
       })),
     })
     : null

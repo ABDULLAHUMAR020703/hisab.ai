@@ -171,9 +171,15 @@ registerJobHandler('QUICKBOOKS_IMPORT_STEP', async (payload, platformJobId, owne
   const { runImportJobStep } = await import('@/app/api/import-export/[module]/import/route')
   try {
     const response = await runImportJobStep(importJobId, companyId, userId, ownership)
-    if (!response.ok) throw new Error(`QuickBooks import continuation failed with HTTP ${response.status}.`)
+    const payload = await response.json() as Record<string, unknown>
+    if (!response.ok) {
+      const detail = typeof payload.error === 'string' && payload.error.trim()
+        ? payload.error.trim()
+        : `QuickBooks import continuation failed with HTTP ${response.status}.`
+      throw new Error(detail)
+    }
     await ownership.assertOwned()
-    return await response.json() as Record<string, unknown>
+    return payload
   } finally {
     // This row is still RUNNING until the handler returns, so it is excluded:
     // the session must be judged on the work that outlives this step.

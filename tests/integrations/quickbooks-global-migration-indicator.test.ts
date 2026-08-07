@@ -3,26 +3,27 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const read = (path: string) => readFileSync(path, 'utf8')
+const provider = () => read('src/components/import-export/MigrationSessionProvider.tsx')
 
 test('closing the modal only hides the viewer while layout polling continues', () => {
-  const provider = read('src/components/import-export/MigrationSessionProvider.tsx')
+  const source = provider()
 
-  assert.match(provider, /const closeViewer = useCallback\(\(\) => setViewerOpen\(false\)/)
-  assert.match(provider, /window\.setInterval\(\(\) =>/)
-  assert.match(provider, /POLL_INTERVAL_MS = 1_500/)
-  assert.match(provider, /open=\{viewerOpen\}/)
-  assert.match(provider, /onClose=\{\(\) => setViewerOpen\(false\)\}/)
+  assert.match(source, /const closeViewer = useCallback\(\(\) => setViewerOpen\(false\)/)
+  assert.match(source, /window\.setInterval\(\(\) =>/)
+  assert.match(source, /POLL_INTERVAL_MS = 1_500/)
+  assert.match(source, /open=\{viewerOpen\}/)
+  assert.match(source, /onClose=\{\(\) => setViewerOpen\(false\)\}/)
 
-  const closeBody = provider.slice(
-    provider.indexOf('const closeViewer'),
-    provider.indexOf('const refresh'),
+  const closeBody = source.slice(
+    source.indexOf('const closeViewer'),
+    source.indexOf('const refresh'),
   )
   assert.doesNotMatch(closeBody, /clearInterval|setSession\(null\)|cancel/i)
 })
 
 test('dashboard layout owns migration coordination across route navigation', () => {
   const layout = read('src/app/(dashboard)/layout.tsx')
-  const provider = read('src/components/import-export/MigrationSessionProvider.tsx')
+  const source = provider()
 
   assert.match(layout, /<MigrationSessionProvider>/)
   assert.match(layout, /\{children\}/)
@@ -31,107 +32,102 @@ test('dashboard layout owns migration coordination across route navigation', () 
     layout.indexOf('<MigrationSessionProvider>') < layout.indexOf('{children}'),
     'provider must wrap route children',
   )
-  assert.match(provider, /coordinate\(coordinationSignal\)/)
-  assert.match(provider, /sourceKey: current\.config\.provider/)
-  assert.match(provider, /\/jobs\/\$\{unfinished\.jobId\}\/run/)
-  assert.match(provider, /usePathname\(\)/)
-  assert.match(provider, /migrationSessionIdFromPathname/)
+  assert.match(source, /coordinate\(coordinationSignal\)/)
+  assert.match(source, /sourceKey: current\.config\.provider/)
+  assert.match(source, /\/jobs\/\$\{unfinished\.jobId\}\/run/)
+  assert.match(source, /usePathname\(\)/)
+  assert.match(source, /migrationSessionIdFromPathname/)
 })
 
-test('global indicator opens Migration Center from persisted session', () => {
-  const provider = read('src/components/import-export/MigrationSessionProvider.tsx')
+test('running indicator stays compact without duplicating Migration Center actions', () => {
+  const source = provider()
 
-  assert.match(provider, /data-global-migration-indicator=\{state\}/)
-  assert.match(provider, /QuickBooks Migration/)
-  assert.match(provider, /View Progress/)
-  assert.match(provider, /overall\.percent/)
-  assert.match(provider, /current\?\.label/)
-  assert.match(provider, /current\?\.progress\?\.currentStage/)
-  assert.match(provider, /openMigrationCenter\(session\.id\)/)
-  assert.match(provider, /migrationCenterPath/)
-  assert.match(provider, /Continues in background/)
-  assert.match(provider, /data-cancel-migration/)
-  assert.match(provider, /Cancel Migration/)
-  assert.match(provider, /migrationCancelConfirmMessage/)
+  assert.match(source, /data-global-migration-indicator=\{state\}/)
+  assert.match(source, /QuickBooks Migration/)
+  assert.match(source, /overall\.percent/)
+  assert.match(source, /current\?\.label/)
+  assert.match(source, /openMigrationCenter\(session\.id\)/)
+  // Floating widget no longer hosts Cancel / View Progress / Resume.
+  assert.doesNotMatch(source, /data-cancel-migration/)
+  assert.doesNotMatch(source, />View Progress</)
+  assert.doesNotMatch(source, /failed \? 'Resume'/)
+  assert.doesNotMatch(source, />View Report</)
 })
 
-test('completed migration indicator links to the persisted Migration Center report', () => {
-  const provider = read('src/components/import-export/MigrationSessionProvider.tsx')
-  const center = read('src/components/import-export/MigrationCenter.tsx')
+test('completed migration shows success then collapses to a circular icon after 8s', () => {
+  const source = provider()
 
-  assert.match(provider, /Migration Completed/)
-  assert.match(provider, /View Report/)
-  assert.match(provider, /state === 'completed'/)
-  assert.match(provider, /openMigrationCenter/)
-  assert.match(provider, /openCompletedReport/)
-  assert.match(center, /Final Report/)
-  assert.match(center, /buildMigrationCenterView/)
+  assert.match(source, /Migration Completed/)
+  assert.match(source, /COMPLETED_COLLAPSE_MS = 8_000/)
+  assert.match(source, /data-migration-indicator-presentation/)
+  assert.match(source, /collapsed/)
+  assert.match(source, /expandFromIcon/)
+  assert.match(source, /collapseToIcon/)
+  assert.match(source, /Open \$\{title\} notification/)
+  assert.match(source, /rounded-full/)
+  assert.match(source, /h-12 w-12/)
 })
 
-test('completed migration indicator auto-dismisses like a success toast', () => {
-  const provider = read('src/components/import-export/MigrationSessionProvider.tsx')
-
-  assert.match(provider, /COMPLETED_TOAST_VISIBLE_MS = 9_000/)
-  assert.match(provider, /COMPLETED_TOAST_EXIT_MS = 280/)
-  assert.match(provider, /liveCompletedToastSessionIds/)
-  assert.match(provider, /dismissedCompletedToastSessionIds/)
-  assert.match(provider, /data-dismiss-completed-toast/)
-  assert.match(provider, /Dismiss migration notification/)
-  assert.match(provider, /dismissCompletedToast\('immediate'\)/)
-  assert.match(provider, /dismissCompletedToast\('animate'\)/)
-  assert.match(provider, /data-completed-toast/)
-  assert.match(provider, /translate-y-2 opacity-0/)
-  assert.match(provider, /if \(completed && completedToast === 'hidden'\) return null/)
-  assert.match(provider, /liveCompletedToastSessionIds\.add\(session\.id\)/)
-  assert.match(provider, /dismissedCompletedToastSessionIds\.add\(session\.id\)/)
-  assert.match(provider, /setCompletedToast\(liveCompletedToastSessionIds\.has\(session\.id\) \? 'visible' : 'hidden'\)/)
-})
-
-test('failed migration indicator exposes resume, retry, and logs actions', () => {
-  const provider = read('src/components/import-export/MigrationSessionProvider.tsx')
+test('failed migration shows View Logs and Retry only, then collapses after 10s', () => {
+  const source = provider()
   const retryRoute = read('src/app/api/import-export/migration-sessions/[sessionId]/retry/route.ts')
   const service = read('src/lib/import-export/wizard/migration-session.service.ts')
 
-  assert.match(provider, /Migration Failed/)
-  assert.match(provider, /failed \? 'Resume'/)
-  assert.match(provider, />Retry</)
-  assert.match(provider, />View Logs</)
-  assert.match(provider, /migrationCenterPath\(session\.id\)\}#logs/)
-  assert.match(provider, /\/migration-sessions\/\$\{sessionId\}\/retry/)
+  assert.match(source, /Migration Failed/)
+  assert.match(source, /FAILED_COLLAPSE_MS = 10_000/)
+  assert.match(source, />Retry</)
+  assert.match(source, />View Logs</)
+  assert.doesNotMatch(source, /Resume/)
+  assert.match(source, /migrationCenterPath\(session\.id\)\}#logs/)
+  assert.match(source, /\/migration-sessions\/\$\{sessionId\}\/retry/)
   assert.match(retryRoute, /retryQuickBooksMigrationSession/)
   assert.match(service, /incrementImportJobRetry/)
-  assert.match(service, /phase: 'queued'/)
-  assert.match(service, /state: 'running'/)
-  assert.match(service, /status: 'IN_PROGRESS'/)
+})
+
+test('dismiss hides the indicator for the remainder of the browser session', () => {
+  const source = provider()
+
+  assert.match(source, /dismissedIndicatorSessionIds/)
+  assert.match(source, /data-dismiss-migration-indicator/)
+  assert.match(source, /Dismiss migration notification/)
+  assert.match(source, /dismissForSession/)
+  assert.match(source, /presentation === 'dismissed'\) return null/)
+  assert.match(source, /dismissedIndicatorSessionIds\.add\(session\.id\)/)
+})
+
+test('expanded panel never covers Migration Center content', () => {
+  const source = provider()
+
+  assert.match(source, /onCenterPage=\{polledSessionId === session\.id\}/)
+  assert.match(source, /if \(!onCenterPage\) return/)
+  assert.match(source, /if \(presentation === 'expanded'\) collapseToIcon\(\)/)
+  assert.match(source, /w-\[min\(20rem,calc\(100%-2rem\)\)\]/)
 })
 
 test('indicator state persists through refresh and session completion', () => {
-  const provider = read('src/components/import-export/MigrationSessionProvider.tsx')
+  const source = provider()
   const route = read('src/app/api/import-export/migration-sessions/route.ts')
   const service = read('src/lib/import-export/wizard/migration-session.service.ts')
 
-  assert.match(provider, /includeLatest/)
-  assert.match(provider, /poll: '1'/)
-  assert.match(provider, /cache: 'no-store'/)
-  assert.match(provider, /quickbooks-migration-session-changed/)
-  assert.match(provider, /liveCompletedToastSessionIds/)
-  assert.match(provider, /if \(state !== 'completed'\) return 'hidden'/)
-  assert.match(provider, /if \(liveCompletedToastSessionIds\.has\(session\.id\)\) return 'visible'/)
+  assert.match(source, /includeLatest/)
+  assert.match(source, /poll: '1'/)
+  assert.match(source, /cache: 'no-store'/)
+  assert.match(source, /quickbooks-migration-session-changed/)
+  assert.match(source, /expandedTerminalSessionIds/)
   assert.match(route, /includeLatest/)
   assert.match(route, /findLatestQuickBooksMigrationSession/)
   assert.match(service, /including completed or failed sessions/)
-  assert.match(service, /order\('updated_at', \{ ascending: false \}\)/)
 })
 
 test('modal no longer owns worker polling or migration execution', () => {
   const viewer = read('src/components/import-export/steps/ConnectedSourceFlow.tsx')
-  const provider = read('src/components/import-export/MigrationSessionProvider.tsx')
+  const source = provider()
 
   assert.doesNotMatch(viewer, /while \(result\.status/)
   assert.doesNotMatch(viewer, /ensureJobRunning/)
   assert.match(viewer, /quickbooks-migration-session-changed/)
-  assert.match(provider, /window\.setInterval/)
-  assert.match(provider, /applyJobCreated/)
+  assert.match(source, /window\.setInterval/)
+  assert.match(source, /applyJobCreated/)
 })
 
 test('repeated coordinator ticks cannot enqueue duplicate active queue jobs', () => {
@@ -142,4 +138,3 @@ test('repeated coordinator ticks cannot enqueue duplicate active queue jobs', ()
   assert.match(runRoute, /\.contains\('payload', \{ importJobId: job\.id \}\)/)
   assert.match(runRoute, /if \(activeQueueJob\)/)
 })
-

@@ -16,7 +16,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronRight,
-  Clock3,
   RefreshCw,
   X,
 } from 'lucide-react'
@@ -34,7 +33,6 @@ import {
   nextCoordinationAction,
 } from '@/lib/import-export/wizard/migration-coordination'
 import { migrationCenterPath } from '@/lib/import-export/wizard/migration-center-view'
-import { migrationCancelConfirmMessage } from '@/lib/import-export/wizard/migration-cancel'
 import {
   navigationTarget,
   resolveNavigation,
@@ -61,12 +59,15 @@ import { ConnectedSourceFlow } from './steps/ConnectedSourceFlow'
 const POLL_INTERVAL_MS = 1_500
 /** Releases a navigation latch whose transition never committed, so retries stay possible. */
 const NAVIGATION_LATCH_MS = 5_000
-/** Completion toast: visible long enough to notice, then auto-dismiss like a success toast. */
-const COMPLETED_TOAST_VISIBLE_MS = 9_000
-const COMPLETED_TOAST_EXIT_MS = 280
-/** Browser-tab memory only — cleared on full reload so refresh never restores a completed toast. */
-const liveCompletedToastSessionIds = new Set<string>()
-const dismissedCompletedToastSessionIds = new Set<string>()
+/** Terminal notifications stay expanded briefly, then collapse to a circular icon. */
+const COMPLETED_COLLAPSE_MS = 8_000
+const FAILED_COLLAPSE_MS = 10_000
+const PANEL_EXIT_MS = 220
+/** Browser-tab memory only — cleared on full reload. */
+const dismissedIndicatorSessionIds = new Set<string>()
+const expandedTerminalSessionIds = new Set<string>()
+
+type IndicatorPresentation = 'expanded' | 'collapsed' | 'dismissed' | 'exiting'
 
 function currentNavigationTarget(): string {
   if (typeof window === 'undefined') return ''
@@ -630,17 +631,6 @@ export function MigrationSessionProvider({ children }: { children: ReactNode }) 
     openMigrationCenter(session.id)
   }, [openMigrationCenter, retrySession, session])
 
-  const cancel = useCallback(async () => {
-    if (!session || session.config.state !== 'running') return
-    if (!window.confirm(migrationCancelConfirmMessage())) return
-    setActionError(null)
-    try {
-      await cancelSession(session.id)
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Unable to cancel migration.')
-    }
-  }, [cancelSession, session])
-
   const handleWizardSuccess = useCallback((createdSessionId?: string) => {
     forceCoordinationCycle()
     void refresh({ deferActivity: false })
@@ -694,9 +684,9 @@ export function MigrationSessionProvider({ children }: { children: ReactNode }) 
           <MigrationIndicator
             session={session}
             error={actionError}
+            onCenterPage={polledSessionId === session.id}
             onOpen={() => openMigrationCenter(session.id)}
             onRetry={() => void retry()}
-            onCancel={() => void cancel()}
             onLogs={() => navigateOnce(`${migrationCenterPath(session.id)}#logs`)}
           />
         )}
@@ -716,16 +706,16 @@ export function MigrationSessionProvider({ children }: { children: ReactNode }) 
 function MigrationIndicator({
   session,
   error,
+  onCenterPage,
   onOpen,
   onRetry,
-  onCancel,
   onLogs,
 }: {
   session: HydratedMigrationSession
   error: string | null
+  onCenterPage: boolean
   onOpen: () => void
   onRetry: () => void
-  onCancel: () => void
   onLogs: () => void
 }) {
   const overall = deriveOverallProgress(session.lifecycle)
@@ -734,6 +724,7 @@ function MigrationIndicator({
   const completed = state === 'completed'
   const failed = state === 'failed'
   const running = state === 'running'
+  const terminal = completed || failed
   const currentQueueHealth = current ? session.queueHealth?.[current.key] : null
   const workerWarning = currentQueueHealth?.warning
     ? currentQueueHealth
@@ -743,153 +734,196 @@ function MigrationIndicator({
 
   const prevSessionIdRef = useRef(session.id)
   const prevStateRef = useRef(state)
-  const [completedToast, setCompletedToast] = useState<'hidden' | 'visible' | 'exiting'>(() => {
-    if (state !== 'completed') return 'hidden'
-    if (dismissedCompletedToastSessionIds.has(session.id)) return 'hidden'
-    if (liveCompletedToastSessionIds.has(session.id)) return 'visible'
-    return 'hidden'
+  const [presentation, setPresentation] = useState<IndicatorPresentation>(() => {
+    if (dismissedIndicatorSessionIds.has(session.id)) return 'dismissed'
+    if (terminal) {
+      return expandedTerminalSessionIds.has(session.id) ? 'expanded' : 'collapsed'
+    }
+    return 'expanded'
   })
 
   useEffect(() => {
     if (prevSessionIdRef.current !== session.id) {
       prevSessionIdRef.current = session.id
       prevStateRef.current = state
-      if (state !== 'completed') {
-        setCompletedToast('hidden')
+      if (dismissedIndicatorSessionIds.has(session.id)) {
+        setPresentation('dismissed')
         return
       }
-      if (dismissedCompletedToastSessionIds.has(session.id)) {
-        setCompletedToast('hidden')
+      if (state === 'completed' || state === 'failed') {
+        setPresentation(expandedTerminalSessionIds.has(session.id) ? 'expanded' : 'collapsed')
         return
       }
-      setCompletedToast(liveCompletedToastSessionIds.has(session.id) ? 'visible' : 'hidden')
+      setPresentation('expanded')
       return
     }
 
     const previous = prevStateRef.current
     prevStateRef.current = state
-    if (state === 'completed' && previous !== 'completed') {
-      liveCompletedToastSessionIds.add(session.id)
-      if (!dismissedCompletedToastSessionIds.has(session.id)) {
-        setCompletedToast('visible')
-      }
-    }
-  }, [session.id, state])
+    if (dismissedIndicatorSessionIds.has(session.id)) return
 
-  const dismissCompletedToast = useCallback((mode: 'animate' | 'immediate' = 'animate') => {
-    if (state !== 'completed') return
-    dismissedCompletedToastSessionIds.add(session.id)
-    if (mode === 'immediate') {
-      setCompletedToast('hidden')
+    if ((state === 'completed' || state === 'failed') && previous !== state) {
+      expandedTerminalSessionIds.add(session.id)
+      setPresentation('expanded')
       return
     }
-    setCompletedToast((currentPhase) => (currentPhase === 'hidden' ? 'hidden' : 'exiting'))
+    if (state === 'running' && previous !== 'running') {
+      setPresentation('expanded')
+    }
   }, [session.id, state])
 
+  const dismissForSession = useCallback(() => {
+    dismissedIndicatorSessionIds.add(session.id)
+    expandedTerminalSessionIds.delete(session.id)
+    setPresentation((currentPhase) => (currentPhase === 'dismissed' ? 'dismissed' : 'exiting'))
+  }, [session.id])
+
+  const collapseToIcon = useCallback(() => {
+    if (dismissedIndicatorSessionIds.has(session.id)) return
+    setPresentation((currentPhase) => {
+      if (currentPhase === 'dismissed' || currentPhase === 'collapsed') return currentPhase
+      return 'exiting'
+    })
+  }, [session.id])
+
+  const expandFromIcon = useCallback(() => {
+    if (dismissedIndicatorSessionIds.has(session.id)) return
+    if (terminal) expandedTerminalSessionIds.add(session.id)
+    setPresentation('expanded')
+  }, [session.id, terminal])
+
+  // Completed / failed expand briefly, then collapse to the circular icon.
   useEffect(() => {
-    if (!completed || completedToast !== 'visible') return
-    const timer = window.setTimeout(() => dismissCompletedToast('animate'), COMPLETED_TOAST_VISIBLE_MS)
+    if (!terminal || presentation !== 'expanded' || onCenterPage) return
+    const delay = completed ? COMPLETED_COLLAPSE_MS : FAILED_COLLAPSE_MS
+    const timer = window.setTimeout(() => collapseToIcon(), delay)
     return () => window.clearTimeout(timer)
-  }, [completed, completedToast, dismissCompletedToast])
+  }, [collapseToIcon, completed, onCenterPage, presentation, terminal])
 
   useEffect(() => {
-    if (completedToast !== 'exiting') return
-    const timer = window.setTimeout(() => setCompletedToast('hidden'), COMPLETED_TOAST_EXIT_MS)
+    if (presentation !== 'exiting') return
+    const timer = window.setTimeout(() => {
+      if (dismissedIndicatorSessionIds.has(session.id)) {
+        setPresentation('dismissed')
+        return
+      }
+      expandedTerminalSessionIds.delete(session.id)
+      setPresentation('collapsed')
+    }, PANEL_EXIT_MS)
     return () => window.clearTimeout(timer)
-  }, [completedToast])
+  }, [presentation, session.id])
 
-  const openCompletedReport = useCallback(() => {
-    dismissCompletedToast('immediate')
-    onOpen()
-  }, [dismissCompletedToast, onOpen])
+  // On Migration Center itself, never cover the page with the expanded panel.
+  useEffect(() => {
+    if (!onCenterPage) return
+    if (presentation === 'expanded') collapseToIcon()
+  }, [collapseToIcon, onCenterPage, presentation])
 
-  if (completed && completedToast === 'hidden') return null
+  if (presentation === 'dismissed') return null
 
-  const exiting = completed && completedToast === 'exiting'
+  const statusIcon = completed
+    ? <CheckCircle2 size={20} />
+    : failed
+      ? <AlertCircle size={20} />
+      : workerWarning
+        ? <AlertTriangle size={20} />
+        : <RefreshCw size={19} className="motion-safe:animate-spin" />
+
+  const toneClass = completed
+    ? 'bg-emerald-100 text-emerald-700'
+    : failed
+      ? 'bg-red-100 text-red-700'
+      : workerWarning
+        ? 'bg-amber-100 text-amber-800'
+        : 'bg-indigo-100 text-indigo-700'
+
+  const title = completed
+    ? 'Migration Completed'
+    : failed
+      ? 'Migration Failed'
+      : workerWarning
+        ? 'Worker Not Running'
+        : 'QuickBooks Migration'
+
+  const subtitle = completed
+    ? `${overall.completed} modules completed`
+    : failed
+      ? 'Review logs or retry failed modules'
+      : workerWarning?.warningMessage
+        ?? `${overall.percent.toFixed(0)}% · ${current?.label ?? 'Waiting in queue'} · ${current?.progress?.currentStage?.replaceAll('_', ' ') ?? 'Importing…'}`
+
+  if (presentation === 'collapsed') {
+    return (
+      <button
+        type="button"
+        aria-label={`Open ${title} notification`}
+        data-global-migration-indicator={state}
+        data-migration-indicator-presentation="collapsed"
+        onClick={expandFromIcon}
+        className="fixed bottom-4 right-4 z-40 flex h-12 w-12 items-center justify-center rounded-full border border-slate-200 bg-white shadow-lg shadow-slate-900/15 transition hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 sm:bottom-6 sm:right-6"
+      >
+        <span className={`flex h-10 w-10 items-center justify-center rounded-full ${toneClass}`}>
+          {statusIcon}
+        </span>
+      </button>
+    )
+  }
 
   return (
     <aside
       aria-label="QuickBooks migration status"
       aria-live="polite"
       data-global-migration-indicator={state}
-      data-completed-toast={completed ? completedToast : undefined}
-      className={`relative fixed bottom-4 right-4 z-40 w-[calc(100%-2rem)] max-w-sm overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-900/15 transition-[opacity,transform] duration-300 ease-out sm:bottom-6 sm:right-6 ${
-        exiting ? 'translate-y-2 opacity-0' : 'translate-y-0 opacity-100'
+      data-migration-indicator-presentation={presentation}
+      className={`fixed bottom-4 right-4 z-40 w-[min(20rem,calc(100%-2rem))] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-900/15 transition-[opacity,transform] duration-200 ease-out sm:bottom-6 sm:right-6 ${
+        presentation === 'exiting' ? 'translate-y-2 opacity-0' : 'translate-y-0 opacity-100'
       }`}
     >
-      {completed && (
+      {terminal && (
         <button
           type="button"
           aria-label="Dismiss migration notification"
-          data-dismiss-completed-toast
-          onClick={() => dismissCompletedToast('animate')}
+          data-dismiss-migration-indicator
+          onClick={dismissForSession}
           className="absolute right-2 top-2 z-10 rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
         >
           <X size={14} />
         </button>
       )}
+
       <button
         type="button"
-        onClick={completed ? openCompletedReport : onOpen}
-        className={`flex min-h-14 w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500 ${
-          completed ? 'pr-9' : ''
+        onClick={onOpen}
+        className={`flex min-h-12 w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500 ${
+          terminal ? 'pr-9' : ''
         }`}
       >
-        <span className={`flex h-10 w-10 flex-none items-center justify-center rounded-xl ${
-          completed ? 'bg-emerald-100 text-emerald-700'
-            : failed ? 'bg-red-100 text-red-700'
-              : workerWarning ? 'bg-amber-100 text-amber-800'
-              : 'bg-indigo-100 text-indigo-700'
-        }`}>
-          {completed
-            ? <CheckCircle2 size={20} />
-            : failed
-              ? <AlertCircle size={20} />
-              : workerWarning
-                ? <AlertTriangle size={20} />
-                : <RefreshCw size={19} className="motion-safe:animate-spin" />}
+        <span className={`flex h-9 w-9 flex-none items-center justify-center rounded-xl ${toneClass}`}>
+          {statusIcon}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-sm font-semibold text-slate-900">
-            {completed ? 'Migration Completed' : failed ? 'Migration Failed' : workerWarning ? 'Worker Not Running' : 'QuickBooks Migration'}
-          </span>
-          <span className="mt-0.5 block truncate text-xs text-slate-600">
-            {completed
-              ? `${overall.completed} modules completed`
-              : failed
-                ? 'Migration needs attention'
-                : workerWarning?.warningMessage
-                  ?? `${overall.percent.toFixed(0)}% · ${current?.label ?? 'Waiting in queue'} · ${current?.progress?.currentStage?.replaceAll('_', ' ') ?? 'Importing…'}`}
-          </span>
+          <span className="block text-sm font-semibold text-slate-900">{title}</span>
+          <span className="mt-0.5 block truncate text-xs text-slate-600">{subtitle}</span>
         </span>
-        <ChevronRight size={18} className="flex-none text-slate-400" />
+        {running && <ChevronRight size={16} className="flex-none text-slate-400" />}
       </button>
 
-      {!completed && !failed && (
+      {running && (
         <div className="h-1 bg-slate-100" aria-hidden="true">
           <div className="h-full bg-indigo-600 transition-[width] duration-300" style={{ width: `${overall.percent}%` }} />
         </div>
       )}
 
-      <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-3 py-2">
-        <span className="flex min-w-0 items-center gap-1.5 text-xs text-slate-500">
-          <Clock3 size={13} />
-          {completed ? 'View report' : failed ? 'Resume or retry' : 'Continues in background'}
-        </span>
-        <div className="flex gap-1">
-          {failed && <Button size="sm" variant="outline" onClick={onRetry}>Retry</Button>}
-          {failed && <Button size="sm" variant="outline" onClick={onLogs}>View Logs</Button>}
-          {running && (
-            <Button size="sm" variant="outline" data-cancel-migration onClick={onCancel}>
-              Cancel Migration
-            </Button>
-          )}
-          <Button size="sm" onClick={completed ? openCompletedReport : onOpen}>
-            {completed ? 'View Report' : failed ? 'Resume' : 'View Progress'}
-          </Button>
+      {failed && (
+        <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-3 py-2">
+          <Button size="sm" variant="outline" onClick={onLogs}>View Logs</Button>
+          <Button size="sm" onClick={onRetry}>Retry</Button>
         </div>
-      </div>
-      {error && <p role="alert" className="border-t border-red-100 bg-red-50 px-4 py-2 text-xs text-red-700">{error}</p>}
+      )}
+
+      {error && (
+        <p role="alert" className="border-t border-red-100 bg-red-50 px-4 py-2 text-xs text-red-700">{error}</p>
+      )}
     </aside>
   )
 }
