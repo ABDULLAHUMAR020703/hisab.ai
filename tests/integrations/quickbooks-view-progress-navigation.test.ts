@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   navigationTarget,
+  resolveMigrateEntryAction,
   resolveNavigation,
 } from '../../src/lib/import-export/wizard/migration-navigation'
 import { migrationCenterPath } from '../../src/lib/import-export/wizard/migration-center-view'
@@ -77,6 +78,17 @@ test('opening the wizard during an active migration redirects exactly once', () 
   nav.commit()
   assert.equal(nav.request(target), 'already-there')
   assert.deepEqual(nav.pushes, [target])
+})
+
+test('completed migrations do not steal the Migrate entry into Migration Center', () => {
+  assert.deepEqual(
+    resolveMigrateEntryAction({ id: 'done', config: { state: 'completed' } }),
+    { type: 'open-wizard' },
+  )
+  assert.deepEqual(
+    resolveMigrateEntryAction({ id: 'live', config: { state: 'running' } }),
+    { type: 'open-migration-center', sessionId: 'live' },
+  )
 })
 
 test('hash targets are deduplicated independently of the plain route', () => {

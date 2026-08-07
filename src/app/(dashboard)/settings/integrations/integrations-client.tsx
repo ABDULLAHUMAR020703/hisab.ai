@@ -7,6 +7,8 @@ import { AlertCircle, CheckCircle2, Clock3, Download, Link2, RefreshCw, ShieldCh
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { ImportWizard } from '@/components/import-export/ImportWizard'
+import { useMigrationSession } from '@/components/import-export/MigrationSessionProvider'
+import { resolveMigrateEntryAction } from '@/lib/import-export/wizard/migration-navigation'
 
 type Status = 'NOT_CONNECTED' | 'PENDING' | 'CONNECTED' | 'FAILED' | 'DISCONNECTED' | 'TOKEN_EXPIRED'
 
@@ -49,6 +51,7 @@ async function apiError(response: Response): Promise<string> {
 }
 
 export function IntegrationsClient({ oauthFeedback, certificationEnabled }: { oauthFeedback?: OAuthFeedback; certificationEnabled: boolean }) {
+  const { openMigrationCenter, session } = useMigrationSession()
   const [items, setItems] = useState<IntegrationItem[]>([])
   const [loading, setLoading] = useState(true)
   const [busyProvider, setBusyProvider] = useState<string | null>(null)
@@ -71,6 +74,21 @@ export function IntegrationsClient({ oauthFeedback, certificationEnabled }: { oa
     }
   }, [])
 
+  /** Migrate never silently no-ops: open the wizard, or resume Migration Center. */
+  const openMigrate = useCallback(() => {
+    const action = resolveMigrateEntryAction(session)
+    if (action.type === 'open-migration-center') {
+      openMigrationCenter(action.sessionId)
+      return
+    }
+    setShowImport(true)
+  }, [openMigrationCenter, session])
+
+  const handleWizardSuccess = useCallback((sessionId?: string) => {
+    if (sessionId) openMigrationCenter(sessionId)
+    void load()
+  }, [load, openMigrationCenter])
+
   useEffect(() => {
     const timer = window.setTimeout(() => { void load() }, 0)
     return () => window.clearTimeout(timer)
@@ -78,9 +96,9 @@ export function IntegrationsClient({ oauthFeedback, certificationEnabled }: { oa
 
   useEffect(() => {
     if (oauthFeedback?.kind !== 'connected') return
-    const timer = window.setTimeout(() => setShowImport(true), 0)
+    const timer = window.setTimeout(() => openMigrate(), 0)
     return () => window.clearTimeout(timer)
-  }, [oauthFeedback])
+  }, [oauthFeedback, openMigrate])
 
   async function mutate(provider: string, action: 'connect' | 'disconnect') {
     setBusyProvider(provider)
@@ -217,7 +235,7 @@ export function IntegrationsClient({ oauthFeedback, certificationEnabled }: { oa
                     <div className="flex gap-2">
                       {item.status === 'CONNECTED' && <Link href="/settings/integrations/quickbooks-validation" className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"><ShieldCheck size={14} /> Validate</Link>}
                       {certificationEnabled && item.status === 'CONNECTED' && <Link href="/settings/integrations/quickbooks-certification" className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50">Certify</Link>}
-                      {item.status === 'CONNECTED' && <Button onClick={() => setShowImport(true)}><Download size={14} /> Migrate</Button>}
+                      {item.status === 'CONNECTED' && <Button onClick={openMigrate}><Download size={14} /> Migrate</Button>}
                       <Button variant="outline" loading={busyProvider === item.provider} onClick={() => void mutate(item.provider, 'disconnect')}>
                         <Unplug size={14} /> Disconnect
                       </Button>
@@ -241,7 +259,7 @@ export function IntegrationsClient({ oauthFeedback, certificationEnabled }: { oa
           <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Refresh
         </button>
       </div>
-      <ImportWizard open={showImport} onClose={() => setShowImport(false)} onSuccess={() => void load()} initialSource="quickbooks" />
+      <ImportWizard open={showImport} onClose={() => setShowImport(false)} onSuccess={handleWizardSuccess} initialSource="quickbooks" />
     </div>
   )
 }

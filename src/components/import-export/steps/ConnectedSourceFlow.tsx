@@ -23,6 +23,7 @@ import {
 } from '@/lib/import-export/wizard/module-lifecycle'
 import type { HydratedMigrationSession } from '@/lib/import-export/wizard/migration-session'
 import { migrationCancelConfirmMessage } from '@/lib/import-export/wizard/migration-cancel'
+import { resolveMigrateEntryAction } from '@/lib/import-export/wizard/migration-navigation'
 
 interface SourceResource { key: string; label: string; moduleKey: string }
 interface ImportSource {
@@ -121,9 +122,11 @@ export function ConnectedSourceFlow({
   const onCloseRef = useRef(onClose)
   onSuccessRef.current = onSuccess
   onCloseRef.current = onClose
-  const activeSessionId = persistentSession
-    && (persistentSession.config.state === 'running' || migrationHasStarted(persistentSession.lifecycle))
-    ? persistentSession.id
+  // Only an in-flight migration owns the Migrate entry. Terminal sessions keep
+  // job ids forever; treating them as "active" closed the wizard immediately.
+  const migrateEntry = resolveMigrateEntryAction(persistentSession)
+  const runningSessionId = migrateEntry.type === 'open-migration-center'
+    ? migrateEntry.sessionId
     : null
 
   useEffect(() => {
@@ -135,14 +138,14 @@ export function ConnectedSourceFlow({
       redirectedSessionRef.current = null
       return
     }
-    if (!activeSessionId || redirectedSessionRef.current === activeSessionId) return
-    redirectedSessionRef.current = activeSessionId
+    if (!runningSessionId || redirectedSessionRef.current === runningSessionId) return
+    redirectedSessionRef.current = runningSessionId
     onCloseRef.current()
-    onSuccessRef.current?.(activeSessionId)
-  }, [activeSessionId, open])
+    onSuccessRef.current?.(runningSessionId)
+  }, [runningSessionId, open])
 
   useEffect(() => {
-    if (!open || activeSessionId) return
+    if (!open || runningSessionId) return
     let active = true
     const token = ++resumeTokenRef.current
     const timer = window.setTimeout(() => {
@@ -184,7 +187,7 @@ export function ConnectedSourceFlow({
       })
     }, 0)
     return () => { active = false; window.clearTimeout(timer) }
-  }, [activeSessionId, initialSource, open])
+  }, [runningSessionId, initialSource, open])
 
   function resetLocalWizardState() {
     setStep('analyze')

@@ -216,8 +216,11 @@ test('wizard detects active sessions and opens Migration Center instead of inven
   assert.match(wizard, /data-migration-gate="already-running"/)
   assert.match(wizard, /fetch\('\/api\/import-export\/migration-sessions', \{/)
   assert.doesNotMatch(wizard, /fetch\('\/api\/import-export\/migration-sessions', \{ cache: 'no-store' \}\)/)
-  assert.match(wizard, /onSuccessRef\.current\?\.\(activeSessionId\)/)
+  assert.match(wizard, /onSuccessRef\.current\?\.\(runningSessionId\)/)
+  assert.match(wizard, /resolveMigrateEntryAction\(persistentSession\)/)
   assert.match(wizard, /Starting Migration Center/)
+  // Completed sessions with job ids must not hijack Migrate into a silent close.
+  assert.doesNotMatch(wizard, /migrationHasStarted\(persistentSession\.lifecycle\)/)
 
   assert.match(provider, /includeLatest/)
   assert.match(provider, /poll: '1'/)
