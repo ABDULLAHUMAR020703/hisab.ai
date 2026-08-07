@@ -38,6 +38,17 @@ import {
   resolveNavigation,
 } from '@/lib/import-export/wizard/migration-navigation'
 import {
+  IndicatorAutoCollapseController,
+  initialIndicatorPresentation,
+  PANEL_EXIT_MS,
+  presentationAfterCollapseRequest,
+  presentationAfterExitAnimation,
+  presentationAfterExpand,
+  presentationForSessionTransition,
+  resolveIndicatorCollapseDelayMs,
+  type IndicatorPresentation,
+} from '@/lib/import-export/wizard/migration-indicator-state'
+import {
   extractActivityCursors,
   mergeMigrationPollPayload,
   migrationPollLiveFingerprint,
@@ -59,15 +70,9 @@ import { ConnectedSourceFlow } from './steps/ConnectedSourceFlow'
 const POLL_INTERVAL_MS = 1_500
 /** Releases a navigation latch whose transition never committed, so retries stay possible. */
 const NAVIGATION_LATCH_MS = 5_000
-/** Terminal notifications stay expanded briefly, then collapse to a circular icon. */
-const COMPLETED_COLLAPSE_MS = 8_000
-const FAILED_COLLAPSE_MS = 10_000
-const PANEL_EXIT_MS = 220
 /** Browser-tab memory only — cleared on full reload. */
 const dismissedIndicatorSessionIds = new Set<string>()
 const expandedTerminalSessionIds = new Set<string>()
-
-type IndicatorPresentation = 'expanded' | 'collapsed' | 'dismissed' | 'exiting'
 
 function currentNavigationTarget(): string {
   if (typeof window === 'undefined') return ''
@@ -684,7 +689,6 @@ export function MigrationSessionProvider({ children }: { children: ReactNode }) 
           <MigrationIndicator
             session={session}
             error={actionError}
-            onCenterPage={polledSessionId === session.id}
             onOpen={() => openMigrationCenter(session.id)}
             onRetry={() => void retry()}
             onLogs={() => navigateOnce(`${migrationCenterPath(session.id)}#logs`)}
@@ -706,14 +710,12 @@ export function MigrationSessionProvider({ children }: { children: ReactNode }) 
 function MigrationIndicator({
   session,
   error,
-  onCenterPage,
   onOpen,
   onRetry,
   onLogs,
 }: {
   session: HydratedMigrationSession
   error: string | null
-  onCenterPage: boolean
   onOpen: () => void
   onRetry: () => void
   onLogs: () => void
@@ -734,90 +736,105 @@ function MigrationIndicator({
 
   const prevSessionIdRef = useRef(session.id)
   const prevStateRef = useRef(state)
-  const [presentation, setPresentation] = useState<IndicatorPresentation>(() => {
-    if (dismissedIndicatorSessionIds.has(session.id)) return 'dismissed'
-    if (terminal) {
-      return expandedTerminalSessionIds.has(session.id) ? 'expanded' : 'collapsed'
-    }
-    return 'expanded'
-  })
+  const collapseControllerRef = useRef(new IndicatorAutoCollapseController())
+  const exitTimerRef = useRef<number | null>(null)
+  const [presentation, setPresentation] = useState<IndicatorPresentation>(() => (
+    initialIndicatorPresentation({
+      sessionId: session.id,
+      state,
+      dismissedIds: dismissedIndicatorSessionIds,
+      expandedIds: expandedTerminalSessionIds,
+    })
+  ))
 
+  const clearExitTimer = useCallback(() => {
+    if (exitTimerRef.current == null) return
+    window.clearTimeout(exitTimerRef.current)
+    exitTimerRef.current = null
+  }, [])
+
+  const armAutoCollapse = useCallback(() => {
+    const delayMs = resolveIndicatorCollapseDelayMs(state)
+    const controller = collapseControllerRef.current
+    if (delayMs == null) {
+      controller.clear()
+      return
+    }
+    controller.arm(delayMs, () => {
+      if (dismissedIndicatorSessionIds.has(session.id)) return
+      expandedTerminalSessionIds.delete(session.id)
+      setPresentation((currentPhase) => presentationAfterCollapseRequest(currentPhase))
+    })
+  }, [session.id, state])
+
+  // Progress polls must not rewrite presentation — only session identity / state transitions.
   useEffect(() => {
-    if (prevSessionIdRef.current !== session.id) {
-      prevSessionIdRef.current = session.id
-      prevStateRef.current = state
-      if (dismissedIndicatorSessionIds.has(session.id)) {
-        setPresentation('dismissed')
-        return
-      }
-      if (state === 'completed' || state === 'failed') {
-        setPresentation(expandedTerminalSessionIds.has(session.id) ? 'expanded' : 'collapsed')
-        return
-      }
-      setPresentation('expanded')
-      return
-    }
-
-    const previous = prevStateRef.current
+    const next = presentationForSessionTransition({
+      previousSessionId: prevSessionIdRef.current,
+      nextSessionId: session.id,
+      previousState: prevStateRef.current,
+      nextState: state,
+      dismissedIds: dismissedIndicatorSessionIds,
+      expandedIds: expandedTerminalSessionIds,
+    })
+    prevSessionIdRef.current = session.id
     prevStateRef.current = state
-    if (dismissedIndicatorSessionIds.has(session.id)) return
-
-    if ((state === 'completed' || state === 'failed') && previous !== state) {
+    if (!next) return
+    if (next === 'expanded' && (state === 'completed' || state === 'failed')) {
       expandedTerminalSessionIds.add(session.id)
-      setPresentation('expanded')
-      return
     }
-    if (state === 'running' && previous !== 'running') {
-      setPresentation('expanded')
-    }
+    setPresentation(next)
   }, [session.id, state])
 
   const dismissForSession = useCallback(() => {
     dismissedIndicatorSessionIds.add(session.id)
     expandedTerminalSessionIds.delete(session.id)
-    setPresentation((currentPhase) => (currentPhase === 'dismissed' ? 'dismissed' : 'exiting'))
-  }, [session.id])
-
-  const collapseToIcon = useCallback(() => {
-    if (dismissedIndicatorSessionIds.has(session.id)) return
-    setPresentation((currentPhase) => {
-      if (currentPhase === 'dismissed' || currentPhase === 'collapsed') return currentPhase
-      return 'exiting'
-    })
+    collapseControllerRef.current.clear()
+    setPresentation((currentPhase) => presentationAfterCollapseRequest(currentPhase))
   }, [session.id])
 
   const expandFromIcon = useCallback(() => {
     if (dismissedIndicatorSessionIds.has(session.id)) return
+    const next = presentationAfterExpand(false)
+    if (!next) return
     if (terminal) expandedTerminalSessionIds.add(session.id)
-    setPresentation('expanded')
-  }, [session.id, terminal])
+    clearExitTimer()
+    setPresentation(next)
+    // Opening always cancels any prior arm and starts a fresh collapse window.
+    armAutoCollapse()
+  }, [armAutoCollapse, clearExitTimer, session.id, terminal])
 
-  // Completed / failed expand briefly, then collapse to the circular icon.
+  // Keep a single auto-collapse timer in sync with expanded terminal panels.
+  // expandFromIcon also arms; this covers completion/failure transitions and
+  // clears on collapse/dismiss. Cleanup always clears so remounts cannot leak.
   useEffect(() => {
-    if (!terminal || presentation !== 'expanded' || onCenterPage) return
-    const delay = completed ? COMPLETED_COLLAPSE_MS : FAILED_COLLAPSE_MS
-    const timer = window.setTimeout(() => collapseToIcon(), delay)
-    return () => window.clearTimeout(timer)
-  }, [collapseToIcon, completed, onCenterPage, presentation, terminal])
+    if (presentation !== 'expanded') {
+      collapseControllerRef.current.clear()
+      return
+    }
+    armAutoCollapse()
+    return () => {
+      collapseControllerRef.current.clear()
+    }
+  }, [armAutoCollapse, presentation])
 
   useEffect(() => {
-    if (presentation !== 'exiting') return
-    const timer = window.setTimeout(() => {
-      if (dismissedIndicatorSessionIds.has(session.id)) {
-        setPresentation('dismissed')
-        return
-      }
-      expandedTerminalSessionIds.delete(session.id)
-      setPresentation('collapsed')
+    if (presentation !== 'exiting') {
+      clearExitTimer()
+      return
+    }
+    clearExitTimer()
+    exitTimerRef.current = window.setTimeout(() => {
+      exitTimerRef.current = null
+      setPresentation(presentationAfterExitAnimation(dismissedIndicatorSessionIds.has(session.id)))
     }, PANEL_EXIT_MS)
-    return () => window.clearTimeout(timer)
-  }, [presentation, session.id])
+    return clearExitTimer
+  }, [clearExitTimer, presentation, session.id])
 
-  // On Migration Center itself, never cover the page with the expanded panel.
-  useEffect(() => {
-    if (!onCenterPage) return
-    if (presentation === 'expanded') collapseToIcon()
-  }, [collapseToIcon, onCenterPage, presentation])
+  useEffect(() => () => {
+    collapseControllerRef.current.clear()
+    clearExitTimer()
+  }, [clearExitTimer])
 
   if (presentation === 'dismissed') return null
 

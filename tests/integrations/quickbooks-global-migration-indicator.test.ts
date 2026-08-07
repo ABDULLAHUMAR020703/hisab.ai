@@ -56,13 +56,16 @@ test('running indicator stays compact without duplicating Migration Center actio
 
 test('completed migration shows success then collapses to a circular icon after 8s', () => {
   const source = provider()
+  const state = read('src/lib/import-export/wizard/migration-indicator-state.ts')
 
   assert.match(source, /Migration Completed/)
-  assert.match(source, /COMPLETED_COLLAPSE_MS = 8_000/)
+  assert.match(state, /COMPLETED_COLLAPSE_MS = 8_000/)
+  assert.match(source, /resolveIndicatorCollapseDelayMs/)
+  assert.match(source, /IndicatorAutoCollapseController/)
   assert.match(source, /data-migration-indicator-presentation/)
   assert.match(source, /collapsed/)
   assert.match(source, /expandFromIcon/)
-  assert.match(source, /collapseToIcon/)
+  assert.match(source, /presentationAfterCollapseRequest/)
   assert.match(source, /Open \$\{title\} notification/)
   assert.match(source, /rounded-full/)
   assert.match(source, /h-12 w-12/)
@@ -70,11 +73,12 @@ test('completed migration shows success then collapses to a circular icon after 
 
 test('failed migration shows View Logs and Retry only, then collapses after 10s', () => {
   const source = provider()
+  const state = read('src/lib/import-export/wizard/migration-indicator-state.ts')
   const retryRoute = read('src/app/api/import-export/migration-sessions/[sessionId]/retry/route.ts')
   const service = read('src/lib/import-export/wizard/migration-session.service.ts')
 
   assert.match(source, /Migration Failed/)
-  assert.match(source, /FAILED_COLLAPSE_MS = 10_000/)
+  assert.match(state, /FAILED_COLLAPSE_MS = 10_000/)
   assert.match(source, />Retry</)
   assert.match(source, />View Logs</)
   assert.doesNotMatch(source, /Resume/)
@@ -95,12 +99,16 @@ test('dismiss hides the indicator for the remainder of the browser session', () 
   assert.match(source, /dismissedIndicatorSessionIds\.add\(session\.id\)/)
 })
 
-test('expanded panel never covers Migration Center content', () => {
+test('indicator expand survives polling and does not force-collapse on Migration Center', () => {
   const source = provider()
 
-  assert.match(source, /onCenterPage=\{polledSessionId === session\.id\}/)
-  assert.match(source, /if \(!onCenterPage\) return/)
-  assert.match(source, /if \(presentation === 'expanded'\) collapseToIcon\(\)/)
+  // Root cause of the flicker: route-based force-collapse on every expand.
+  assert.doesNotMatch(source, /onCenterPage/)
+  assert.doesNotMatch(source, /if \(presentation === 'expanded'\) collapseToIcon/)
+  // Same session id + state from polls must not rewrite presentation.
+  assert.match(source, /presentationForSessionTransition/)
+  assert.match(source, /Progress polls must not rewrite presentation/)
+  assert.match(source, /armAutoCollapse/)
   assert.match(source, /w-\[min\(20rem,calc\(100%-2rem\)\)\]/)
 })
 
