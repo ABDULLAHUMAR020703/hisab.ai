@@ -70,3 +70,11 @@ export class ProviderRequestException extends AccountingIntegrationException {
     super(message, statusCode, 'PROVIDER_REQUEST_FAILED', options)
   }
 }
+
+export class SandboxConnectionNotAllowedException extends AccountingIntegrationException {
+  constructor(
+    message = 'QuickBooks is connected to a Sandbox company. Please connect a Production QuickBooks company before migrating.',
+  ) {
+    super(message, 409, 'QUICKBOOKS_SANDBOX_CONNECTION')
+  }
+}

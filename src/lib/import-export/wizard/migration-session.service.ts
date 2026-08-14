@@ -1,6 +1,8 @@
 import 'server-only'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveCompanyId } from '@/lib/tenant'
+import { Provider } from '@/integrations/accounting/contracts/types'
+import { createAccountingIntegrationRuntime } from '@/integrations/accounting/services/container'
 import {
   cancelImportJob,
   createImportJob,
@@ -436,6 +438,10 @@ export async function createQuickBooksMigrationSession(input: {
   companyIdOverride?: string
 }): Promise<HydratedMigrationSession> {
   const companyId = input.companyIdOverride ?? await resolveCompanyId()
+  // Refuse sandbox (or env-mismatched) connections before any session/job/queue work.
+  const runtime = createAccountingIntegrationRuntime()
+  await runtime.connections.assertMigrationConnectionReady(companyId, Provider.QUICKBOOKS)
+
   const existing = await findActiveQuickBooksMigrationSession(companyId)
   if (existing) {
     throw new FrameworkBadRequestError('Migration already running')

@@ -19,6 +19,7 @@ export interface CreateConnectionInput {
 
 export interface UpdateConnectionInput {
   status?: ConnectionStatus
+  environment?: 'sandbox' | 'production' | null
   realmId?: string | null
   companyName?: string | null
   companyEmail?: string | null

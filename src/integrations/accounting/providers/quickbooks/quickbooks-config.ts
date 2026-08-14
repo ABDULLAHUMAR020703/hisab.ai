@@ -1,4 +1,7 @@
-import { ProviderRequestException } from '../../utils/exceptions'
+import {
+  ProviderRequestException,
+  SandboxConnectionNotAllowedException,
+} from '../../utils/exceptions'
 
 export type QuickBooksEnvironment = 'sandbox' | 'production'
 
@@ -17,16 +20,67 @@ export interface QuickBooksEndpoints {
   api: string
 }
 
+/**
+ * Resolve the process QuickBooks environment.
+ * Explicit QB_ENVIRONMENT wins. Otherwise production NODE_ENV → production,
+ * everything else → sandbox (local/dev/test).
+ */
+export function resolveQuickBooksEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+): QuickBooksEnvironment {
+  const explicit = env.QB_ENVIRONMENT?.trim().toLowerCase()
+  if (explicit === 'sandbox' || explicit === 'production') return explicit
+  if (explicit) {
+    throw new ProviderRequestException("QB_ENVIRONMENT must be 'sandbox' or 'production'.", 503)
+  }
+  return env.NODE_ENV === 'production' ? 'production' : 'sandbox'
+}
+
+/**
+ * Legacy connection rows store NULL environment. Treat them as sandbox so they
+ * cannot be reused as production after QB_ENVIRONMENT is switched.
+ */
+export function resolveStoredConnectionEnvironment(
+  stored: string | null | undefined,
+): QuickBooksEnvironment {
+  return stored === 'production' ? 'production' : 'sandbox'
+}
+
+/**
+ * Reject sandbox (or env-mismatched) connections when the process targets
+ * production, and reject any connection/process environment mismatch.
+ */
+export function assertQuickBooksConnectionEnvironment(input: {
+  connectionEnvironment: string | null | undefined
+  processEnvironment: QuickBooksEnvironment
+  forMigration?: boolean
+}): QuickBooksEnvironment {
+  const connectionEnvironment = resolveStoredConnectionEnvironment(input.connectionEnvironment)
+
+  if (connectionEnvironment !== input.processEnvironment) {
+    if (input.processEnvironment === 'production' || input.forMigration) {
+      throw new SandboxConnectionNotAllowedException()
+    }
+    throw new ProviderRequestException(
+      `QuickBooks is connected to a ${connectionEnvironment} company, but this server is configured for ${input.processEnvironment}. Disconnect and reconnect QuickBooks to continue.`,
+      409,
+    )
+  }
+
+  if (input.forMigration && connectionEnvironment !== 'production' && input.processEnvironment === 'production') {
+    throw new SandboxConnectionNotAllowedException()
+  }
+
+  return connectionEnvironment
+}
+
 export function quickBooksConfigFromEnv(env: NodeJS.ProcessEnv = process.env): QuickBooksConfig {
   const clientId = env.QB_CLIENT_ID?.trim()
   const clientSecret = env.QB_CLIENT_SECRET?.trim()
   const redirectUri = env.QB_REDIRECT_URI?.trim()
-  const environment = env.QB_ENVIRONMENT?.trim().toLowerCase() || 'sandbox'
+  const environment = resolveQuickBooksEnvironment(env)
   if (!clientId || !clientSecret || !redirectUri) {
     throw new ProviderRequestException('QuickBooks OAuth is not configured on the server.', 503)
-  }
-  if (environment !== 'sandbox' && environment !== 'production') {
-    throw new ProviderRequestException("QB_ENVIRONMENT must be 'sandbox' or 'production'.", 503)
   }
   let parsed: URL
   try {

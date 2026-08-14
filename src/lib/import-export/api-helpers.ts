@@ -2,8 +2,15 @@ import { NextResponse } from 'next/server'
 import { TenantAccessError } from '@/lib/tenant-error'
 import { FrameworkBadRequestError, FrameworkNotFoundError } from './errors'
 import { ForbiddenError } from '@/lib/authz'
+import { AccountingIntegrationException } from '@/integrations/accounting/utils/exceptions'
 
 export function apiError(error: unknown, fallback = 'Request failed') {
+  if (error instanceof AccountingIntegrationException) {
+    return NextResponse.json(
+      { error: error.message, code: error.code },
+      { status: error.statusCode },
+    )
+  }
   if (error instanceof FrameworkNotFoundError) {
     return NextResponse.json({ error: error.message }, { status: 404 })
   }

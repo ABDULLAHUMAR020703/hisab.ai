@@ -37,9 +37,14 @@ ZATCA_CREDENTIAL_ENCRYPTION_KEY=
 ```
 
 QuickBooks OAuth credentials are configured in the Intuit Developer dashboard. Use
-`QB_ENVIRONMENT=sandbox` for development and register the exact `QB_REDIRECT_URI`
-shown above. Replace the URI with the deployed application callback URL in production;
-never commit real client credentials.
+`QB_ENVIRONMENT=sandbox` for local development/testing. Production web and worker
+deployments must set `QB_ENVIRONMENT=production` (or rely on `NODE_ENV=production`
+when `QB_ENVIRONMENT` is unset) and use production Intuit app credentials. Register
+the exact `QB_REDIRECT_URI` shown above; replace it with the deployed application
+callback URL in production. Never commit real client credentials.
+
+Existing Sandbox connections are not reused as Production. Disconnect or use
+**Reconnect to Production** under Settings → Integrations before migrating live data.
 
 QuickBooks Accounting Certification is temporarily frozen for production and
 defaults to disabled. See [the certification feature-freeze documentation](QUICKBOOKS_CERTIFICATION_FEATURE_FREEZE.md)

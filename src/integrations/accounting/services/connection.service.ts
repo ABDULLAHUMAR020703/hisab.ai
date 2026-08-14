@@ -2,10 +2,17 @@ import type { IntegrationRepository, UpdateConnectionInput } from '../contracts/
 import {
   ConnectionStatus,
   type ConnectionStatusDto,
+  type IntegrationConnectionEnvironment,
   type IntegrationConnectionRecord,
   type Provider,
   type ProviderTokenSet,
 } from '../contracts/types'
+import {
+  assertQuickBooksConnectionEnvironment,
+  resolveQuickBooksEnvironment,
+  resolveStoredConnectionEnvironment,
+  type QuickBooksEnvironment,
+} from '../providers/quickbooks/quickbooks-config'
 import {
   ConnectionAlreadyExistsException,
   ConnectionNotFoundException,
@@ -36,6 +43,7 @@ export class ConnectionService {
     private readonly encryption: TokenEncryptionService,
     private readonly oauthStates: OAuthStateService,
     private readonly now: () => Date = () => new Date(),
+    private readonly resolveProcessEnvironment: () => QuickBooksEnvironment = () => resolveQuickBooksEnvironment(),
   ) {}
 
   async getStatus(tenantId: string, slug: Provider): Promise<ConnectionStatusDto> {
@@ -45,12 +53,37 @@ export class ConnectionService {
     return this.toStatusDto(connection)
   }
 
+  /**
+   * Server-side gate for Migrate / session create. Ensures the tenant connection
+   * exists, matches the process environment, and is production when required.
+   */
+  async assertMigrationConnectionReady(tenantId: string, slug: Provider): Promise<ConnectionStatusDto> {
+    const provider = this.validation.validateProvider(await this.repository.findProviderBySlug(slug), slug)
+    this.validation.validateProviderActive(provider)
+    const connection = await this.repository.findCurrentConnection(tenantId, provider.id)
+    if (!connection || connection.status !== ConnectionStatus.CONNECTED || !connection.realmId) {
+      throw new ConnectionNotFoundException()
+    }
+    this.assertConnectionEnvironment(connection, { forMigration: true })
+    return this.toStatusDto(connection)
+  }
+
   async beginConnection(tenantId: string, userId: string, slug: Provider): Promise<{ authorizationUrl: string }> {
     const providerRecord = this.validation.validateProvider(await this.repository.findProviderBySlug(slug), slug)
     this.validation.validateProviderActive(providerRecord)
     const current = await this.repository.findCurrentConnection(tenantId, providerRecord.id)
+    const processEnvironment = this.processEnvironmentFor(slug)
+    const canReplaceForEnvironment = Boolean(
+      current
+      && [ConnectionStatus.PENDING, ConnectionStatus.CONNECTED].includes(current.status)
+      && this.connectionNeedsEnvironmentReconnect(current, processEnvironment),
+    )
 
-    if (current && [ConnectionStatus.PENDING, ConnectionStatus.CONNECTED].includes(current.status)) {
+    if (
+      current
+      && [ConnectionStatus.PENDING, ConnectionStatus.CONNECTED].includes(current.status)
+      && !canReplaceForEnvironment
+    ) {
       await this.audit.record({
         connectionId: current.id,
         action: 'OAUTH_FAILED',
@@ -61,7 +94,7 @@ export class ConnectionService {
       throw new ConnectionAlreadyExistsException()
     }
 
-    if (current && current.status !== ConnectionStatus.DISCONNECTED) {
+    if (current && (current.status !== ConnectionStatus.DISCONNECTED || canReplaceForEnvironment)) {
       if (current.accessToken || current.refreshToken) {
         try {
           await this.providerFactory.get(slug).disconnect({
@@ -96,14 +129,14 @@ export class ConnectionService {
         action: 'CONNECTION_CREATED',
         status: ConnectionStatus.PENDING,
         message: 'OAuth connection lifecycle created.',
-        metadata: { provider: slug, tenantId, userId },
+        metadata: { provider: slug, tenantId, userId, environment: processEnvironment },
       })
       await this.audit.record({
         connectionId: connection.id,
         action: 'OAUTH_STARTED',
         status: ConnectionStatus.PENDING,
         message: 'User redirected to provider authorization.',
-        metadata: { provider: slug, tenantId, userId },
+        metadata: { provider: slug, tenantId, userId, environment: processEnvironment },
       })
       return result
     } catch (error) {
@@ -141,6 +174,7 @@ export class ConnectionService {
     }
 
     let issuedTokens: ProviderTokenSet | null = null
+    const processEnvironment = this.processEnvironmentFor(slug)
     try {
       if (input.providerError) throw new InvalidOAuthCallbackException('QuickBooks authorization was denied or cancelled.')
       if (!input.code || input.code.length > 512 || !input.realmId || !/^\d{1,64}$/.test(input.realmId)) {
@@ -153,6 +187,7 @@ export class ConnectionService {
       const connected = await this.repository.updateConnection(connection.id, tenantId, {
         ...this.encryptedTokens(issuedTokens),
         status: ConnectionStatus.CONNECTED,
+        environment: processEnvironment,
         realmId: input.realmId,
         companyName: company.companyName,
         companyEmail: company.companyEmail,
@@ -169,14 +204,14 @@ export class ConnectionService {
         action: 'OAUTH_COMPLETED',
         status: ConnectionStatus.CONNECTED,
         message: 'QuickBooks OAuth completed successfully.',
-        metadata: { provider: slug, tenantId, userId, realmId: input.realmId },
+        metadata: { provider: slug, tenantId, userId, realmId: input.realmId, environment: processEnvironment },
       })
       await this.audit.record({
         connectionId: connection.id,
         action: 'CONNECTION_CONNECTED',
         status: ConnectionStatus.CONNECTED,
         message: 'Provider company information stored.',
-        metadata: { provider: slug, tenantId, userId, realmId: input.realmId },
+        metadata: { provider: slug, tenantId, userId, realmId: input.realmId, environment: processEnvironment },
       })
       return this.toStatusDto(connected)
     } catch (error) {
@@ -243,7 +278,7 @@ export class ConnectionService {
     slug: Provider,
     operation: (context: { accessToken: string; realmId: string }) => Promise<T>,
   ): Promise<T> {
-    let connection = await this.requireConnectedConnection(tenantId, connectionId)
+    let connection = await this.requireConnectedConnection(tenantId, connectionId, slug)
     if (!connection.expiresAt || connection.expiresAt.getTime() <= this.now().getTime() + EXPIRY_SKEW_MS) {
       connection = await this.refreshConnection(tenantId, connection, slug)
     }
@@ -315,12 +350,43 @@ export class ConnectionService {
     }
   }
 
-  private async requireConnectedConnection(tenantId: string, connectionId: string) {
+  private async requireConnectedConnection(tenantId: string, connectionId: string, slug: Provider) {
     const connection = await this.repository.findConnectionById(connectionId, tenantId)
     if (!connection || connection.status !== ConnectionStatus.CONNECTED || !connection.realmId || !connection.accessToken) {
       throw new ConnectionNotFoundException()
     }
+    this.assertConnectionEnvironment(connection, { slug, forMigration: this.processEnvironmentFor(slug) === 'production' })
     return connection
+  }
+
+  private assertConnectionEnvironment(
+    connection: IntegrationConnectionRecord,
+    options?: { slug?: Provider; forMigration?: boolean },
+  ): QuickBooksEnvironment {
+    const processEnvironment = options?.slug
+      ? this.processEnvironmentFor(options.slug)
+      : this.resolveProcessEnvironment()
+    return assertQuickBooksConnectionEnvironment({
+      connectionEnvironment: connection.environment,
+      processEnvironment,
+      forMigration: options?.forMigration,
+    })
+  }
+
+  private processEnvironmentFor(slug: Provider): QuickBooksEnvironment {
+    const provider = this.providerFactory.get(slug)
+    if (provider.environment === 'sandbox' || provider.environment === 'production') {
+      return provider.environment
+    }
+    return this.resolveProcessEnvironment()
+  }
+
+  private connectionNeedsEnvironmentReconnect(
+    connection: IntegrationConnectionRecord,
+    processEnvironment: QuickBooksEnvironment,
+  ): boolean {
+    const connectionEnvironment = resolveStoredConnectionEnvironment(connection.environment)
+    return connectionEnvironment !== processEnvironment
   }
 
   private accessContext(connection: IntegrationConnectionRecord) {
@@ -335,6 +401,7 @@ export class ConnectionService {
   private clearedConnection(): UpdateConnectionInput {
     return {
       status: ConnectionStatus.DISCONNECTED,
+      environment: null,
       accessToken: null,
       refreshToken: null,
       expiresAt: null,
@@ -374,6 +441,15 @@ export class ConnectionService {
   }
 
   private toStatusDto(connection: IntegrationConnectionRecord): ConnectionStatusDto {
+    const serverEnvironment = this.resolveProcessEnvironment()
+    const connectionEnvironment = connection.environment
+    const effectiveEnvironment = resolveStoredConnectionEnvironment(connectionEnvironment)
+    const environmentMismatch = connection.status === ConnectionStatus.CONNECTED
+      && effectiveEnvironment !== serverEnvironment
+    const productionReady = connection.status === ConnectionStatus.CONNECTED
+      && Boolean(connection.realmId)
+      && effectiveEnvironment === 'production'
+      && serverEnvironment === 'production'
     return {
       connected: connection.status === ConnectionStatus.CONNECTED,
       companyName: connection.companyName,
@@ -386,10 +462,15 @@ export class ConnectionService {
       legalName: connection.legalName,
       connectedAt: connection.connectedAt?.toISOString() ?? null,
       status: connection.status,
+      environment: connectionEnvironment,
+      serverEnvironment: serverEnvironment as IntegrationConnectionEnvironment,
+      environmentMismatch,
+      productionReady,
     }
   }
 
   private emptyStatus(): ConnectionStatusDto {
+    const serverEnvironment = this.resolveProcessEnvironment() as IntegrationConnectionEnvironment
     return {
       connected: false,
       companyName: null,
@@ -402,6 +483,10 @@ export class ConnectionService {
       legalName: null,
       connectedAt: null,
       status: ConnectionStatus.NOT_CONNECTED,
+      environment: null,
+      serverEnvironment,
+      environmentMismatch: false,
+      productionReady: false,
     }
   }
 }
