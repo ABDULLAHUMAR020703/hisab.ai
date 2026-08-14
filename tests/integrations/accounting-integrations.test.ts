@@ -143,6 +143,7 @@ class FakeRepository implements IntegrationRepository {
       tenantId: input.tenantId,
       providerId: input.providerId,
       status: input.status,
+      environment: null,
       realmId: null,
       companyName: null,
       companyEmail: null,
@@ -206,6 +207,7 @@ class FakeRepository implements IntegrationRepository {
 
 class FakeProvider implements AccountingProvider {
   readonly slug = Provider.QUICKBOOKS
+  readonly environment: 'sandbox' | 'production' = 'sandbox'
   connectCalls = 0
   exchangeCalls = 0
   refreshCalls = 0

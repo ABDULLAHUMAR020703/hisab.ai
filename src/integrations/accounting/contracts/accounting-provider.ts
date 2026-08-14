@@ -61,6 +61,8 @@ export interface ProviderReportRequest {
 
 export interface AccountingProvider {
   readonly slug: Provider
+  /** Process QuickBooks environment for this provider instance, when applicable. */
+  readonly environment?: 'sandbox' | 'production'
   connect(context: ProviderConnectContext): Promise<ProviderConnectResult>
   exchangeAuthorizationCode(context: ProviderOAuthCallbackContext): Promise<ProviderTokenSet>
   disconnect(context: ProviderCredentialContext): Promise<void>

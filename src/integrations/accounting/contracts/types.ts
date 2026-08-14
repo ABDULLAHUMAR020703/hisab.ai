@@ -25,11 +25,16 @@ export interface IntegrationProviderRecord {
   updatedAt: Date
 }
 
+/** QuickBooks OAuth/API environment that issued this connection. Null = legacy (treat as sandbox). */
+export type IntegrationConnectionEnvironment = 'sandbox' | 'production'
+
 export interface IntegrationConnectionRecord {
   id: string
   tenantId: string
   providerId: string
   status: ConnectionStatus
+  /** sandbox | production | null (legacy → sandbox) */
+  environment: IntegrationConnectionEnvironment | null
   realmId: string | null
   companyName: string | null
   companyEmail: string | null
@@ -102,4 +107,12 @@ export interface ConnectionStatusDto {
   legalName: string | null
   connectedAt: string | null
   status: ConnectionStatus
+  /** Environment that issued the stored connection (legacy null → sandbox). */
+  environment: IntegrationConnectionEnvironment | null
+  /** Process QB_ENVIRONMENT / NODE_ENV resolution for this server. */
+  serverEnvironment: IntegrationConnectionEnvironment
+  /** True when stored connection env does not match the server environment. */
+  environmentMismatch: boolean
+  /** True when a production migration may use this connection. */
+  productionReady: boolean
 }

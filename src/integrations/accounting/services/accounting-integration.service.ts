@@ -28,6 +28,10 @@ export class AccountingIntegrationService {
         timezone: status.timezone,
         legalName: status.legalName,
         connectedAt: status.connectedAt,
+        environment: status.environment,
+        serverEnvironment: status.serverEnvironment,
+        environmentMismatch: status.environmentMismatch,
+        productionReady: status.productionReady,
       }
     }))
   }

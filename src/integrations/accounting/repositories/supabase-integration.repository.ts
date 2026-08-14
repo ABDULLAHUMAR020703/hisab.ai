@@ -64,11 +64,15 @@ function providerFromRow(row: Row): IntegrationProviderRecord {
 }
 
 function connectionFromRow(row: Row): IntegrationConnectionRecord {
+  const environmentRaw = row.environment
+  const environment =
+    environmentRaw === 'sandbox' || environmentRaw === 'production' ? environmentRaw : null
   return {
     id: String(row.id),
     tenantId: String(row.tenant_id),
     providerId: String(row.provider_id),
     status: row.status as ConnectionStatus,
+    environment,
     realmId: (row.realm_id as string | null) ?? null,
     companyName: (row.company_name as string | null) ?? null,
     companyEmail: (row.company_email as string | null) ?? null,
@@ -160,6 +164,7 @@ export class SupabaseIntegrationRepository implements IntegrationRepository {
   async updateConnection(connectionId: string, tenantId: string, input: UpdateConnectionInput): Promise<IntegrationConnectionRecord> {
     const patch: Row = {}
     if (input.status !== undefined) patch.status = input.status
+    if (input.environment !== undefined) patch.environment = input.environment
     if (input.realmId !== undefined) patch.realm_id = input.realmId
     if (input.companyName !== undefined) patch.company_name = input.companyName
     if (input.companyEmail !== undefined) patch.company_email = input.companyEmail

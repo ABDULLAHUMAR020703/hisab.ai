@@ -25,16 +25,17 @@ SUPABASE_SERVICE_ROLE_KEY=
 QB_CLIENT_ID=
 QB_CLIENT_SECRET=
 QB_REDIRECT_URI=
-QB_ENVIRONMENT=sandbox
+QB_ENVIRONMENT=production
 IMPORT_WORKER_POLL_MS=2000
 # Queue ownership/abandonment protection
 JOB_QUEUE_HEARTBEAT_MS=30000
 JOB_QUEUE_STALE_MS=300000
 ```
 
-Use `QB_ENVIRONMENT=production` only for a production QuickBooks connection.
-The worker must have the Supabase service-role key because it claims and
-updates tenant-scoped queue/checkpoint rows outside a browser request.
+Use the same `QB_ENVIRONMENT` (and matching Intuit app credentials) on the web
+app and this worker. Production migrations require `QB_ENVIRONMENT=production`
+plus a connection that was authorized against QuickBooks Production. Use
+`QB_ENVIRONMENT=sandbox` only for local/dev workers.
 
 ## Runtime behavior
 

@@ -1,4 +1,4 @@
-import type { ConnectionStatus, Provider } from '../contracts/types'
+import type { ConnectionStatus, IntegrationConnectionEnvironment, Provider } from '../contracts/types'
 
 export interface IntegrationListItemDto {
   provider: Provider
@@ -16,6 +16,10 @@ export interface IntegrationListItemDto {
   timezone: string | null
   legalName: string | null
   connectedAt: string | null
+  environment: IntegrationConnectionEnvironment | null
+  serverEnvironment: IntegrationConnectionEnvironment
+  environmentMismatch: boolean
+  productionReady: boolean
 }
 
 export interface ConnectIntegrationDto {

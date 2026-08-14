@@ -11,6 +11,7 @@ export const GET = integrationApiHandler(
   async ({ tenantId }) => {
     const runtime = createAccountingIntegrationRuntime()
     const source = getImportSource('quickbooks')
+    const connectionStatus = await runtime.connections.getStatus(tenantId, Provider.QUICKBOOKS)
     const analysis = await runtime.connections.executeForProvider(tenantId, Provider.QUICKBOOKS, async (context) => {
       const provider = runtime.providers.get(Provider.QUICKBOOKS)
       const company = await provider.getCompanyInfo(context)
@@ -36,6 +37,9 @@ export const GET = integrationApiHandler(
       country: analysis.company.country,
       currency: analysis.company.baseCurrency,
       realmId: analysis.realmId,
+      environment: connectionStatus.environment,
+      serverEnvironment: connectionStatus.serverEnvironment,
+      productionReady: connectionStatus.productionReady,
       recordCounts: analysis.modules,
       estimatedMigrationMinutes: Math.max(1, Math.ceil(recordCount / 500)),
       supportedModules: analysis.modules.filter(module => module.supported).map((module) => module.label),

@@ -28,6 +28,10 @@ interface IntegrationItem {
   timezone: string | null
   legalName: string | null
   connectedAt: string | null
+  environment: 'sandbox' | 'production' | null
+  serverEnvironment: 'sandbox' | 'production'
+  environmentMismatch: boolean
+  productionReady: boolean
 }
 
 interface OAuthFeedback {
@@ -171,6 +175,10 @@ export function IntegrationsClient({ oauthFeedback, certificationEnabled }: { oa
           const status = STATUS_UI[item.status]
           const isQuickBooks = item.provider === 'quickbooks'
           const canDisconnect = item.status === 'CONNECTED' || item.status === 'PENDING'
+          const connectionEnvironment = item.environment === 'production' ? 'production' : item.connected ? 'sandbox' : null
+          const needsProductionReconnect = isQuickBooks
+            && item.status === 'CONNECTED'
+            && (item.environmentMismatch || connectionEnvironment === 'sandbox' && item.serverEnvironment === 'production')
           return (
             <article key={item.provider} className={cn(
               'group relative overflow-hidden rounded-2xl border bg-white p-6 shadow-sm transition-all',
@@ -189,9 +197,21 @@ export function IntegrationsClient({ oauthFeedback, certificationEnabled }: { oa
                 {!item.isActive ? (
                   <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Coming Soon</span>
                 ) : (
-                  <span className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold', status.className)}>
-                    <span className={cn('h-1.5 w-1.5 rounded-full', status.dot)} />{status.label}
-                  </span>
+                  <div className="flex flex-col items-end gap-1.5">
+                    <span className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold', status.className)}>
+                      <span className={cn('h-1.5 w-1.5 rounded-full', status.dot)} />{status.label}
+                    </span>
+                    {isQuickBooks && connectionEnvironment && (
+                      <span className={cn(
+                        'rounded-full border px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide',
+                        connectionEnvironment === 'production'
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                          : 'border-amber-200 bg-amber-50 text-amber-800',
+                      )}>
+                        {connectionEnvironment === 'production' ? 'Production' : 'Sandbox'}
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -208,9 +228,19 @@ export function IntegrationsClient({ oauthFeedback, certificationEnabled }: { oa
                 ))}
               </dl>
 
+              {needsProductionReconnect && (
+                <div role="status" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  <p className="font-semibold">Sandbox company connected</p>
+                  <p className="mt-1 text-xs leading-5 text-amber-800">
+                    This connection targets QuickBooks Sandbox. Disconnect or reconnect to authorize a Production QuickBooks company before migrating.
+                  </p>
+                </div>
+              )}
+
               {item.connected && (
                 <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl bg-slate-50 p-4 text-xs">
                   {[
+                    ['Environment', connectionEnvironment === 'production' ? 'Production' : connectionEnvironment === 'sandbox' ? 'Sandbox' : '—'],
                     ['Legal Name', item.legalName ?? '—'],
                     ['Email', item.companyEmail ?? '—'],
                     ['Country', item.country ?? '—'],
@@ -232,10 +262,15 @@ export function IntegrationsClient({ oauthFeedback, certificationEnabled }: { oa
                 </div>
                 {isQuickBooks && item.isActive && (
                   canDisconnect ? (
-                    <div className="flex gap-2">
-                      {item.status === 'CONNECTED' && <Link href="/settings/integrations/quickbooks-validation" className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"><ShieldCheck size={14} /> Validate</Link>}
-                      {certificationEnabled && item.status === 'CONNECTED' && <Link href="/settings/integrations/quickbooks-certification" className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50">Certify</Link>}
-                      {item.status === 'CONNECTED' && <Button onClick={openMigrate}><Download size={14} /> Migrate</Button>}
+                    <div className="flex flex-wrap justify-end gap-2">
+                      {item.status === 'CONNECTED' && !needsProductionReconnect && <Link href="/settings/integrations/quickbooks-validation" className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"><ShieldCheck size={14} /> Validate</Link>}
+                      {certificationEnabled && item.status === 'CONNECTED' && !needsProductionReconnect && <Link href="/settings/integrations/quickbooks-certification" className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50">Certify</Link>}
+                      {item.status === 'CONNECTED' && !needsProductionReconnect && <Button onClick={openMigrate}><Download size={14} /> Migrate</Button>}
+                      {needsProductionReconnect && (
+                        <Button loading={busyProvider === item.provider} onClick={() => void mutate(item.provider, 'connect')}>
+                          <Link2 size={14} /> Reconnect to Production
+                        </Button>
+                      )}
                       <Button variant="outline" loading={busyProvider === item.provider} onClick={() => void mutate(item.provider, 'disconnect')}>
                         <Unplug size={14} /> Disconnect
                       </Button>
@@ -247,7 +282,7 @@ export function IntegrationsClient({ oauthFeedback, certificationEnabled }: { oa
                   )
                 )}
               </div>
-              {isQuickBooks && item.status === 'CONNECTED' && <div className="mt-4 space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-indigo-900">Synchronization</p><Button variant="outline" loading={syncBusy} onClick={() => void runSync()}><RefreshCw size={13} /> Sync now</Button></div><div className="grid grid-cols-2 gap-2"><label className="text-[11px] text-slate-600">Mode<select value={syncSettings?.mode ?? 'import_only'} onFocus={() => void loadSyncSettings()} onChange={(event) => void saveSync({ mode: event.target.value })} className="mt-1 block w-full rounded-md border-slate-200 text-xs"><option value="import_only">Import only</option><option value="two_way">Two-way sync</option></select></label><label className="text-[11px] text-slate-600">Conflicts<select value={syncSettings?.conflictStrategy ?? 'source_wins'} onFocus={() => void loadSyncSettings()} onChange={(event) => void saveSync({ conflictStrategy: event.target.value })} className="mt-1 block w-full rounded-md border-slate-200 text-xs"><option value="source_wins">QuickBooks wins</option><option value="hisab_wins">Hisab wins</option><option value="manual">Review manually</option></select></label></div><label className="flex items-center gap-2 text-[11px] text-slate-600"><input type="checkbox" checked={syncSettings?.scheduleEnabled ?? false} onFocus={() => void loadSyncSettings()} onChange={(event) => void saveSync({ scheduleEnabled: event.target.checked, scheduleCron: '@hourly' })} /> Schedule hourly sync {syncSettings?.lastRunAt ? `· Last run ${new Date(syncSettings.lastRunAt).toLocaleString()}` : ''}</label><Link href="/settings/integrations/quickbooks-validation" className="text-[11px] font-medium text-indigo-700 hover:underline">Review changes and conflicts</Link></div>}
+              {isQuickBooks && item.status === 'CONNECTED' && !needsProductionReconnect && <div className="mt-4 space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-indigo-900">Synchronization</p><Button variant="outline" loading={syncBusy} onClick={() => void runSync()}><RefreshCw size={13} /> Sync now</Button></div><div className="grid grid-cols-2 gap-2"><label className="text-[11px] text-slate-600">Mode<select value={syncSettings?.mode ?? 'import_only'} onFocus={() => void loadSyncSettings()} onChange={(event) => void saveSync({ mode: event.target.value })} className="mt-1 block w-full rounded-md border-slate-200 text-xs"><option value="import_only">Import only</option><option value="two_way">Two-way sync</option></select></label><label className="text-[11px] text-slate-600">Conflicts<select value={syncSettings?.conflictStrategy ?? 'source_wins'} onFocus={() => void loadSyncSettings()} onChange={(event) => void saveSync({ conflictStrategy: event.target.value })} className="mt-1 block w-full rounded-md border-slate-200 text-xs"><option value="source_wins">QuickBooks wins</option><option value="hisab_wins">Hisab wins</option><option value="manual">Review manually</option></select></label></div><label className="flex items-center gap-2 text-[11px] text-slate-600"><input type="checkbox" checked={syncSettings?.scheduleEnabled ?? false} onFocus={() => void loadSyncSettings()} onChange={(event) => void saveSync({ scheduleEnabled: event.target.checked, scheduleCron: '@hourly' })} /> Schedule hourly sync {syncSettings?.lastRunAt ? `· Last run ${new Date(syncSettings.lastRunAt).toLocaleString()}` : ''}</label><Link href="/settings/integrations/quickbooks-validation" className="text-[11px] font-medium text-indigo-700 hover:underline">Review changes and conflicts</Link></div>}
             </article>
           )
         })}

@@ -87,6 +87,7 @@ export function quickBooksErrorStatus(error: unknown): number | null {
 
 export class QuickBooksIntegrationService implements AccountingProvider {
   readonly slug = Provider.QUICKBOOKS
+  readonly environment
   private readonly endpoints
 
   constructor(
@@ -94,6 +95,7 @@ export class QuickBooksIntegrationService implements AccountingProvider {
     private readonly fetchImpl: typeof fetch = diagnosticFetch,
     private readonly now: () => Date = () => new Date(),
   ) {
+    this.environment = config.environment
     this.endpoints = quickBooksEndpoints(config.environment)
   }
 
