@@ -10,6 +10,8 @@ const PUBLIC_PAGE_PREFIXES = [
   '/reset-password',
   '/verify-email',
   '/auth/callback',
+  '/terms',
+  '/privacy',
 ]
 
 const PUBLIC_API_PREFIXES = [
