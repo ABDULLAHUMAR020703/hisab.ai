@@ -196,6 +196,20 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
+          <Link
+            href="/terms"
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-xl hover:bg-indigo-100 transition-colors"
+          >
+            <FileText size={14} />
+            Terms of Service
+          </Link>
+          <Link
+            href="/privacy"
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors"
+          >
+            <Shield size={14} />
+            Privacy Policy
+          </Link>
           <button
             onClick={loadData}
             disabled={loading}

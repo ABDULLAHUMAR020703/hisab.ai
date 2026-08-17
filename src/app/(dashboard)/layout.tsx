@@ -352,6 +352,37 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         ))}
       </nav>
 
+      {/* Legal */}
+      <div className={cn(
+        'flex-shrink-0 border-t border-white/[0.06] px-3 py-3',
+        collapsed && !mobile ? 'space-y-1' : 'flex gap-2'
+      )}>
+        <Link
+          href="/terms"
+          onClick={() => mobile && setMobileOpen(false)}
+          title={collapsed && !mobile ? 'Terms of Service' : undefined}
+          className={cn(
+            'flex items-center gap-2 rounded-lg text-slate-400 hover:bg-white/[0.06] hover:text-white transition-colors',
+            collapsed && !mobile ? 'justify-center p-2.5' : 'flex-1 px-2.5 py-2 text-[11px] font-medium'
+          )}
+        >
+          <FileText size={15} />
+          {(!collapsed || mobile) && <span>Terms</span>}
+        </Link>
+        <Link
+          href="/privacy"
+          onClick={() => mobile && setMobileOpen(false)}
+          title={collapsed && !mobile ? 'Privacy Policy' : undefined}
+          className={cn(
+            'flex items-center gap-2 rounded-lg text-slate-400 hover:bg-white/[0.06] hover:text-white transition-colors',
+            collapsed && !mobile ? 'justify-center p-2.5' : 'flex-1 px-2.5 py-2 text-[11px] font-medium'
+          )}
+        >
+          <Shield size={15} />
+          {(!collapsed || mobile) && <span>Privacy</span>}
+        </Link>
+      </div>
+
       {/* User + Logout */}
       <div className={cn(
         'flex-shrink-0 border-t border-white/[0.06] p-3',
