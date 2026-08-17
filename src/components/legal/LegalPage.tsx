@@ -18,9 +18,13 @@ function LegalFooter() {
           </span>
           {legalConfig.productName}
         </Link>
-        <nav aria-label="Legal navigation" className="flex flex-wrap gap-x-5 gap-y-2">
-          <Link href="/terms" className="transition-colors hover:text-indigo-600">Terms of Service</Link>
-          <Link href="/privacy" className="transition-colors hover:text-indigo-600">Privacy Policy</Link>
+        <nav aria-label="Legal navigation" className="flex flex-wrap gap-2">
+          <Link href="/terms" className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 font-semibold text-indigo-700 transition-colors hover:border-indigo-300 hover:bg-indigo-100">
+            Terms of Service
+          </Link>
+          <Link href="/privacy" className="rounded-lg border border-slate-200 bg-white px-3 py-2 font-semibold text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50">
+            Privacy Policy
+          </Link>
         </nav>
       </div>
     </footer>
