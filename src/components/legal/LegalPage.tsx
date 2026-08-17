@@ -52,9 +52,17 @@ export function LegalPage({
             </span>
             <span className="text-xl font-bold text-slate-900">{legalConfig.productName}</span>
           </Link>
-          <Link href="/login" className="rounded-lg px-3 py-2 text-sm font-semibold text-indigo-600 transition-colors hover:bg-indigo-50">
-            Sign in
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href="/terms" className="hidden rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 transition-colors hover:border-indigo-300 hover:bg-indigo-100 sm:inline-flex">
+              Terms of Service
+            </Link>
+            <Link href="/privacy" className="hidden rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 sm:inline-flex">
+              Privacy Policy
+            </Link>
+            <Link href="/login" className="rounded-lg px-3 py-2 text-sm font-semibold text-indigo-600 transition-colors hover:bg-indigo-50">
+              Sign in
+            </Link>
+          </div>
         </div>
       </header>
 
