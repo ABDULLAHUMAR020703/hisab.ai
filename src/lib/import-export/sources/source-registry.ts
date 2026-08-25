@@ -7,6 +7,9 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { PreviewStageError, type PreviewStage, type PreviewStageState } from './preview-service'
 import { withExternalRequestDiagnostics } from '@/lib/ops/external-request-diagnostics'
 import { MigrationTrace } from '../quickbooks/migration-telemetry'
+import { resolveSourcePageHasMore } from './source-page-state'
+
+export { resolveSourcePageHasMore } from './source-page-state'
 
 interface SourceFetchDiagnostics {
   onStage?: (stage: PreviewStage, state: PreviewStageState, module: string) => void
@@ -273,7 +276,14 @@ export async function fetchSourceResourcePage(
         hasMore = Boolean(checkpoint.hasMore || checkpoint.partitionComplete)
       },
     })
+    hasMore = resolveSourcePageHasMore(hasMore, result.hasMore)
     if (!pageRows.length) pageRows = result.rows
+    // Non-paginated resources have no provider checkpoint callback. Their
+    // returned rows still belong to this durable page and must be reflected in
+    // the checkpoint before the import job is finalized.
+    if (!hasMore && pageRows.length && pageCheckpoint.fetched === priorFetched) {
+      pageCheckpoint = { ...pageCheckpoint, fetched: priorFetched + pageRows.length }
+    }
     if (!pageRows.length && pageCheckpoint.fetched === 0) hasMore = false
 
     return {

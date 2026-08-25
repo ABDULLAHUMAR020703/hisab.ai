@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
 import {
+  computeProgressPercent,
   finalizeProgressSnapshot,
   mergeImportJobProgress,
 } from '../../src/lib/import-export/jobs/progress-merge'
@@ -114,6 +115,22 @@ test('completed jobs ignore late progress callbacks as stale updates', () => {
   assert.match(service, /progress\.stale_ignored/)
   assert.match(service, /completed_job_immutable/)
   assert.match(service, /\.neq\('status', 'completed'\)/)
+})
+
+test('a live job can never expose 100 percent before terminal completion', () => {
+  assert.equal(computeProgressPercent(200, 200, 100), 99.99)
+  assert.equal(computeProgressPercent(200, 200, 100, true), 100)
+
+  const merged = mergeImportJobProgress({
+    ...baseState,
+    processedRows: 200,
+    totalRows: 200,
+    progressSnapshot: { ...baseState.progressSnapshot, processedRecords: 200, progressPercent: 100 },
+  }, { processedRows: 200, totalRows: 200, progressSnapshot: { processedRecords: 200, progressPercent: 100 } })
+  assert.notEqual(merged, 'stale_completed')
+  if (merged === 'stale_completed') return
+  assert.equal(merged.progressPercent, 99.99)
+  assert.equal(merged.progressSnapshot.progressPercent, 99.99)
 })
 
 test('counters remain internally consistent and snapshot matches persisted totals', () => {

@@ -6,6 +6,7 @@ import { applyColumnMapping } from '../../src/lib/import-export/mapping/auto-map
 import { normalizeImportError, MissingDependencyError } from '../../src/lib/import-export/import/import-error'
 import { orderQuickBooksMigrationResources } from '../../src/lib/import-export/quickbooks/dependency-order'
 import { QuickBooksImportAdapter, stableQuickBooksSourceId } from '../../src/lib/import-export/sources/quickbooks.adapter'
+import { resolveSourcePageHasMore } from '../../src/lib/import-export/sources/source-page-state'
 
 const file=(path:string)=>readFileSync(resolve(process.cwd(),path),'utf8')
 
@@ -21,6 +22,14 @@ test('non-native QuickBooks identifiers are deterministic and idempotent',()=>{
   assert.equal(stableQuickBooksSourceId('exchange-rates',exchange),'ExchangeRate:USD:SAR:2026-01-02')
   const recurring={Name:'Monthly rent',RecurrenceInfo:{IntervalType:'Monthly',NumInterval:1}}
   assert.equal(stableQuickBooksSourceId('recurring-transactions',recurring),stableQuickBooksSourceId('recurring-transactions',{RecurrenceInfo:{NumInterval:1,IntervalType:'Monthly'},Name:'Monthly rent'}))
+})
+
+test('non-paginated Company Preferences is terminal and cannot create continuations', () => {
+  // The page runner starts optimistically at hasMore=true. The adapter result
+  // must override that value when no pagination callbacks are emitted.
+  assert.equal(resolveSourcePageHasMore(true, false), false)
+  assert.equal(resolveSourcePageHasMore(false, true), true)
+  assert.equal(resolveSourcePageHasMore(true, undefined), true)
 })
 
 test('QuickBooks exposes exactly one customer payment import path',()=>{

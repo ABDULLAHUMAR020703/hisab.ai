@@ -470,7 +470,16 @@ export async function createQuickBooksMigrationSession(input: {
     .select('*')
     .single()
 
-  if (error) throw error
+  if (error) {
+    // The partial unique index is the authoritative duplicate-click guard.
+    // A concurrent request may win between the active-session read and insert;
+    // return that durable session instead of creating a second migration.
+    if (error.code === '23505') {
+      const concurrent = await findActiveQuickBooksMigrationSession(companyId)
+      if (concurrent) return concurrent
+    }
+    throw error
+  }
   const created = await hydrateSession(mapSessionRow(data))
   // Job + queue row must exist before the response returns. The browser
   // coordinator is a fallback for later modules / resume — not the start path.

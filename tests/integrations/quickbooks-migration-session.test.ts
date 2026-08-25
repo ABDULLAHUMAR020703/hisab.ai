@@ -232,7 +232,7 @@ test('wizard detects active sessions and opens Migration Center instead of inven
   assert.doesNotMatch(wizard, /while \(result\.status/)
 })
 
-test('session APIs and service reuse migration_wizard_sessions without schema changes', () => {
+test('session APIs and service use the durable migration session guard', () => {
   const service = read('src/lib/import-export/wizard/migration-session.service.ts')
   const cancelRoute = read('src/app/api/import-export/migration-sessions/[sessionId]/cancel/route.ts')
   const patchRoute = read('src/app/api/import-export/migration-sessions/[sessionId]/route.ts')
@@ -246,6 +246,9 @@ test('session APIs and service reuse migration_wizard_sessions without schema ch
   assert.match(cancelRoute, /cancelQuickBooksMigrationSession/)
   assert.match(patchRoute, /updateQuickBooksMigrationSession/)
   assert.match(jobService, /export async function getImportJobsByIds/)
-  assert.doesNotMatch(service, /CREATE TABLE/)
-  assert.doesNotMatch(service, /alter table/i)
+  const guard = read('supabase/migrations/066_quickbooks_migration_guards.sql')
+  assert.match(guard, /CREATE UNIQUE INDEX IF NOT EXISTS migration_wizard_sessions_one_active_per_company_idx/)
+  assert.match(guard, /WHERE status = 'IN_PROGRESS'/)
+  assert.match(guard, /config->>'kind' = 'quickbooks_migration'/)
+  assert.match(service, /error\.code === '23505'/)
 })

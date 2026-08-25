@@ -50,10 +50,12 @@ function maxNullable(left: number | null | undefined, right: number | null | und
   return Math.max(left, right)
 }
 
-export function computeProgressPercent(processedRows: number, totalRows: number, previousPercent = 0): number {
-  if (totalRows <= 0) return Math.max(0, previousPercent)
+export function computeProgressPercent(processedRows: number, totalRows: number, previousPercent = 0, terminal = false): number {
+  if (totalRows <= 0) return terminal ? 100 : Math.min(99.99, Math.max(0, previousPercent))
   const next = Math.min(100, Math.round((processedRows / totalRows) * 10000) / 100)
-  return Math.max(previousPercent, next)
+  const boundedPrevious = terminal ? previousPercent : Math.min(99.99, previousPercent)
+  const boundedNext = terminal ? next : Math.min(99.99, next)
+  return Math.max(boundedPrevious, boundedNext)
 }
 
 export function mergeProgressSnapshot(
@@ -126,7 +128,8 @@ export function mergeImportJobProgress(
   )
   const totalRows = maxNumber(current.totalRows, incoming.totalRows, incoming.progressSnapshot?.estimatedTotalRecords, processedRows)
   const previousPercent = Number((current.progressSnapshot as SnapshotWithPercent | null)?.progressPercent ?? 0)
-  const progressPercent = computeProgressPercent(processedRows, totalRows, previousPercent)
+  const terminal = ['completed', 'failed', 'cancelled'].includes(current.status)
+  const progressPercent = computeProgressPercent(processedRows, totalRows, previousPercent, terminal)
   const progressSnapshot = mergeProgressSnapshot(current.progressSnapshot, incoming.progressSnapshot, {
     processedRows,
     totalRows,

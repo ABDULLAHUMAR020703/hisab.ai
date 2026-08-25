@@ -308,9 +308,18 @@ export async function setImportJobStatus(jobId: string, status: 'processing' | '
   const db = supabaseDb(); const companyId = await resolveCompanyId()
   const patch: Record<string, unknown> = { status, last_heartbeat_at: new Date().toISOString(), paused_at: status === 'paused' ? new Date().toISOString() : null }
   logger.info('quickbooks.import_job.status.persist_attempt', { importJobId: jobId, companyId, fromStatus: current.status, toStatus: status })
-  const { data, error } = await db.from('import_jobs').update(patch).eq('id', jobId).eq('company_id', companyId).select('*').maybeSingle()
+  const { data, error } = await db.from('import_jobs').update(patch)
+    .eq('id', jobId)
+    .eq('company_id', companyId)
+    .not('status', 'in', '(completed,failed,cancelled)')
+    .select('*')
+    .maybeSingle()
   if (error) throw error
-  if (!data) throw new Error(`Import job status update matched no row for job ${jobId} and company ${companyId}.`)
+  if (!data) {
+    const latest = await getImportJob(jobId, companyId)
+    if (latest && ['completed', 'failed', 'cancelled'].includes(latest.status)) return latest
+    throw new Error(`Import job status update matched no row for job ${jobId} and company ${companyId}.`)
+  }
   logger.info('quickbooks.import_job.status.persisted', { importJobId: jobId, companyId, status: data.status })
   return data ? mapJobRow(data) : null
 }
@@ -383,10 +392,16 @@ export async function finalizeImportJob(
     })
     .eq('id', jobId)
     .eq('company_id', companyId)
+    .not('status', 'in', '(completed,failed,cancelled)')
     .select('*')
-    .single()
+    .maybeSingle()
 
   if (error) throw error
+  if (!data) {
+    const latest = await getImportJob(jobId, companyId)
+    if (latest && ['completed', 'failed', 'cancelled'].includes(latest.status)) return latest
+    throw new Error(`Import job finalization matched no active row for job ${jobId} and company ${companyId}.`)
+  }
   logger.info('quickbooks.import_job.finalize.persisted', { importJobId: jobId, companyId, status: data.status, processedRows: data.processed_rows, importedCount: data.imported_count, failedCount: data.failed_count })
   return mapJobRow(data)
 }

@@ -474,7 +474,7 @@ export function deriveOverallProgress(state: ModuleLifecycleState): OverallMigra
     else if (entry.phase === 'processing' || entry.phase === 'claimed' || entry.phase === 'paused') summary.processing += 1
     else if (entry.phase === 'queued') summary.queued += 1
 
-    percentAccumulator += isTerminalPhase(entry.phase) ? 100 : Math.min(100, entry.progress?.progressPercent ?? 0)
+    percentAccumulator += isTerminalPhase(entry.phase) ? 100 : Math.min(99.99, entry.progress?.progressPercent ?? 0)
 
     summary.importedCount += entry.progress?.importedCount ?? 0
     summary.updatedCount += entry.progress?.updatedCount ?? 0

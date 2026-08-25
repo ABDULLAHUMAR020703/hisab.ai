@@ -302,7 +302,7 @@ export function jobRecordToProgressSnapshot(job: {
     }
     : (job.progressSnapshot ?? {})
   const processedRows = completed ? persistedOutcomeRows : Math.max(snapshot.processedRecords ?? 0, job.processedRows)
-  const totalRows = Math.max(snapshot.estimatedTotalRecords ?? 0, job.totalRows)
+  const totalRows = Math.max(snapshot.estimatedTotalRecords ?? 0, job.totalRows, processedRows)
   const startedAt = snapshot.startedAt ?? job.startedAt
   const elapsedMs = startedAt ? Math.max(0, Date.now() - new Date(startedAt).getTime()) : (job.durationMs ?? 0)
   const remaining = completed ? 0 : (totalRows > processedRows ? totalRows - processedRows : null)
@@ -310,7 +310,12 @@ export function jobRecordToProgressSnapshot(job: {
     ? remaining / Number(snapshot.averageThroughput)
     : null
   const livePercent = totalRows ? Math.min(100, Math.round((processedRows / totalRows) * 10000) / 100) : 0
-  const progressPercent = completed ? 100 : Math.max(Number(snapshot.progressPercent ?? 0), livePercent)
+  const progressPercent = completed
+    ? 100
+    : Math.min(99.99, Math.max(Number(snapshot.progressPercent ?? 0), livePercent))
+  const visibleSnapshot = completed
+    ? snapshot
+    : { ...snapshot, progressPercent }
   const batchSize = Math.max(1, job.batchSize ?? 250)
 
   return {
@@ -343,7 +348,7 @@ export function jobRecordToProgressSnapshot(job: {
     estimatedRemainingSeconds: secondsRemaining,
     estimatedCompletionAt: secondsRemaining === null ? null : new Date(Date.now() + secondsRemaining * 1000).toISOString(),
     activityEvents: job.activityEvents ?? [],
-    progressSnapshot: snapshot,
+    progressSnapshot: visibleSnapshot,
     skipSummary: job.skipSummary ?? null,
   }
 }

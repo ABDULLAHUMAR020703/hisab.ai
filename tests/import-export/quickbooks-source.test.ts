@@ -69,6 +69,18 @@ test('QuickBooks contacts select one valid canonical email while preserving mult
   assert.match(String(normalized._quickbooksRaw), /pauliejones15@intuit\.com/)
 })
 
+test('Company Preferences is a terminal non-paginated source resource', async () => {
+  const preferenceProvider: AccountingProvider = {
+    ...provider,
+    async getPreferences() {
+      return [{ CurrencyPrefs: { HomeCurrency: { value: 'USD' } } }]
+    },
+  }
+  const result = await new QuickBooksImportAdapter().fetchResource(preferenceProvider, { accessToken: 'x', realmId: '1' }, 'preferences')
+  assert.equal(result.rows.length, 1)
+  assert.equal(result.hasMore, false)
+})
+
 test('Fixed Assets preview treats an unavailable Sandbox Item query as zero records', async () => {
   const requests: Array<{ entity: string; options: unknown }> = []
   const fixedAssetProvider: AccountingProvider = {
