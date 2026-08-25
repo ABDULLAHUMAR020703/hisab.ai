@@ -65,6 +65,7 @@ import type {
   MigrationHistorySummary,
   MigrationSessionState,
 } from '@/lib/import-export/wizard/migration-session'
+import { isWorkerOwnedQuickBooksMigration } from '@/lib/import-export/wizard/migration-session'
 import { ConnectedSourceFlow } from './steps/ConnectedSourceFlow'
 
 const POLL_INTERVAL_MS = 1_500
@@ -474,6 +475,10 @@ export function MigrationSessionProvider({ children }: { children: ReactNode }) 
     if (coordinatedSignalRef.current === signal) return
     const current = sessionRef.current
     if (!current || current.config.state !== 'running') return
+    // Current Migrate All sessions are advanced only by the worker. Sessions
+    // without this marker are historical browser-coordinated migrations and
+    // retain the legacy recovery path.
+    if (isWorkerOwnedQuickBooksMigration(current.config)) return
 
     const action = nextCoordinationAction(current, issuedActionsRef.current)
     coordinatedSignalRef.current = signal

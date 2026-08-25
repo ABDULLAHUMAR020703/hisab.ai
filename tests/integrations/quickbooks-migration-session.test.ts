@@ -251,4 +251,8 @@ test('session APIs and service use the durable migration session guard', () => {
   assert.match(guard, /WHERE status = 'IN_PROGRESS'/)
   assert.match(guard, /config->>'kind' = 'quickbooks_migration'/)
   assert.match(service, /error\.code === '23505'/)
+  const schedulerGuard = read('supabase/migrations/067_quickbooks_durable_scheduler_guards.sql')
+  assert.match(schedulerGuard, /migration_session_id UUID REFERENCES public\.migration_wizard_sessions/)
+  assert.match(schedulerGuard, /import_jobs_one_resource_per_migration_idx/)
+  assert.match(schedulerGuard, /job_queue_one_active_quickbooks_step_idx/)
 })

@@ -183,8 +183,9 @@ registerJobHandler('QUICKBOOKS_IMPORT_STEP', async (payload, platformJobId, owne
   } finally {
     // This row is still RUNNING until the handler returns, so it is excluded:
     // the session must be judged on the work that outlives this step.
-    const { reconcileMigrationSessionForImportJob } = await import('@/lib/import-export/wizard/migration-session.service')
+    const { advanceQuickBooksMigrationAfterImportJob, reconcileMigrationSessionForImportJob } = await import('@/lib/import-export/wizard/migration-session.service')
     await reconcileMigrationSessionForImportJob(importJobId, companyId, { ignoreQueueJobIds: [platformJobId] })
+    await advanceQuickBooksMigrationAfterImportJob(importJobId, companyId, userId)
   }
 })
 

@@ -167,7 +167,7 @@ test('import route keeps multi-page and continuation progress cumulative', () =>
   const route = read('src/app/api/import-export/[module]/import/route.ts')
   assert.match(route, /const absoluteProcessed = sourcePage \? baseProcessedRows \+ processed : processed/)
   assert.match(route, /trace\.setTotals\(existingJob\.processedRows, existingJob\.totalRows\)/)
-  assert.match(route, /enqueueJob\(\{ jobType: 'QUICKBOOKS_IMPORT_STEP'/)
+  assert.match(route, /enqueueQuickBooksContinuationOnce|enqueueJob\(\{ jobType: 'QUICKBOOKS_IMPORT_STEP'/)
   assert.match(route, /status: 'processing'/)
   assert.doesNotMatch(route, /if \(sourcePage\?\.hasMore\)[\s\S]*setImportJobStatus\(job\.id, 'pending'\)/)
 })

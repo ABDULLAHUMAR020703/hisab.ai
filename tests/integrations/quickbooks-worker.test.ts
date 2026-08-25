@@ -50,7 +50,7 @@ test('continuation jobs preserve the processing import state', () => {
   const continuation = route.slice(continuationStart, continuationEnd)
 
   assert.match(continuation, /sourcePage\.commit\(\)/)
-  assert.match(continuation, /enqueueJob\(\{ jobType: 'QUICKBOOKS_IMPORT_STEP'/)
+  assert.match(continuation, /enqueueQuickBooksContinuationOnce|enqueueJob\(\{ jobType: 'QUICKBOOKS_IMPORT_STEP'/)
   assert.match(route, /runImportJobStep[\s\S]*setImportJobStatus\(job\.id, 'processing'\)/)
 })
 
@@ -91,7 +91,7 @@ test('worker and import-job reads fail closed when observability migration is mi
 
   assert.match(worker, /await assertImportJobSchemaCompatibility\(\)/)
   assert.match(service, /await assertImportJobSchemaCompatibility\(\)/)
-  assert.match(compatibility, /REQUIRED_IMPORT_JOB_SCHEMA_VERSION = '063_import_job_observability'/)
+  assert.match(compatibility, /REQUIRED_IMPORT_JOB_SCHEMA_VERSION = '067_quickbooks_durable_scheduler_guards'/)
   assert.match(compatibility, /progress_snapshot,activity_events/)
-  assert.match(compatibility, /Apply supabase\/migrations\/063_import_job_observability\.sql/)
+  assert.match(compatibility, /Apply supabase\/migrations\/067_quickbooks_durable_scheduler_guards\.sql/)
 })

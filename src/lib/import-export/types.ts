@@ -166,6 +166,8 @@ export interface ImportJobRecord {
   companyId: string
   userId: string
   moduleKey: string
+  migrationSessionId?: string | null
+  migrationResourceKey?: string | null
   filename: string
   fileFormat: FileFormat
   duplicateStrategy: DuplicateStrategy | null

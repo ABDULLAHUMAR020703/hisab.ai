@@ -11,9 +11,10 @@ export type MigrationStartBootstrapPlan =
  * Plans the server-side work that must happen when a migration starts so the
  * worker has a queue row without waiting on the browser coordinator.
  *
- * Mirrors `nextCoordinationAction` for the first unfinished module: create the
- * import job when missing, then enqueue. Later modules still advance via the
- * provider (or a future server-side completion hook).
+ * Mirrors `nextCoordinationAction` for the next dependency-ready module: create
+ * the import job when missing, then enqueue. The worker invokes this same
+ * bootstrap after each terminal import step; the provider is only a recovery
+ * fallback for sessions created before the durable scheduler is available.
  */
 export function planMigrationStartBootstrap(
   session: HydratedMigrationSession,

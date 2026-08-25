@@ -41,6 +41,35 @@ import type { MigrationActivityEvent, MigrationProgressSnapshot, SkippedRecordDi
 import { isImportJobMigrationCancelled } from '@/lib/import-export/wizard/migration-session.service'
 import { createProgressWriteQueue } from '@/lib/import-export/jobs/progress-write-queue'
 
+async function enqueueQuickBooksContinuationOnce(input: {
+  companyId: string
+  importJobId: string
+  moduleKey: string
+  userId: string
+}): Promise<void> {
+  try {
+    await enqueueJob({
+      jobType: 'QUICKBOOKS_IMPORT_STEP',
+      companyId: input.companyId,
+      payload: {
+        importJobId: input.importJobId,
+        moduleKey: input.moduleKey,
+        companyId: input.companyId,
+        userId: input.userId,
+      },
+    })
+  } catch (error) {
+    // A replay after a worker crash may already have inserted the same active
+    // continuation. The database unique index is the authority; treat that
+    // race as success and let the existing queue row continue the work.
+    if ((error as { code?: string })?.code !== '23505') throw error
+    logger.info('quickbooks.import_job.continuation_already_queued', {
+      importJobId: input.importJobId,
+      companyId: input.companyId,
+    })
+  }
+}
+
 async function handleImport(
   request: Request,
   { params }: { params: Promise<{ module: string }> },
@@ -304,7 +333,7 @@ async function handleImport(
         })
       }
       orchestrationStep('enqueue_continuation')
-      await enqueueJob({ jobType: 'QUICKBOOKS_IMPORT_STEP', companyId, payload: { importJobId: job.id, moduleKey, companyId, userId: user.id } })
+      await enqueueQuickBooksContinuationOnce({ companyId, importJobId: job.id, moduleKey, userId: user.id })
       orchestrationStep('continuation_enqueued')
       trace.finish({ fetched: sourcePage.checkpoint.fetched, imported: aggregate.importedCount, updated: aggregate.updatedCount, skipped: aggregate.skippedCount, failed: aggregate.failedCount })
       return Response.json({

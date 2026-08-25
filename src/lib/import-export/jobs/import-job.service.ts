@@ -20,6 +20,8 @@ function mapJobRow(row: Record<string, unknown>): ImportJobRecord {
     companyId: String(row.company_id),
     userId: String(row.user_id),
     moduleKey: String(row.module_key),
+    migrationSessionId: row.migration_session_id ? String(row.migration_session_id) : null,
+    migrationResourceKey: row.migration_resource_key ? String(row.migration_resource_key) : null,
     filename: String(row.filename),
     fileFormat: row.file_format as FileFormat,
     duplicateStrategy: (row.duplicate_strategy as DuplicateStrategy | null) ?? null,
@@ -63,6 +65,8 @@ export async function createImportJob(input: {
   totalRows?: number
   payloadSnapshot?: Record<string, unknown>
   batchSize?: number
+  migrationSessionId?: string | null
+  migrationResourceKey?: string | null
 }): Promise<ImportJobRecord> {
   const db = supabaseDb()
   const companyId = await resolveCompanyId()
@@ -74,6 +78,8 @@ export async function createImportJob(input: {
       company_id: companyId,
       user_id: input.userId,
       module_key: input.moduleKey,
+      migration_session_id: input.migrationSessionId ?? null,
+      migration_resource_key: input.migrationResourceKey ?? null,
       filename: input.filename,
       file_format: input.fileFormat,
       duplicate_strategy: input.duplicateStrategy ?? null,
@@ -108,12 +114,33 @@ export async function getImportJob(jobId: string, companyIdOverride?: string): P
   return data ? mapJobRow(data) : null
 }
 
+export async function getMigrationImportJob(
+  migrationSessionId: string,
+  migrationResourceKey: string,
+  companyIdOverride?: string,
+): Promise<ImportJobRecord | null> {
+  await assertImportJobSchemaCompatibility()
+  const db = supabaseDb()
+  const companyId = companyIdOverride ?? await resolveCompanyId()
+  const { data, error } = await db
+    .from('import_jobs')
+    .select('*')
+    .eq('company_id', companyId)
+    .eq('migration_session_id', migrationSessionId)
+    .eq('migration_resource_key', migrationResourceKey)
+    .maybeSingle()
+  if (error) throw error
+  return data ? mapJobRow(data) : null
+}
+
 /** Columns needed to hydrate Migration Center progress without pulling unused blobs. */
 const IMPORT_JOB_POLL_COLUMNS = [
   'id',
   'company_id',
   'user_id',
   'module_key',
+  'migration_session_id',
+  'migration_resource_key',
   'filename',
   'file_format',
   'duplicate_strategy',

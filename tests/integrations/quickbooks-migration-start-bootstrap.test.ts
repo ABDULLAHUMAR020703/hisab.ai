@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { planMigrationStartBootstrap } from '../../src/lib/import-export/wizard/migration-session-bootstrap'
+import { orderQuickBooksMigrationResources, quickBooksResourceDependenciesCompleted } from '../../src/lib/import-export/quickbooks/dependency-order'
+import { isWorkerOwnedQuickBooksMigration } from '../../src/lib/import-export/wizard/migration-session'
 import type { HydratedMigrationSession } from '../../src/lib/import-export/wizard/migration-session'
 import type {
   ModuleLifecycleEntry,
@@ -160,4 +162,67 @@ test('idle-backend migrate contract: queue row is part of session create, not a 
   assert.match(provider, /POLL_INTERVAL_MS = 1_500/)
   // Polling must not be the mechanism that inserts the first queue row.
   assert.doesNotMatch(provider, /enqueueJob/)
+})
+
+test('QuickBooks scheduling uses durable dependency readiness rather than only display order', () => {
+  const ordered = orderQuickBooksMigrationResources([
+    { key: 'invoices' },
+    { key: 'customers' },
+    { key: 'accounts' },
+    { key: 'preferences' },
+  ])
+  assert.deepEqual(ordered.map((item) => item.key), ['preferences', 'accounts', 'customers', 'invoices'])
+  const selected = new Set(['preferences', 'accounts', 'customers', 'invoices'])
+  assert.equal(quickBooksResourceDependenciesCompleted('invoices', selected, new Set(['preferences', 'accounts'])), false)
+  assert.equal(quickBooksResourceDependenciesCompleted('invoices', selected, new Set(['preferences', 'accounts', 'customers'])), true)
+})
+
+test('worker completion advances the next module without the browser', () => {
+  const workers = read('src/lib/platform/jobs/workers.ts')
+  const service = read('src/lib/import-export/wizard/migration-session.service.ts')
+  assert.match(workers, /advanceQuickBooksMigrationAfterImportJob\(/)
+  assert.match(service, /export async function advanceQuickBooksMigrationAfterImportJob/)
+  assert.match(service, /planMigrationStartBootstrap\(session\)/)
+  assert.match(service, /migrationResourceKey: module\.key/)
+})
+
+test('current sessions are explicitly worker-owned and browser coordination exits before side effects', () => {
+  const provider = read('src/components/import-export/MigrationSessionProvider.tsx')
+  const coordinate = provider.slice(provider.indexOf('const coordinate = useCallback'), provider.indexOf('  }, [patchSession, refresh])', provider.indexOf('const coordinate = useCallback')))
+  assert.equal(isWorkerOwnedQuickBooksMigration({ orchestrationOwner: 'worker' }), true)
+  assert.equal(isWorkerOwnedQuickBooksMigration({}), false)
+  assert.match(coordinate, /isWorkerOwnedQuickBooksMigration\(current\.config\)\) return/)
+  assert.ok(coordinate.indexOf('isWorkerOwnedQuickBooksMigration') < coordinate.indexOf('nextCoordinationAction'))
+  assert.match(read('src/lib/import-export/wizard/migration-session.ts'), /orchestrationOwner: input\.orchestrationOwner \?\? QUICKBOOKS_MIGRATION_ORCHESTRATION_OWNER/)
+})
+
+test('legacy sessions remain distinguishable from current worker-owned sessions', () => {
+  assert.equal(isWorkerOwnedQuickBooksMigration({}), false)
+  assert.equal(isWorkerOwnedQuickBooksMigration({ orchestrationOwner: 'browser_legacy' }), false)
+})
+
+test('worker-owned retry bootstraps server-side while legacy retry remains browser-compatible', () => {
+  const service = read('src/lib/import-export/wizard/migration-session.service.ts')
+  const retry = service.slice(service.indexOf('export async function retryQuickBooksMigrationSession'))
+  assert.match(retry, /isWorkerOwnedQuickBooksMigration\(resumed\.config\)/)
+  assert.match(retry, /return bootstrapQuickBooksMigrationQueue\(\{/)
+  assert.match(retry, /if \(!isWorkerOwnedQuickBooksMigration\(resumed\.config\)\) return resumed/)
+})
+
+test('worker advancement and durable bootstrap reject browser-legacy ownership', () => {
+  const service = read('src/lib/import-export/wizard/migration-session.service.ts')
+  const reconcile = service.slice(
+    service.indexOf('export async function reconcileMigrationSessionForImportJob'),
+    service.indexOf('/** Returns the company\'s active QuickBooks migration session'),
+  )
+  const bootstrap = service.slice(service.indexOf('export async function bootstrapQuickBooksMigrationQueue'))
+  const advance = service.slice(service.indexOf('export async function advanceQuickBooksMigrationAfterImportJob'))
+
+  assert.match(reconcile, /if \(!isWorkerOwnedQuickBooksMigration\(row\.config\)\) continue/)
+  assert.match(reconcile, /ownedJob\?\.migration_session_id !== row\.id/)
+  assert.match(bootstrap, /if \(!isWorkerOwnedQuickBooksMigration\(input\.session\.config\)\) return input\.session/)
+  assert.match(advance, /if \(!isWorkerOwnedQuickBooksMigration\(candidate\.config\)\) return false/)
+  assert.match(advance, /ownedJob\?\.migration_session_id !== row\.id/)
+  assert.match(read('src/lib/platform/jobs/workers.ts'), /reconcileMigrationSessionForImportJob\(/)
+  assert.match(read('src/lib/platform/jobs/workers.ts'), /advanceQuickBooksMigrationAfterImportJob\(/)
 })

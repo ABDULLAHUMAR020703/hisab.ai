@@ -7,6 +7,7 @@ import {
   cancelImportJob,
   createImportJob,
   getImportJobsByIds,
+  getMigrationImportJob,
   incrementImportJobRetry,
   setImportJobStatus,
 } from '@/lib/import-export/jobs/import-job.service'
@@ -18,6 +19,7 @@ import {
   importJobIdsFromConfig,
   isActiveMigrationSession,
   isQuickBooksMigrationConfig,
+  isWorkerOwnedQuickBooksMigration,
   jobRecordToProgressSnapshot,
   restoreLifecycleFromSession,
   summarizeMigrationSession,
@@ -271,7 +273,16 @@ export async function reconcileMigrationSessionForImportJob(
 
     for (const row of data ?? []) {
       if (!isQuickBooksMigrationConfig(row.config)) continue
+      if (!isWorkerOwnedQuickBooksMigration(row.config)) continue
       if (!importJobIdsFromConfig(row.config).includes(importJobId)) continue
+      const { data: ownedJob, error: ownedJobError } = await client
+        .from('import_jobs')
+        .select('id,migration_session_id')
+        .eq('id', importJobId)
+        .eq('company_id', companyId)
+        .maybeSingle()
+      if (ownedJobError) throw ownedJobError
+      if (ownedJob?.migration_session_id !== row.id) continue
       await reconcileQuickBooksMigrationSession(await hydrateSession(mapSessionRow(row)), options)
       return
     }
@@ -500,6 +511,8 @@ export async function bootstrapQuickBooksMigrationQueue(input: {
   userId: string
   companyIdOverride?: string
 }): Promise<HydratedMigrationSession> {
+  if (!isWorkerOwnedQuickBooksMigration(input.session.config)) return input.session
+
   const plan = planMigrationStartBootstrap(input.session)
   if (plan.type === 'none') return input.session
 
@@ -512,23 +525,35 @@ export async function bootstrapQuickBooksMigrationQueue(input: {
     const module = plan.module
     const filename = `${session.config.sourceLabel ?? 'QuickBooks'} - ${module.label}`
     const duplicateStrategy = session.config.duplicateStrategy
-    const created = await createImportJob({
-      userId: input.userId,
-      moduleKey: module.moduleKey,
-      filename,
-      fileFormat: 'csv',
-      duplicateStrategy,
-      totalRows: 0,
-      mappingSnapshot: {},
-      payloadSnapshot: {
-        sourceKey: session.config.provider,
-        resourceKey: module.key,
+    let created: Awaited<ReturnType<typeof createImportJob>>
+    try {
+      created = await createImportJob({
+        userId: input.userId,
+        moduleKey: module.moduleKey,
         filename,
         fileFormat: 'csv',
         duplicateStrategy,
-      },
-    })
-    await setImportJobStatus(created.id, 'pending')
+        totalRows: 0,
+        mappingSnapshot: {},
+        payloadSnapshot: {
+          sourceKey: session.config.provider,
+          resourceKey: module.key,
+          filename,
+          fileFormat: 'csv',
+          duplicateStrategy,
+        },
+        migrationSessionId: session.id,
+        migrationResourceKey: module.key,
+      })
+    } catch (error) {
+      if ((error as { code?: string })?.code !== '23505') throw error
+      const existing = await getMigrationImportJob(session.id, module.key, companyId)
+      if (!existing) throw error
+      created = existing
+    }
+    if (!['completed', 'failed', 'cancelled'].includes(created.status)) {
+      await setImportJobStatus(created.id, 'pending')
+    }
     importJobId = created.id
 
     const lifecycle = applyJobCreated(session.lifecycle, module.key, created.id)
@@ -563,17 +588,24 @@ export async function bootstrapQuickBooksMigrationQueue(input: {
   if (activeQueueError) throw activeQueueError
   if (activeQueueJob) return session
 
-  const queued = await enqueueJob({
-    jobType: 'QUICKBOOKS_IMPORT_STEP',
-    companyId,
-    createdById: input.userId,
-    payload: {
-      importJobId,
-      moduleKey,
+  let queued
+  try {
+    queued = await enqueueJob({
+      jobType: 'QUICKBOOKS_IMPORT_STEP',
       companyId,
-      userId: input.userId,
-    },
-  })
+      createdById: input.userId,
+      payload: {
+        importJobId,
+        moduleKey,
+        companyId,
+        userId: input.userId,
+      },
+    })
+  } catch (error) {
+    // A second worker/completion hook may win the unique active-step race.
+    if ((error as { code?: string })?.code !== '23505') throw error
+    return session
+  }
 
   logger.info('quickbooks.migration_session.bootstrap.enqueued', {
     sessionId: session.id,
@@ -584,6 +616,67 @@ export async function bootstrapQuickBooksMigrationQueue(input: {
   })
 
   return session
+}
+
+/**
+ * Worker-owned module advancement. A completed import step is the only event
+ * that can schedule the next dependency-ready module; browser polling is not
+ * part of this path. The unique migration-resource and active-queue indexes
+ * make replayed completion hooks harmless.
+ */
+export async function advanceQuickBooksMigrationAfterImportJob(
+  importJobId: string,
+  companyId: string,
+  userId: string,
+): Promise<void> {
+  const client = createAdminClient()
+  const { data, error } = await client
+    .from('migration_wizard_sessions')
+    .select('*')
+    .eq('company_id', companyId)
+    .eq('status', 'IN_PROGRESS')
+    .order('updated_at', { ascending: false })
+    .limit(40)
+    if (error) throw error
+
+  const row = (data ?? []).find((candidate) => {
+    if (!isQuickBooksMigrationConfig(candidate.config)) return false
+    if (!isWorkerOwnedQuickBooksMigration(candidate.config)) return false
+    return importJobIdsFromConfig(candidate.config).includes(importJobId)
+  })
+  if (!row) return
+
+  const { data: ownedJob, error: ownedJobError } = await client
+    .from('import_jobs')
+    .select('id,migration_session_id')
+    .eq('id', importJobId)
+    .eq('company_id', companyId)
+    .maybeSingle()
+  if (ownedJobError) throw ownedJobError
+  if (ownedJob?.migration_session_id !== row.id) return
+
+  const session = await hydrateSession(mapSessionRow(row), { includeQueueHealth: false })
+  const finished = Object.values(session.jobs).find((job) => job.id === importJobId)
+  if (!finished || !['completed', 'failed', 'cancelled'].includes(finished.status)) return
+
+  if (finished.status !== 'completed') {
+    await reconcileQuickBooksMigrationSession(session)
+    return
+  }
+
+  const next = planMigrationStartBootstrap(session)
+  if (next.type === 'none') {
+    await reconcileQuickBooksMigrationSession(session)
+    return
+  }
+
+  await bootstrapQuickBooksMigrationQueue({ session, userId, companyIdOverride: companyId })
+  logger.info('quickbooks.migration_session.worker_advanced', {
+    sessionId: session.id,
+    companyId,
+    completedImportJobId: importJobId,
+    nextModule: next.module.key,
+  })
 }
 
 export async function updateQuickBooksMigrationSession(input: {
@@ -608,6 +701,7 @@ export async function updateQuickBooksMigrationSession(input: {
     sourceLabel: current.config.sourceLabel,
     companyName: current.config.companyName,
     currency: current.config.currency,
+    orchestrationOwner: current.config.orchestrationOwner ?? 'browser_legacy',
     state: input.state ?? current.config.state,
   })
 
@@ -749,12 +843,20 @@ export async function retryQuickBooksMigrationSession(sessionId: string, company
     ),
   )
 
-  return updateQuickBooksMigrationSession({
+  const resumed = await updateQuickBooksMigrationSession({
     sessionId,
     companyIdOverride: companyId,
     state: 'running',
     status: 'IN_PROGRESS',
     step: 'import',
     lifecycle: retryLifecycle,
+  })
+
+  if (!isWorkerOwnedQuickBooksMigration(resumed.config)) return resumed
+  if (!resumed.userId) throw new FrameworkBadRequestError('Worker-owned migration cannot resume without an owning user.')
+  return bootstrapQuickBooksMigrationQueue({
+    session: resumed,
+    userId: resumed.userId,
+    companyIdOverride: companyId,
   })
 }

@@ -1,5 +1,6 @@
 import { orderedModules, type ModuleLifecycleEntry, type ModuleLifecyclePhase } from './module-lifecycle'
 import type { HydratedMigrationSession } from './migration-session'
+import { quickBooksResourceDependenciesCompleted } from '../quickbooks/dependency-order'
 
 const EXCLUDED_PHASES = new Set<ModuleLifecyclePhase>(['unsupported', 'preview_failed'])
 const COMPLETED_PHASES = new Set<ModuleLifecyclePhase>(['completed', 'completed_with_warnings'])
@@ -56,8 +57,16 @@ export function nextCoordinationAction(
   const failed = participating.find((entry) => FAILED_PHASES.has(entry.phase))
   if (failed) return guard({ type: 'mark-failed', key: `${session.id}:state:failed` }, issued)
 
-  const unfinished = participating.find((entry) => !COMPLETED_PHASES.has(entry.phase))
-  if (!unfinished) return guard({ type: 'mark-completed', key: `${session.id}:state:completed` }, issued)
+  const selectedKeys = new Set(participating.map((entry) => entry.key))
+  const completedKeys = new Set(participating.filter((entry) => COMPLETED_PHASES.has(entry.phase)).map((entry) => entry.key))
+  const allCompleted = participating.every((entry) => COMPLETED_PHASES.has(entry.phase))
+  const unfinished = participating.find((entry) =>
+    !COMPLETED_PHASES.has(entry.phase)
+      && quickBooksResourceDependenciesCompleted(entry.key, selectedKeys, completedKeys),
+  )
+  if (!unfinished) return allCompleted
+    ? guard({ type: 'mark-completed', key: `${session.id}:state:completed` }, issued)
+    : IDLE
 
   if (!unfinished.jobId) {
     return guard({ type: 'create-job', key: `${session.id}:create:${unfinished.key}`, module: unfinished }, issued)

@@ -17,6 +17,8 @@ import type {
 } from './migration-queue-health'
 
 export const QUICKBOOKS_MIGRATION_SESSION_KIND = 'quickbooks_migration' as const
+export const QUICKBOOKS_MIGRATION_ORCHESTRATION_OWNER = 'worker' as const
+export type QuickBooksMigrationOrchestrationOwner = 'worker' | 'browser_legacy'
 
 export type MigrationSessionState = 'running' | 'completed' | 'failed' | 'cancelled'
 export type MigrationSessionStep = 'analyze' | 'modules' | 'validation' | 'import' | 'report'
@@ -49,6 +51,8 @@ export interface QuickBooksMigrationSessionConfig {
   sourceLabel?: string | null
   companyName?: string | null
   currency?: string | null
+  /** New sessions are worker-owned; omitted on historical browser-coordinated sessions. */
+  orchestrationOwner?: QuickBooksMigrationOrchestrationOwner
 }
 
 export interface MigrationSessionRecord {
@@ -141,6 +145,12 @@ export function isActiveMigrationSession(session: Pick<MigrationSessionRecord, '
   return session.status === 'IN_PROGRESS' && isQuickBooksMigrationConfig(session.config) && session.config.state === 'running'
 }
 
+export function isWorkerOwnedQuickBooksMigration(
+  config: Pick<QuickBooksMigrationSessionConfig, 'orchestrationOwner'>,
+): boolean {
+  return config.orchestrationOwner === QUICKBOOKS_MIGRATION_ORCHESTRATION_OWNER
+}
+
 export function serializeModuleCards(lifecycle: ModuleLifecycleState): PersistedModuleCard[] {
   return orderedModules(lifecycle).map((entry) => ({
     key: entry.key,
@@ -166,6 +176,7 @@ export function buildSessionConfig(input: {
   companyName?: string | null
   currency?: string | null
   state?: MigrationSessionState
+  orchestrationOwner?: QuickBooksMigrationOrchestrationOwner
 }): QuickBooksMigrationSessionConfig {
   const modules = serializeModuleCards(input.lifecycle)
   const importJobIds: Record<string, string> = {}
@@ -184,6 +195,7 @@ export function buildSessionConfig(input: {
     sourceLabel: input.sourceLabel ?? null,
     companyName: input.companyName ?? null,
     currency: input.currency ?? null,
+    orchestrationOwner: input.orchestrationOwner ?? QUICKBOOKS_MIGRATION_ORCHESTRATION_OWNER,
   }
 }
 
