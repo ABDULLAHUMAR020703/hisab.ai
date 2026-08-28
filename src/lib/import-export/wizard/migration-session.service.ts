@@ -20,10 +20,12 @@ import {
   isActiveMigrationSession,
   isImportJobOwnedByMigrationSession,
   isQuickBooksMigrationConfig,
+  isTerminalImportJobStatus,
   isWorkerOwnedQuickBooksMigration,
   jobRecordToProgressSnapshot,
   resourceKeyForMigrationImportJob,
   restoreLifecycleFromSession,
+  shouldAdvanceToNextMigrationModule,
   summarizeMigrationSession,
   type HydratedMigrationSession,
   type MigrationHistorySummary,
@@ -703,7 +705,7 @@ export async function advanceQuickBooksMigrationAfterImportJob(
 
     const { data: ownedJob, error: ownedJobError } = await client
       .from('import_jobs')
-      .select('id,migration_session_id')
+      .select('id,migration_session_id,status')
       .eq('id', importJobId)
       .eq('company_id', companyId)
       .maybeSingle()
@@ -719,6 +721,18 @@ export async function advanceQuickBooksMigrationAfterImportJob(
       return
     }
 
+    const persistedStatus = ownedJob?.status == null ? null : String(ownedJob.status)
+    if (!isTerminalImportJobStatus(persistedStatus)) {
+      logger.info('quickbooks.migration_session.advance_skipped', {
+        reason: 'import_job_not_terminal',
+        importJobId,
+        companyId,
+        sessionId: row.id,
+        status: persistedStatus,
+      })
+      return
+    }
+
     await backfillMigrationImportJobOwnership({
       sessionId: row.id,
       companyId,
@@ -728,7 +742,7 @@ export async function advanceQuickBooksMigrationAfterImportJob(
 
     let session = await hydrateSession(mapSessionRow(row), { includeQueueHealth: false })
     const finished = Object.values(session.jobs).find((job) => job.id === importJobId)
-    if (!finished || !['completed', 'failed', 'cancelled'].includes(finished.status)) {
+    if (!finished || !isTerminalImportJobStatus(finished.status)) {
       logger.info('quickbooks.migration_session.advance_skipped', {
         reason: 'import_job_not_terminal',
         importJobId,
@@ -739,7 +753,7 @@ export async function advanceQuickBooksMigrationAfterImportJob(
       return
     }
 
-    if (finished.status !== 'completed') {
+    if (!shouldAdvanceToNextMigrationModule(finished.status)) {
       await reconcileQuickBooksMigrationSession(session)
       return
     }

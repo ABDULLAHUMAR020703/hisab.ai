@@ -2,6 +2,7 @@ import 'server-only'
 import { completeJob, failJob, heartbeatJob, updateJobProgress, HEARTBEAT_INTERVAL_MS } from './queue'
 import { createJobOwnership, isOwnershipLostError, type JobOwnership } from './ownership'
 import { logger } from '@/lib/ops/logger'
+import { isTerminalImportJobStatus } from '@/lib/import-export/wizard/migration-session'
 
 type JobHandler = (
   payload: Record<string, unknown>,
@@ -111,6 +112,41 @@ export async function processJobBatch(limit = 5, jobType?: string) {
   return { processed: processed.length, jobIds: processed }
 }
 
+/**
+ * The platform queue row can complete while the import job is still processing
+ * (multi-page continuation). Session advancement must observe a persisted
+ * terminal import_jobs.status, never the handler return alone.
+ */
+async function coordinateQuickBooksMigrationAfterStep(input: {
+  importJobId: string
+  companyId: string
+  userId: string
+  platformJobId: string
+}): Promise<void> {
+  const { getImportJob } = await import('@/lib/import-export/jobs/import-job.service')
+  const job = await getImportJob(input.importJobId, input.companyId)
+  if (!job || !isTerminalImportJobStatus(job.status)) {
+    logger.info('quickbooks.migration_session.advance_deferred', {
+      reason: 'import_job_not_terminal',
+      importJobId: input.importJobId,
+      companyId: input.companyId,
+      platformJobId: input.platformJobId,
+      status: job?.status ?? null,
+    })
+    return
+  }
+  logger.info('quickbooks.import_job.terminal_status_persisted', {
+    importJobId: job.id,
+    companyId: input.companyId,
+    status: job.status,
+    processedRows: job.processedRows,
+    totalRows: job.totalRows,
+  })
+  const { advanceQuickBooksMigrationAfterImportJob, reconcileMigrationSessionForImportJob } = await import('@/lib/import-export/wizard/migration-session.service')
+  await reconcileMigrationSessionForImportJob(input.importJobId, input.companyId, { ignoreQueueJobIds: [input.platformJobId] })
+  await advanceQuickBooksMigrationAfterImportJob(input.importJobId, input.companyId, input.userId)
+}
+
 // Register built-in handlers
 registerJobHandler('EMAIL_SEND', async (payload) => {
   const notificationId = String(payload.notificationId ?? '')
@@ -186,11 +222,14 @@ registerJobHandler('QUICKBOOKS_IMPORT_STEP', async (payload, platformJobId, owne
       await ownership.assertOwned()
       return payload
     } finally {
-      // This row is still RUNNING until the handler returns, so it is excluded:
-      // the session must be judged on the work that outlives this step.
-      const { advanceQuickBooksMigrationAfterImportJob, reconcileMigrationSessionForImportJob } = await import('@/lib/import-export/wizard/migration-session.service')
-      await reconcileMigrationSessionForImportJob(importJobId, companyId, { ignoreQueueJobIds: [platformJobId] })
-      await advanceQuickBooksMigrationAfterImportJob(importJobId, companyId, userId)
+      // Read the persisted import job after the step returns. Continuation
+      // pages stay `processing` and must not schedule the next module.
+      await coordinateQuickBooksMigrationAfterStep({
+        importJobId,
+        companyId,
+        userId,
+        platformJobId,
+      })
     }
   })
 })

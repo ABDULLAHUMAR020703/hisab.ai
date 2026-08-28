@@ -307,6 +307,19 @@ export function isImportJobOwnedByMigrationSession(
   return importJobIdsFromConfig(config).includes(importJobId)
 }
 
+export const TERMINAL_IMPORT_JOB_STATUSES = ['completed', 'failed', 'cancelled'] as const
+export type TerminalImportJobStatus = (typeof TERMINAL_IMPORT_JOB_STATUSES)[number]
+
+/** True once an import job has a persisted terminal status and must not be re-processed. */
+export function isTerminalImportJobStatus(status: string | null | undefined): status is TerminalImportJobStatus {
+  return status === 'completed' || status === 'failed' || status === 'cancelled'
+}
+
+/** Only a successfully completed module may schedule the next dependency-ready module. */
+export function shouldAdvanceToNextMigrationModule(status: string | null | undefined): boolean {
+  return status === 'completed'
+}
+
 /** Maps an import_jobs row into the polling snapshot the wizard already understands. */
 export function jobRecordToProgressSnapshot(job: {
   id: string

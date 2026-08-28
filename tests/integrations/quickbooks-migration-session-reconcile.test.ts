@@ -210,5 +210,5 @@ test('server paths reconcile sessions so completion no longer depends on an open
   assert.match(service, /isActiveMigrationSession\(hydrated\) \? hydrated : null/)
 
   const workers = read('src/lib/platform/jobs/workers.ts')
-  assert.match(workers, /reconcileMigrationSessionForImportJob\(importJobId, companyId, \{ ignoreQueueJobIds: \[platformJobId\] \}\)/)
+  assert.match(workers, /reconcileMigrationSessionForImportJob\((?:input\.)?importJobId, (?:input\.)?companyId, \{ ignoreQueueJobIds: \[(?:input\.)?platformJobId\] \}\)/)
 })
