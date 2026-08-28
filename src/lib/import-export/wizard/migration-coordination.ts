@@ -1,10 +1,32 @@
-import { orderedModules, type ModuleLifecycleEntry, type ModuleLifecyclePhase } from './module-lifecycle'
+import {
+  derivePhaseFromPersistedJob,
+  orderedModules,
+  type ModuleLifecycleEntry,
+  type ModuleLifecyclePhase,
+} from './module-lifecycle'
 import type { HydratedMigrationSession } from './migration-session'
 import { quickBooksResourceDependenciesCompleted } from '../quickbooks/dependency-order'
 
 const EXCLUDED_PHASES = new Set<ModuleLifecyclePhase>(['unsupported', 'preview_failed'])
 const COMPLETED_PHASES = new Set<ModuleLifecyclePhase>(['completed', 'completed_with_warnings'])
 const FAILED_PHASES = new Set<ModuleLifecyclePhase>(['failed', 'cancelled'])
+
+/** Prefer persisted import_jobs status over stale module-card phase during scheduling. */
+function effectiveModulePhase(
+  entry: ModuleLifecycleEntry,
+  jobs: HydratedMigrationSession['jobs'],
+): ModuleLifecyclePhase {
+  const job = jobs[entry.key]
+  if (!job) return entry.phase
+  const derived = derivePhaseFromPersistedJob(job)
+  if (COMPLETED_PHASES.has(derived) || FAILED_PHASES.has(derived) || derived === 'cancelled') {
+    return derived
+  }
+  if (COMPLETED_PHASES.has(entry.phase) || FAILED_PHASES.has(entry.phase)) {
+    return entry.phase
+  }
+  return derived
+}
 
 export type CoordinationAction =
   | { type: 'idle'; key: null }
@@ -52,18 +74,23 @@ export function nextCoordinationAction(
   if (session.config.state !== 'running') return IDLE
 
   const participating = orderedModules(session.lifecycle)
-    .filter((entry) => !EXCLUDED_PHASES.has(entry.phase))
+    .filter((entry) => !EXCLUDED_PHASES.has(effectiveModulePhase(entry, session.jobs)))
 
-  const failed = participating.find((entry) => FAILED_PHASES.has(entry.phase))
+  const failed = participating.find((entry) => FAILED_PHASES.has(effectiveModulePhase(entry, session.jobs)))
   if (failed) return guard({ type: 'mark-failed', key: `${session.id}:state:failed` }, issued)
 
   const selectedKeys = new Set(participating.map((entry) => entry.key))
-  const completedKeys = new Set(participating.filter((entry) => COMPLETED_PHASES.has(entry.phase)).map((entry) => entry.key))
-  const allCompleted = participating.every((entry) => COMPLETED_PHASES.has(entry.phase))
-  const unfinished = participating.find((entry) =>
-    !COMPLETED_PHASES.has(entry.phase)
-      && quickBooksResourceDependenciesCompleted(entry.key, selectedKeys, completedKeys),
+  const completedKeys = new Set(
+    participating
+      .filter((entry) => COMPLETED_PHASES.has(effectiveModulePhase(entry, session.jobs)))
+      .map((entry) => entry.key),
   )
+  const allCompleted = participating.every((entry) => COMPLETED_PHASES.has(effectiveModulePhase(entry, session.jobs)))
+  const unfinished = participating.find((entry) => {
+    const phase = effectiveModulePhase(entry, session.jobs)
+    return !COMPLETED_PHASES.has(phase)
+      && quickBooksResourceDependenciesCompleted(entry.key, selectedKeys, completedKeys)
+  })
   if (!unfinished) return allCompleted
     ? guard({ type: 'mark-completed', key: `${session.id}:state:completed` }, issued)
     : IDLE

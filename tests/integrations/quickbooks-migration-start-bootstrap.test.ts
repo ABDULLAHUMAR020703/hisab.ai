@@ -219,10 +219,9 @@ test('worker advancement and durable bootstrap reject browser-legacy ownership',
   const advance = service.slice(service.indexOf('export async function advanceQuickBooksMigrationAfterImportJob'))
 
   assert.match(reconcile, /if \(!isWorkerOwnedQuickBooksMigration\(row\.config\)\) continue/)
-  assert.match(reconcile, /ownedJob\?\.migration_session_id !== row\.id/)
+  assert.match(reconcile, /isImportJobOwnedByMigrationSession\(/)
   assert.match(bootstrap, /if \(!isWorkerOwnedQuickBooksMigration\(input\.session\.config\)\) return input\.session/)
-  assert.match(advance, /if \(!isWorkerOwnedQuickBooksMigration\(candidate\.config\)\) return false/)
-  assert.match(advance, /ownedJob\?\.migration_session_id !== row\.id/)
+  assert.match(advance, /isImportJobOwnedByMigrationSession\(/)
   assert.match(read('src/lib/platform/jobs/workers.ts'), /reconcileMigrationSessionForImportJob\(/)
   assert.match(read('src/lib/platform/jobs/workers.ts'), /advanceQuickBooksMigrationAfterImportJob\(/)
 })

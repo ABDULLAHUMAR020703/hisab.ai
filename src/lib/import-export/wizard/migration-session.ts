@@ -276,6 +276,37 @@ export function importJobIdsFromConfig(config: QuickBooksMigrationSessionConfig)
   return [...ids]
 }
 
+/** Resolves the migration resource key for a session-linked import job, if any. */
+export function resourceKeyForMigrationImportJob(
+  config: QuickBooksMigrationSessionConfig,
+  importJobId: string,
+): string | null {
+  for (const [key, id] of Object.entries(config.importJobIds)) {
+    if (id === importJobId) return key
+  }
+  for (const card of config.modules) {
+    if (card.jobId === importJobId) return card.key
+  }
+  return null
+}
+
+/**
+ * True when the import job belongs to the migration session. Accepts durable
+ * migration_session_id ownership or a legacy session roster match so worker
+ * advancement is not blocked by jobs created before ownership columns were set.
+ */
+export function isImportJobOwnedByMigrationSession(
+  sessionId: string,
+  config: QuickBooksMigrationSessionConfig,
+  importJobId: string,
+  ownedJob: { migration_session_id?: string | null } | null | undefined,
+): boolean {
+  if (!ownedJob) return false
+  if (ownedJob.migration_session_id === sessionId) return true
+  if (ownedJob.migration_session_id) return false
+  return importJobIdsFromConfig(config).includes(importJobId)
+}
+
 /** Maps an import_jobs row into the polling snapshot the wizard already understands. */
 export function jobRecordToProgressSnapshot(job: {
   id: string

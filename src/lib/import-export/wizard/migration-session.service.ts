@@ -18,9 +18,11 @@ import {
   buildSessionConfig,
   importJobIdsFromConfig,
   isActiveMigrationSession,
+  isImportJobOwnedByMigrationSession,
   isQuickBooksMigrationConfig,
   isWorkerOwnedQuickBooksMigration,
   jobRecordToProgressSnapshot,
+  resourceKeyForMigrationImportJob,
   restoreLifecycleFromSession,
   summarizeMigrationSession,
   type HydratedMigrationSession,
@@ -60,6 +62,44 @@ import { logger } from '@/lib/ops/logger'
 function configuredThreshold(value: string | undefined, fallback: number, minimum: number): number {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? Math.max(minimum, parsed) : fallback
+}
+
+async function backfillMigrationImportJobOwnership(input: {
+  sessionId: string
+  companyId: string
+  importJobId: string
+  config: QuickBooksMigrationSessionConfig
+}): Promise<void> {
+  const resourceKey = resourceKeyForMigrationImportJob(input.config, input.importJobId)
+  if (!resourceKey) return
+
+  const client = createAdminClient()
+  const { data: job, error } = await client
+    .from('import_jobs')
+    .select('id,migration_session_id,migration_resource_key')
+    .eq('id', input.importJobId)
+    .eq('company_id', input.companyId)
+    .maybeSingle()
+  if (error) throw error
+  if (!job || job.migration_session_id === input.sessionId) return
+  if (job.migration_session_id) return
+
+  const patch: Record<string, unknown> = { migration_session_id: input.sessionId }
+  if (!job.migration_resource_key) patch.migration_resource_key = resourceKey
+  const { error: updateError } = await client
+    .from('import_jobs')
+    .update(patch)
+    .eq('id', input.importJobId)
+    .eq('company_id', input.companyId)
+    .is('migration_session_id', null)
+  if (updateError) throw updateError
+
+  logger.info('quickbooks.migration_session.ownership_backfilled', {
+    sessionId: input.sessionId,
+    companyId: input.companyId,
+    importJobId: input.importJobId,
+    resourceKey,
+  })
 }
 
 const QUEUE_HEALTH_THRESHOLDS: MigrationQueueHealthThresholds = {
@@ -282,7 +322,13 @@ export async function reconcileMigrationSessionForImportJob(
         .eq('company_id', companyId)
         .maybeSingle()
       if (ownedJobError) throw ownedJobError
-      if (ownedJob?.migration_session_id !== row.id) continue
+      if (!isImportJobOwnedByMigrationSession(row.id, row.config, importJobId, ownedJob)) continue
+      await backfillMigrationImportJobOwnership({
+        sessionId: row.id,
+        companyId,
+        importJobId,
+        config: row.config,
+      })
       await reconcileQuickBooksMigrationSession(await hydrateSession(mapSessionRow(row)), options)
       return
     }
@@ -629,54 +675,104 @@ export async function advanceQuickBooksMigrationAfterImportJob(
   companyId: string,
   userId: string,
 ): Promise<void> {
-  const client = createAdminClient()
-  const { data, error } = await client
-    .from('migration_wizard_sessions')
-    .select('*')
-    .eq('company_id', companyId)
-    .eq('status', 'IN_PROGRESS')
-    .order('updated_at', { ascending: false })
-    .limit(40)
+  try {
+    const client = createAdminClient()
+    const { data, error } = await client
+      .from('migration_wizard_sessions')
+      .select('*')
+      .eq('company_id', companyId)
+      .eq('status', 'IN_PROGRESS')
+      .order('updated_at', { ascending: false })
+      .limit(40)
     if (error) throw error
 
-  const row = (data ?? []).find((candidate) => {
-    if (!isQuickBooksMigrationConfig(candidate.config)) return false
-    if (!isWorkerOwnedQuickBooksMigration(candidate.config)) return false
-    return importJobIdsFromConfig(candidate.config).includes(importJobId)
-  })
-  if (!row) return
+    const row = (data ?? []).find((candidate) => {
+      if (!isQuickBooksMigrationConfig(candidate.config)) return false
+      if (!isWorkerOwnedQuickBooksMigration(candidate.config)) return false
+      return importJobIdsFromConfig(candidate.config).includes(importJobId)
+    })
+    if (!row) {
+      logger.info('quickbooks.migration_session.advance_skipped', {
+        reason: 'no_worker_owned_session',
+        importJobId,
+        companyId,
+      })
+      return
+    }
 
-  const { data: ownedJob, error: ownedJobError } = await client
-    .from('import_jobs')
-    .select('id,migration_session_id')
-    .eq('id', importJobId)
-    .eq('company_id', companyId)
-    .maybeSingle()
-  if (ownedJobError) throw ownedJobError
-  if (ownedJob?.migration_session_id !== row.id) return
+    const { data: ownedJob, error: ownedJobError } = await client
+      .from('import_jobs')
+      .select('id,migration_session_id')
+      .eq('id', importJobId)
+      .eq('company_id', companyId)
+      .maybeSingle()
+    if (ownedJobError) throw ownedJobError
+    if (!isImportJobOwnedByMigrationSession(row.id, row.config, importJobId, ownedJob)) {
+      logger.info('quickbooks.migration_session.advance_skipped', {
+        reason: 'import_job_not_owned_by_session',
+        importJobId,
+        companyId,
+        sessionId: row.id,
+        migrationSessionId: ownedJob?.migration_session_id ?? null,
+      })
+      return
+    }
 
-  const session = await hydrateSession(mapSessionRow(row), { includeQueueHealth: false })
-  const finished = Object.values(session.jobs).find((job) => job.id === importJobId)
-  if (!finished || !['completed', 'failed', 'cancelled'].includes(finished.status)) return
+    await backfillMigrationImportJobOwnership({
+      sessionId: row.id,
+      companyId,
+      importJobId,
+      config: row.config,
+    })
 
-  if (finished.status !== 'completed') {
-    await reconcileQuickBooksMigrationSession(session)
-    return
+    let session = await hydrateSession(mapSessionRow(row), { includeQueueHealth: false })
+    const finished = Object.values(session.jobs).find((job) => job.id === importJobId)
+    if (!finished || !['completed', 'failed', 'cancelled'].includes(finished.status)) {
+      logger.info('quickbooks.migration_session.advance_skipped', {
+        reason: 'import_job_not_terminal',
+        importJobId,
+        companyId,
+        sessionId: row.id,
+        status: finished?.status ?? null,
+      })
+      return
+    }
+
+    if (finished.status !== 'completed') {
+      await reconcileQuickBooksMigrationSession(session)
+      return
+    }
+
+    const next = planMigrationStartBootstrap(session)
+    if (next.type === 'none') {
+      logger.info('quickbooks.migration_session.advance_skipped', {
+        reason: 'no_next_module_planned',
+        importJobId,
+        companyId,
+        sessionId: row.id,
+        preferencesPhase: session.lifecycle.preferences?.phase ?? null,
+      })
+      session = await reconcileQuickBooksMigrationSession(session)
+      return
+    }
+
+    await bootstrapQuickBooksMigrationQueue({ session, userId, companyIdOverride: companyId })
+    logger.info('quickbooks.migration_session.worker_advanced', {
+      sessionId: session.id,
+      companyId,
+      completedImportJobId: importJobId,
+      nextModule: next.module.key,
+    })
+  } catch (error) {
+    logger.error('quickbooks.migration_session.advance_failed', {
+      importJobId,
+      companyId,
+      error: error instanceof Error
+        ? { name: error.name, message: error.message }
+        : { message: String(error) },
+    })
+    throw error
   }
-
-  const next = planMigrationStartBootstrap(session)
-  if (next.type === 'none') {
-    await reconcileQuickBooksMigrationSession(session)
-    return
-  }
-
-  await bootstrapQuickBooksMigrationQueue({ session, userId, companyIdOverride: companyId })
-  logger.info('quickbooks.migration_session.worker_advanced', {
-    sessionId: session.id,
-    companyId,
-    completedImportJobId: importJobId,
-    nextModule: next.module.key,
-  })
 }
 
 export async function updateQuickBooksMigrationSession(input: {
