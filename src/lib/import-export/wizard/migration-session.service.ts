@@ -590,6 +590,7 @@ export async function bootstrapQuickBooksMigrationQueue(input: {
         },
         migrationSessionId: session.id,
         migrationResourceKey: module.key,
+        companyId,
       })
     } catch (error) {
       if ((error as { code?: string })?.code !== '23505') throw error
@@ -598,7 +599,7 @@ export async function bootstrapQuickBooksMigrationQueue(input: {
       created = existing
     }
     if (!['completed', 'failed', 'cancelled'].includes(created.status)) {
-      await setImportJobStatus(created.id, 'pending')
+      await setImportJobStatus(created.id, 'pending', companyId)
     }
     importJobId = created.id
 
@@ -898,7 +899,7 @@ export async function cancelQuickBooksMigrationSession(sessionId: string, compan
   })
 
   for (const jobId of plan.cancelJobIds) {
-    await cancelImportJob(jobId)
+    await cancelImportJob(jobId, companyId)
   }
 
   const allJobIds = importJobIdsFromConfig(cancelled.config)
@@ -923,7 +924,7 @@ export async function retryQuickBooksMigrationSession(sessionId: string, company
   }
 
   for (const jobId of resumableJobIds) {
-    await incrementImportJobRetry(jobId)
+    await incrementImportJobRetry(jobId, companyId)
   }
 
   const refreshed = await getQuickBooksMigrationSession(sessionId, companyId)

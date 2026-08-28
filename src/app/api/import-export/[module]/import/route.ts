@@ -79,6 +79,7 @@ async function handleImport(
 ) {
   let jobId: string | null = null
   let sourcePage: Awaited<ReturnType<typeof fetchSourceResourcePage>> | null = null
+  let resolvedCompanyId: string | undefined
   const ensureOwned = async () => {
     if (!ownership) return
     await ownership.assertOwned()
@@ -102,9 +103,22 @@ async function handleImport(
       : 'skip') as DuplicateStrategy
 
     const companyId = await resolveCompanyId()
+    resolvedCompanyId = companyId
     const existingJobId = typeof body.jobId === 'string' ? body.jobId : null
-    const existingJob = existingJobId ? await getImportJob(existingJobId) : null
+    const existingJob = existingJobId ? await getImportJob(existingJobId, companyId) : null
     if (existingJobId && !existingJob) return Response.json({ error: 'Import job not found.' }, { status: 404 })
+    if (existingJob && ['completed', 'failed', 'cancelled'].includes(existingJob.status)) {
+      return Response.json({
+        jobId: existingJob.id,
+        status: existingJob.status,
+        importedCount: existingJob.importedCount,
+        updatedCount: existingJob.updatedCount,
+        skippedCount: existingJob.skippedCount,
+        failedCount: existingJob.failedCount,
+        totalRows: existingJob.totalRows,
+        processedRows: existingJob.processedRows,
+      })
+    }
     const sourceKey = typeof body.sourceKey === 'string' ? body.sourceKey : ''
     const resourceKey = typeof body.resourceKey === 'string' ? body.resourceKey : ''
     const sourceResource = sourceKey && resourceKey
@@ -126,9 +140,10 @@ async function handleImport(
         totalRows: 0,
         mappingSnapshot: {},
         payloadSnapshot: { sourceKey, resourceKey, filename, fileFormat, duplicateStrategy },
+        companyId,
       })
       jobId = queued.id
-      await setImportJobStatus(queued.id, 'pending')
+      await setImportJobStatus(queued.id, 'pending', companyId)
       trace.finish({ fetched: 0 })
       return Response.json({ jobId: queued.id, status: 'pending', totalRows: 0, batchSize: queued.batchSize ?? 250 }, { status: 202 })
     }
@@ -147,6 +162,7 @@ async function handleImport(
       userId: user.id, moduleKey, filename, fileFormat, duplicateStrategy,
       mappingSnapshot: mappingSnapshot(mapping), totalRows: mappedRows.length,
       payloadSnapshot: { rows: mappedRows, validation, mapping, filename, fileFormat, duplicateStrategy },
+      companyId,
     })
     jobId = job.id
 
@@ -173,7 +189,7 @@ async function handleImport(
     const duplicateMatches = await trace.measure('duplicate_detection', () => detectDuplicates(definition, validRows, { companyId, userId: user.id, performance: trace }))
 
     if (body.background === true && !existingJobId) {
-      await setImportJobStatus(job.id, 'pending')
+      await setImportJobStatus(job.id, 'pending', companyId)
       trace.finish({ fetched:mappedRows.length })
       return Response.json({ jobId: job.id, status: 'pending', totalRows: mappedRows.length, batchSize: job.batchSize ?? 250 }, { status: 202 })
     }
@@ -216,10 +232,10 @@ async function handleImport(
           failedCount:base.failedCount+counts.failedCount,
         }:undefined, Math.max(sourcePage?.checkpoint.fetched ?? 0, job.totalRows, absoluteProcessed), {
           progressSnapshot: trace?.snapshot() as MigrationProgressSnapshot,
-        })
+        }, companyId)
       },
-      isCancelled: () => isJobCancelled(job.id),
-      isPaused: () => isJobPaused(job.id),
+      isCancelled: () => isJobCancelled(job.id, companyId),
+      isPaused: () => isJobPaused(job.id, companyId),
       assertActive: ensureOwned,
       startAt: sourcePage ? 0 : job.batchCursor ?? 0,
       batchSize: sourcePage ? 100 : job.batchSize ?? 250,
@@ -243,19 +259,19 @@ async function handleImport(
     const allErrors = [...validationErrors, ...result.errors]
     const skippedRecords = [...validationSkips, ...result.skippedRecords]
     orchestrationStep('save_skips', { skippedRecords: skippedRecords.length })
-    await saveImportJobSkips(job.id, skippedRecords)
+    await saveImportJobSkips(job.id, skippedRecords, companyId)
     const skipSummary = skippedRecords.reduce<Record<string, number>>((summary, item) => {
       const label = item.reason === 'duplicate' ? 'Duplicate (already exists)' : item.reason === 'validation_failed' ? 'Validation failed' : item.reason === 'inactive' ? 'Inactive records' : item.reason === 'filtered' ? 'Filtered by module' : item.reason === 'unsupported_type' ? 'Unsupported type' : 'Other'
       summary[label] = (summary[label] ?? 0) + 1
       return summary
     }, { 'Duplicate (already exists)': 0, 'Inactive records': 0, 'Filtered by module': 0, 'Validation failed': 0, 'Unsupported type': 0, Other: 0 })
     orchestrationStep('save_errors', { errors: allErrors.length })
-    await saveImportJobErrors(job.id, allErrors)
+    await saveImportJobErrors(job.id, allErrors, companyId)
     const aggregate = { importedCount: base.importedCount + result.importedCount, updatedCount: base.updatedCount + result.updatedCount, skippedCount: base.skippedCount + result.skippedCount, failedCount: base.failedCount + result.failedCount }
     const invalidRowCount = validation.invalidRowNumbers.length
     const aggregateSkippedCount = aggregate.skippedCount + invalidRowCount
     orchestrationStep('cancel_checks')
-    const cancelledAfterBatch = await isJobCancelled(job.id)
+    const cancelledAfterBatch = await isJobCancelled(job.id, companyId)
     // Session cancel never interrupts the batch above; stop before the next continuation.
     const sessionCancelled = await isImportJobMigrationCancelled(job.id, companyId)
     orchestrationStep('cancel_checks_resolved', {
@@ -279,7 +295,7 @@ async function handleImport(
             validRows: (job.validRows ?? 0) + validation.validRowNumbers.length,
             invalidRows: (job.invalidRows ?? 0) + invalidRowCount,
             warningCount: (job.warningCount ?? 0) + validation.warningCount,
-          }, sourcePage.checkpoint.fetched)
+          }, sourcePage.checkpoint.fetched, undefined, companyId)
         }
         await finalizeImportJob(job.id, {
           status: 'cancelled',
@@ -292,9 +308,9 @@ async function handleImport(
           invalidRows: (job.invalidRows ?? 0) + invalidRowCount,
           warningCount: (job.warningCount ?? 0) + validation.warningCount,
           startedAt: job.startedAt,
-        })
+        }, companyId)
       } else {
-        await setImportJobStatus(job.id, result.paused ? 'paused' : 'pending')
+        await setImportJobStatus(job.id, result.paused ? 'paused' : 'pending', companyId)
       }
       trace.finish({ fetched: sourcePage?.checkpoint.fetched ?? mappedRows.length, imported: aggregate.importedCount, updated: aggregate.updatedCount, skipped: aggregate.skippedCount, failed: aggregate.failedCount })
       return Response.json({ jobId: job.id, status: result.paused ? 'paused' : 'cancelled', ...aggregate, totalRows: sourcePage?.checkpoint.fetched ?? mappedRows.length, validRows: validation.validRowNumbers.length, invalidRows: validation.invalidRowNumbers.length, warningCount: validation.warningCount, durationMs: Date.now() - new Date(job.startedAt ?? Date.now()).getTime() })
@@ -304,7 +320,7 @@ async function handleImport(
       await ensureOwned()
       orchestrationStep('commit_checkpoint', { fetched: sourcePage.checkpoint.fetched })
       await sourcePage.commit()
-      await updateImportJobProgress(job.id, sourcePage.checkpoint.fetched, { ...aggregate, skippedCount: aggregateSkippedCount, validRows: (job.validRows ?? 0) + validation.validRowNumbers.length, invalidRows: (job.invalidRows ?? 0) + invalidRowCount, warningCount: (job.warningCount ?? 0) + validation.warningCount }, sourcePage.checkpoint.fetched)
+      await updateImportJobProgress(job.id, sourcePage.checkpoint.fetched, { ...aggregate, skippedCount: aggregateSkippedCount, validRows: (job.validRows ?? 0) + validation.validRowNumbers.length, invalidRows: (job.invalidRows ?? 0) + invalidRowCount, warningCount: (job.warningCount ?? 0) + validation.warningCount }, sourcePage.checkpoint.fetched, undefined, companyId)
       await ensureOwned()
       if (await isImportJobMigrationCancelled(job.id, companyId)) {
         await finalizeImportJob(job.id, {
@@ -318,7 +334,7 @@ async function handleImport(
           invalidRows: (job.invalidRows ?? 0) + invalidRowCount,
           warningCount: (job.warningCount ?? 0) + validation.warningCount,
           startedAt: job.startedAt,
-        })
+        }, companyId)
         trace.finish({ fetched: sourcePage.checkpoint.fetched, imported: aggregate.importedCount, updated: aggregate.updatedCount, skipped: aggregate.skippedCount, failed: aggregate.failedCount })
         return Response.json({
           jobId: job.id,
@@ -380,7 +396,7 @@ async function handleImport(
       skipSummary,
       startedAt: job.startedAt,
       failure: rowFailure,
-    }))
+    }, companyId))
 
     orchestrationStep('finalized', { status: finalized.status })
     trace.finish({ fetched:mappedRows.length, imported:finalized.importedCount, updated:finalized.updatedCount, skipped:finalized.skippedCount, failed:finalized.failedCount })
@@ -413,7 +429,7 @@ async function handleImport(
     if (jobId) {
       try {
         if (ownership) await ownership.assertOwned()
-        const existing = await getImportJob(jobId)
+        const existing = await getImportJob(jobId, resolvedCompanyId)
         const failure = buildModuleFailureFromException(error, {
           stage: normalized.details.stage
             ?? existing?.progressSnapshot?.currentStage
@@ -431,7 +447,7 @@ async function handleImport(
           startedAt: existing?.startedAt,
           failure,
           errorSummary: { [failure.errorCode ?? 'IMPORT_FATAL']: 1 },
-        })
+        }, resolvedCompanyId)
         await saveImportJobErrors(jobId, [{
           rowNumber: 0,
           errorCode: failure.errorCode ?? 'IMPORT_FATAL',
@@ -445,7 +461,7 @@ async function handleImport(
             _importError: normalized.details,
             _failure: failure,
           },
-        }])
+        }], resolvedCompanyId)
       } catch (finalizeError) {
         if (isOwnershipLostError(finalizeError)) {
           logger.warn('quickbooks.import_job.failed_finalize_skipped_after_ownership_loss', {
@@ -488,25 +504,42 @@ export async function runImportJobStep(jobId: string, companyId: string, userId:
     if (job.companyId !== companyId) {
       throw new Error(`Import job tenant mismatch: job ${job.id} belongs to ${job.companyId}, worker supplied ${companyId}.`)
     }
+    if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
+      logger.info('quickbooks.import_job.terminal_replay_skipped', {
+        importJobId: job.id,
+        companyId,
+        status: job.status,
+        processedRows: job.processedRows,
+        totalRows: job.totalRows,
+      })
+      return Response.json({
+        jobId: job.id,
+        status: job.status,
+        importedCount: job.importedCount,
+        updatedCount: job.updatedCount,
+        skippedCount: job.skippedCount,
+        failedCount: job.failedCount,
+        totalRows: job.totalRows,
+        processedRows: job.processedRows,
+      })
+    }
     // Already-queued continuations must not start a new batch after session cancel.
-    if (job.status === 'cancelled' || await isImportJobMigrationCancelled(job.id, companyId)) {
-      if (job.status !== 'cancelled' && job.status !== 'completed' && job.status !== 'failed') {
-        await finalizeImportJob(job.id, {
-          status: 'cancelled',
-          importedCount: job.importedCount,
-          updatedCount: job.updatedCount,
-          skippedCount: job.skippedCount,
-          failedCount: job.failedCount,
-          totalRows: job.totalRows,
-          validRows: job.validRows ?? undefined,
-          invalidRows: job.invalidRows ?? undefined,
-          warningCount: job.warningCount ?? undefined,
-          startedAt: job.startedAt,
-        })
-      }
+    if (await isImportJobMigrationCancelled(job.id, companyId)) {
+      await finalizeImportJob(job.id, {
+        status: 'cancelled',
+        importedCount: job.importedCount,
+        updatedCount: job.updatedCount,
+        skippedCount: job.skippedCount,
+        failedCount: job.failedCount,
+        totalRows: job.totalRows,
+        validRows: job.validRows ?? undefined,
+        invalidRows: job.invalidRows ?? undefined,
+        warningCount: job.warningCount ?? undefined,
+        startedAt: job.startedAt,
+      }, companyId)
       return Response.json({ jobId: job.id, status: 'cancelled' })
     }
-    await setImportJobStatus(job.id, 'processing')
+    await setImportJobStatus(job.id, 'processing', companyId)
     const progressWrites = createProgressWriteQueue({
       importJobId: job.id,
       companyId,

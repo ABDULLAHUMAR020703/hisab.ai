@@ -193,7 +193,7 @@ test('continuation gates stop before the next claim without redesigning the work
   assert.match(importRoute, /Already-queued continuations must not start a new batch after session cancel/)
   assert.match(importRoute, /Persist its source[\s\S]*await sourcePage\.commit\(\)/)
   // Mid-batch cancel still relies on import job status — graceful cancel does not flip it early.
-  assert.match(importRoute, /isCancelled: \(\) => isJobCancelled\(job\.id\)/)
+  assert.match(importRoute, /isCancelled: \(\) => isJobCancelled\(job\.id, companyId\)/)
   assert.doesNotMatch(importRoute, /claimNextJob/)
 })
 

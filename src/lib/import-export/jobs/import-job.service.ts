@@ -1,5 +1,5 @@
 import 'server-only'
-import { resolveCompanyId, supabaseDb } from '@/lib/db/repository-utils'
+import { resolveCompanyId, resolveCompanyIdOrThrow, supabaseDb } from '@/lib/db/repository-utils'
 import { logger } from '@/lib/ops/logger'
 import { assertImportJobSchemaCompatibility } from '@/lib/platform/schema-compatibility'
 import type {
@@ -67,9 +67,11 @@ export async function createImportJob(input: {
   batchSize?: number
   migrationSessionId?: string | null
   migrationResourceKey?: string | null
+  /** Trusted worker/internal callers pass the tenant explicitly. HTTP callers may omit this and resolve from the request. */
+  companyId?: string
 }): Promise<ImportJobRecord> {
   const db = supabaseDb()
-  const companyId = await resolveCompanyId()
+  const companyId = await resolveCompanyIdOrThrow(input.companyId)
   const now = new Date().toISOString()
 
   const { data, error } = await db
@@ -329,10 +331,11 @@ export async function updateImportJobProgress(
   })
 }
 
-export async function setImportJobStatus(jobId: string, status: 'processing' | 'paused' | 'pending'): Promise<ImportJobRecord | null> {
-  const current = await getImportJob(jobId)
+export async function setImportJobStatus(jobId: string, status: 'processing' | 'paused' | 'pending', companyIdOverride?: string): Promise<ImportJobRecord | null> {
+  const companyId = companyIdOverride ?? await resolveCompanyId()
+  const current = await getImportJob(jobId, companyId)
   if (!current || ['completed', 'failed', 'cancelled'].includes(current.status)) return current
-  const db = supabaseDb(); const companyId = await resolveCompanyId()
+  const db = supabaseDb()
   const patch: Record<string, unknown> = { status, last_heartbeat_at: new Date().toISOString(), paused_at: status === 'paused' ? new Date().toISOString() : null }
   logger.info('quickbooks.import_job.status.persist_attempt', { importJobId: jobId, companyId, fromStatus: current.status, toStatus: status })
   const { data, error } = await db.from('import_jobs').update(patch)
@@ -351,10 +354,12 @@ export async function setImportJobStatus(jobId: string, status: 'processing' | '
   return data ? mapJobRow(data) : null
 }
 
-export async function incrementImportJobRetry(jobId: string): Promise<void> {
-  const job = await getImportJob(jobId); if (!job) return
-  const db = supabaseDb(); const companyId = await resolveCompanyId()
-  const { error } = await db.from('import_jobs').update({ retry_count: (job.retryCount ?? 0) + 1, status: 'pending', last_heartbeat_at: new Date().toISOString() }).eq('id', jobId).eq('company_id', companyId)
+export async function incrementImportJobRetry(jobId: string, companyIdOverride?: string): Promise<void> {
+  const companyId = companyIdOverride ?? await resolveCompanyId()
+  const job = await getImportJob(jobId, companyId); if (!job) return
+  if (job.status === 'completed') return
+  const db = supabaseDb()
+  const { error } = await db.from('import_jobs').update({ retry_count: (job.retryCount ?? 0) + 1, status: 'pending', last_heartbeat_at: new Date().toISOString() }).eq('id', jobId).eq('company_id', companyId).neq('status', 'completed')
   if (error) throw error
 }
 
@@ -376,9 +381,10 @@ export async function finalizeImportJob(
     startedAt?: string | null
     failure?: import('@/lib/import-export/types').ModuleFailureSnapshot | null
   },
+  companyIdOverride?: string,
 ): Promise<ImportJobRecord> {
   const db = supabaseDb()
-  const companyId = await resolveCompanyId()
+  const companyId = companyIdOverride ?? await resolveCompanyId()
   const existing = await getImportJob(jobId, companyId)
   const completedAt = new Date()
   const startedAt = input.startedAt ? new Date(input.startedAt) : completedAt
@@ -433,25 +439,25 @@ export async function finalizeImportJob(
   return mapJobRow(data)
 }
 
-export async function saveImportJobSkips(jobId: string, skips: SkippedRecordDiagnostic[]): Promise<void> {
+export async function saveImportJobSkips(jobId: string, skips: SkippedRecordDiagnostic[], companyIdOverride?: string): Promise<void> {
   if (skips.length === 0) return
   const db = supabaseDb()
-  const companyId = await resolveCompanyId()
+  const companyId = companyIdOverride ?? await resolveCompanyId()
   const payload = skips.map((skip) => ({ company_id: companyId, job_id: jobId, row_number: skip.rowNumber, source_id: skip.sourceId ?? null, record_name: skip.recordName ?? null, skip_reason: skip.reason, duplicate_key: skip.duplicateKey ?? null, existing_record_id: skip.existingRecordId ?? null }))
   const { error } = await db.from('import_job_skips').upsert(payload, { onConflict: 'job_id,row_number' })
   if (error) throw error
 }
 
-export async function getImportJobSkips(jobId: string): Promise<SkippedRecordDiagnostic[]> {
+export async function getImportJobSkips(jobId: string, companyIdOverride?: string): Promise<SkippedRecordDiagnostic[]> {
   const db = supabaseDb()
-  const companyId = await resolveCompanyId()
+  const companyId = companyIdOverride ?? await resolveCompanyId()
   const { data, error } = await db.from('import_job_skips').select('row_number,source_id,record_name,skip_reason,duplicate_key,existing_record_id').eq('job_id', jobId).eq('company_id', companyId).order('row_number', { ascending: true })
   if (error) throw error
   return (data ?? []).map((row) => ({ rowNumber: Number(row.row_number), sourceId: row.source_id ? String(row.source_id) : undefined, recordName: row.record_name ? String(row.record_name) : undefined, reason: String(row.skip_reason) as SkippedRecordDiagnostic['reason'], duplicateKey: row.duplicate_key ? String(row.duplicate_key) : undefined, existingRecordId: row.existing_record_id ? String(row.existing_record_id) : undefined }))
 }
 
-export async function cancelImportJob(jobId: string): Promise<ImportJobRecord | null> {
-  const job = await getImportJob(jobId)
+export async function cancelImportJob(jobId: string, companyIdOverride?: string): Promise<ImportJobRecord | null> {
+  const job = await getImportJob(jobId, companyIdOverride)
   if (!job) return null
   if (['completed', 'failed', 'cancelled'].includes(job.status)) {
     return job
@@ -470,7 +476,7 @@ export async function cancelImportJob(jobId: string): Promise<ImportJobRecord | 
     validationSummary: job.validationSummary ?? undefined,
     errorSummary: job.errorSummary ?? undefined,
     startedAt: job.startedAt,
-  })
+  }, companyIdOverride)
 }
 
 const ERROR_BATCH_SIZE = 500
@@ -478,10 +484,11 @@ const ERROR_BATCH_SIZE = 500
 export async function saveImportJobErrors(
   jobId: string,
   errors: ImportRowError[],
+  companyIdOverride?: string,
 ): Promise<void> {
   if (errors.length === 0) return
   const db = supabaseDb()
-  const companyId = await resolveCompanyId()
+  const companyId = companyIdOverride ?? await resolveCompanyId()
 
   for (let index = 0; index < errors.length; index += ERROR_BATCH_SIZE) {
     const chunk = errors.slice(index, index + ERROR_BATCH_SIZE)
@@ -500,9 +507,9 @@ export async function saveImportJobErrors(
   }
 }
 
-export async function getImportJobErrors(jobId: string): Promise<ImportRowError[]> {
+export async function getImportJobErrors(jobId: string, companyIdOverride?: string): Promise<ImportRowError[]> {
   const db = supabaseDb()
-  const companyId = await resolveCompanyId()
+  const companyId = companyIdOverride ?? await resolveCompanyId()
   const { data, error } = await db
     .from('import_job_errors')
     .select('*')
@@ -525,13 +532,13 @@ export async function getImportJobErrors(jobId: string): Promise<ImportRowError[
   })
 }
 
-export async function isJobCancelled(jobId: string): Promise<boolean> {
-  const job = await getImportJob(jobId)
+export async function isJobCancelled(jobId: string, companyIdOverride?: string): Promise<boolean> {
+  const job = await getImportJob(jobId, companyIdOverride)
   return job?.status === 'cancelled'
 }
 
-export async function isJobPaused(jobId: string): Promise<boolean> {
-  const job = await getImportJob(jobId)
+export async function isJobPaused(jobId: string, companyIdOverride?: string): Promise<boolean> {
+  const job = await getImportJob(jobId, companyIdOverride)
   return job?.status === 'paused'
 }
 

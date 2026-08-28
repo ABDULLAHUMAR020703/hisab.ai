@@ -51,19 +51,23 @@ test('continuation jobs preserve the processing import state', () => {
 
   assert.match(continuation, /sourcePage\.commit\(\)/)
   assert.match(continuation, /enqueueQuickBooksContinuationOnce|enqueueJob\(\{ jobType: 'QUICKBOOKS_IMPORT_STEP'/)
-  assert.match(route, /runImportJobStep[\s\S]*setImportJobStatus\(job\.id, 'processing'\)/)
+  assert.match(route, /runImportJobStep[\s\S]*setImportJobStatus\(job\.id, 'processing'/)
 })
 
 test('completed jobs return their actual state and are not re-enqueued', () => {
   const runRoute = read('src/app/api/import-export/jobs/[jobId]/run/route.ts')
+  const route = read('src/app/api/import-export/[module]/import/route.ts')
   const terminalGuard = runRoute.indexOf('TERMINAL_IMPORT_STATUSES.has(job.status)')
   const enqueue = runRoute.indexOf('await enqueueJob')
+  const step = route.slice(route.indexOf('export async function runImportJobStep'))
 
   assert.ok(terminalGuard >= 0)
   assert.ok(enqueue > terminalGuard)
   assert.match(runRoute, /status: job\.status/)
   assert.match(runRoute, /status: persistedJob\.status/)
   assert.doesNotMatch(runRoute, /status: 'pending'/)
+  assert.match(step, /terminal_replay_skipped/)
+  assert.ok(step.indexOf('terminal_replay_skipped') < step.indexOf("setImportJobStatus(job.id, 'processing'"))
 })
 
 test('queue ownership heartbeats prevent starvation and recover abandoned jobs', () => {

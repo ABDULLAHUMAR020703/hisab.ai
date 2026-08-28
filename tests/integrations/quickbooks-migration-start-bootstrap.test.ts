@@ -113,7 +113,7 @@ test('session create bootstraps the first import job and queue row on the server
   assert.match(service, /return bootstrapQuickBooksMigrationQueue\(/)
   assert.match(service, /export async function bootstrapQuickBooksMigrationQueue/)
   assert.match(service, /createImportJob\(/)
-  assert.match(service, /setImportJobStatus\(created\.id, 'pending'\)/)
+  assert.match(service, /setImportJobStatus\(created\.id, 'pending', companyId\)/)
   assert.match(service, /enqueueJob\(\{/)
   assert.match(service, /jobType: 'QUICKBOOKS_IMPORT_STEP'/)
 
@@ -180,10 +180,16 @@ test('QuickBooks scheduling uses durable dependency readiness rather than only d
 test('worker completion advances the next module without the browser', () => {
   const workers = read('src/lib/platform/jobs/workers.ts')
   const service = read('src/lib/import-export/wizard/migration-session.service.ts')
+  const handler = workers.slice(
+    workers.indexOf("registerJobHandler('QUICKBOOKS_IMPORT_STEP'"),
+    workers.indexOf("registerJobHandler('AUTOMATION_RUN'"),
+  )
   assert.match(workers, /advanceQuickBooksMigrationAfterImportJob\(/)
   assert.match(service, /export async function advanceQuickBooksMigrationAfterImportJob/)
   assert.match(service, /planMigrationStartBootstrap\(session\)/)
   assert.match(service, /migrationResourceKey: module\.key/)
+  assert.match(handler, /withCompanyContext\(companyId/)
+  assert.match(service, /companyId,/)
 })
 
 test('current sessions are explicitly worker-owned and browser coordination exits before side effects', () => {

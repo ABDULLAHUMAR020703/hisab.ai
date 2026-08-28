@@ -168,25 +168,31 @@ registerJobHandler('QUICKBOOKS_IMPORT_STEP', async (payload, platformJobId, owne
   if (!importJobId || !companyId || !userId) throw new Error('QuickBooks import continuation payload is incomplete.')
   logger.info('quickbooks.worker.import_step.dispatch', { platformJobId, importJobId, companyId, userId, attempt: ownership.attempt })
   await ownership.assertOwned()
-  const { runImportJobStep } = await import('@/app/api/import-export/[module]/import/route')
-  try {
-    const response = await runImportJobStep(importJobId, companyId, userId, ownership)
-    const payload = await response.json() as Record<string, unknown>
-    if (!response.ok) {
-      const detail = typeof payload.error === 'string' && payload.error.trim()
-        ? payload.error.trim()
-        : `QuickBooks import continuation failed with HTTP ${response.status}.`
-      throw new Error(detail)
+  const [{ runImportJobStep }, { withCompanyContext }] = await Promise.all([
+    import('@/app/api/import-export/[module]/import/route'),
+    import('@/lib/tenant'),
+  ])
+  // Tenant is taken from the queue payload, never from Next.js cookies/headers.
+  return withCompanyContext(companyId, async () => {
+    try {
+      const response = await runImportJobStep(importJobId, companyId, userId, ownership)
+      const payload = await response.json() as Record<string, unknown>
+      if (!response.ok) {
+        const detail = typeof payload.error === 'string' && payload.error.trim()
+          ? payload.error.trim()
+          : `QuickBooks import continuation failed with HTTP ${response.status}.`
+        throw new Error(detail)
+      }
+      await ownership.assertOwned()
+      return payload
+    } finally {
+      // This row is still RUNNING until the handler returns, so it is excluded:
+      // the session must be judged on the work that outlives this step.
+      const { advanceQuickBooksMigrationAfterImportJob, reconcileMigrationSessionForImportJob } = await import('@/lib/import-export/wizard/migration-session.service')
+      await reconcileMigrationSessionForImportJob(importJobId, companyId, { ignoreQueueJobIds: [platformJobId] })
+      await advanceQuickBooksMigrationAfterImportJob(importJobId, companyId, userId)
     }
-    await ownership.assertOwned()
-    return payload
-  } finally {
-    // This row is still RUNNING until the handler returns, so it is excluded:
-    // the session must be judged on the work that outlives this step.
-    const { advanceQuickBooksMigrationAfterImportJob, reconcileMigrationSessionForImportJob } = await import('@/lib/import-export/wizard/migration-session.service')
-    await reconcileMigrationSessionForImportJob(importJobId, companyId, { ignoreQueueJobIds: [platformJobId] })
-    await advanceQuickBooksMigrationAfterImportJob(importJobId, companyId, userId)
-  }
+  })
 })
 
 registerJobHandler('AUTOMATION_RUN', async (payload) => {

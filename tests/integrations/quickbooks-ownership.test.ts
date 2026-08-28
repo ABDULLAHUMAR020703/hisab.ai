@@ -80,7 +80,7 @@ test('continuation jobs still require ownership before dispatch and completion',
 
   assert.match(workers, /runImportJobStep\(importJobId, companyId, userId, ownership\)/)
   assert.match(workers, /QUICKBOOKS_IMPORT_STEP[\s\S]*await ownership\.assertOwned\(\)/)
-  assert.match(route, /enqueueJob\(\{ jobType: 'QUICKBOOKS_IMPORT_STEP'/)
+  assert.match(route, /enqueueJob\(\{[\s\S]*jobType: 'QUICKBOOKS_IMPORT_STEP'/)
   assert.match(route, /if \(sourcePage\?\.hasMore\)[\s\S]*await ensureOwned\(\)/)
   assert.match(route, /export async function runImportJobStep\(jobId: string, companyId: string, userId: string, ownership\?: JobOwnership\)/)
 })

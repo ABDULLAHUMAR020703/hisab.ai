@@ -151,9 +151,13 @@ test('exchange-rate extraction requests current rates instead of paginating the 
 
 test('trusted background migrations resolve the explicit tenant without request cookies',()=>{
   const tenant=file('src/lib/tenant.ts')
+  const jobs=file('src/lib/import-export/jobs/import-job.service.ts')
+  const workers=file('src/lib/platform/jobs/workers.ts')
   assert.match(tenant,/backgroundTenantContext\.getStore\(\)/)
   assert.match(tenant,/withCompanyContext/)
   assert.match(tenant,/if\(background\?\.companyId\)return background\.companyId/)
+  assert.match(jobs,/resolveCompanyIdOrThrow\(input\.companyId\)/)
+  assert.match(workers,/withCompanyContext\(companyId/)
 })
 
 test('source re-archival never clears a completed native materialization link',()=>{
