@@ -723,12 +723,27 @@ export async function advanceQuickBooksMigrationAfterImportJob(
 
     const persistedStatus = ownedJob?.status == null ? null : String(ownedJob.status)
     if (!isTerminalImportJobStatus(persistedStatus)) {
+      // If there's an active continuation queue row, include it for diagnosability.
+      const client = createAdminClient()
+      const { data: qrows } = await client
+        .from('job_queue')
+        .select('id,status,attempts')
+        .eq('company_id', companyId)
+        .eq('job_type', 'QUICKBOOKS_IMPORT_STEP')
+        .filter("payload->>importJobId", 'eq', importJobId)
+        .in('status', ['PENDING','RUNNING'])
+        .order('updated_at', { ascending: false })
+        .limit(1)
+      const existing = qrows && qrows.length ? qrows[0] as any : null
       logger.info('quickbooks.migration_session.advance_skipped', {
         reason: 'import_job_not_terminal',
         importJobId,
         companyId,
         sessionId: row.id,
         status: persistedStatus,
+        existingPlatformJobId: existing?.id ?? null,
+        existingStatus: existing?.status ?? null,
+        existingAttempts: existing?.attempts ?? null,
       })
       return
     }

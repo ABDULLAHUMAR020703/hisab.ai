@@ -46,9 +46,10 @@ async function enqueueQuickBooksContinuationOnce(input: {
   importJobId: string
   moduleKey: string
   userId: string
-}): Promise<void> {
+}): Promise<{ created?: Record<string, unknown>; existing?: { id: string; status: string; attempts: number | null } }> {
+  const client = await import('@/lib/supabase/admin')
   try {
-    await enqueueJob({
+    const job = await enqueueJob({
       jobType: 'QUICKBOOKS_IMPORT_STEP',
       companyId: input.companyId,
       payload: {
@@ -58,15 +59,31 @@ async function enqueueQuickBooksContinuationOnce(input: {
         userId: input.userId,
       },
     })
+    return { created: job }
   } catch (error) {
-    // A replay after a worker crash may already have inserted the same active
-    // continuation. The database unique index is the authority; treat that
-    // race as success and let the existing queue row continue the work.
+    // Unique constraint on active continuations prevents duplicates. Treat
+    // a 23505 as a race — return the existing active queue row for visibility.
     if ((error as { code?: string })?.code !== '23505') throw error
+    const admin = (await client).createAdminClient()
+    const { data, error: fetchErr } = await admin
+      .from('job_queue')
+      .select('id,status,attempts')
+      .eq("job_type", 'QUICKBOOKS_IMPORT_STEP')
+      .eq("company_id", input.companyId)
+      .filter("payload->>importJobId", 'eq', input.importJobId)
+      .in('status', ['PENDING','RUNNING'])
+      .order('updated_at', { ascending: false })
+      .limit(1)
+    if (fetchErr) throw fetchErr
+    const existing = data && data.length ? data[0] as any : null
     logger.info('quickbooks.import_job.continuation_already_queued', {
       importJobId: input.importJobId,
       companyId: input.companyId,
+      existingPlatformJobId: existing?.id ?? null,
+      existingStatus: existing?.status ?? null,
+      existingAttempts: existing?.attempts ?? null,
     })
+    return existing ? { existing: { id: String(existing.id), status: String(existing.status), attempts: existing.attempts ?? null } } : {}
   }
 }
 
@@ -320,7 +337,11 @@ async function handleImport(
       await ensureOwned()
       orchestrationStep('commit_checkpoint', { fetched: sourcePage.checkpoint.fetched })
       await sourcePage.commit()
-      await updateImportJobProgress(job.id, sourcePage.checkpoint.fetched, { ...aggregate, skippedCount: aggregateSkippedCount, validRows: (job.validRows ?? 0) + validation.validRowNumbers.length, invalidRows: (job.invalidRows ?? 0) + invalidRowCount, warningCount: (job.warningCount ?? 0) + validation.warningCount }, sourcePage.checkpoint.fetched, undefined, companyId)
+      // When the source indicates hasMore=true, avoid persisting total_rows equal
+      // to processed_rows (which would make the job appear terminal). Instead
+      // persist a conservative total > processed to indicate more pages remain.
+      const persistedTotal = Math.max(job.totalRows ?? 0, sourcePage.checkpoint.fetched + (sourcePage.hasMore ? 1 : 0))
+      await updateImportJobProgress(job.id, sourcePage.checkpoint.fetched, { ...aggregate, skippedCount: aggregateSkippedCount, validRows: (job.validRows ?? 0) + validation.validRowNumbers.length, invalidRows: (job.invalidRows ?? 0) + invalidRowCount, warningCount: (job.warningCount ?? 0) + validation.warningCount }, persistedTotal, undefined, companyId)
       await ensureOwned()
       if (await isImportJobMigrationCancelled(job.id, companyId)) {
         await finalizeImportJob(job.id, {
@@ -349,8 +370,21 @@ async function handleImport(
         })
       }
       orchestrationStep('enqueue_continuation')
-      await enqueueQuickBooksContinuationOnce({ companyId, importJobId: job.id, moduleKey, userId: user.id })
-      orchestrationStep('continuation_enqueued')
+      const enqueueResult = await enqueueQuickBooksContinuationOnce({ companyId, importJobId: job.id, moduleKey, userId: user.id })
+      if (enqueueResult?.created) {
+        orchestrationStep('continuation_enqueued', { continuationPlatformJobId: enqueueResult.created.id })
+      } else if (enqueueResult?.existing) {
+        // Already active: log the existing platform job details instead of
+        // claiming success for a new durable enqueue.
+        orchestrationStep('continuation_already_active', {
+          existingPlatformJobId: enqueueResult.existing.id,
+          existingStatus: enqueueResult.existing.status,
+          existingAttempts: enqueueResult.existing.attempts,
+        })
+      } else {
+        // Defensive fallback: no created row and no visible existing row.
+        orchestrationStep('continuation_enqueue_unknown')
+      }
       trace.finish({ fetched: sourcePage.checkpoint.fetched, imported: aggregate.importedCount, updated: aggregate.updatedCount, skipped: aggregate.skippedCount, failed: aggregate.failedCount })
       return Response.json({
         jobId: job.id,
