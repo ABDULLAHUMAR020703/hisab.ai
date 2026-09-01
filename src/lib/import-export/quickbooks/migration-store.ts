@@ -29,44 +29,233 @@ function collectRelationships(value: unknown, path = '', output: Array<{ path: s
   return output
 }
 
-export async function archiveQuickBooksRecord(input: { companyId: string; realmId: string; entityType: string; row: Row; localTable?: string; localId?: string; partition?: string }) {
+/** QuickBooks source id for a mapped row (raw Id wins, then the normalized aliases). */
+export function quickBooksSourceIdOf(row: Row): string {
+  const raw = parseQuickBooksRaw(row)
+  return String(raw.Id ?? row._quickbooksId ?? row.sourceId ?? '')
+}
+
+interface MigrationRecordInput { companyId: string; realmId: string; entityType: string; row: Row; localTable?: string; localId?: string; partition?: string }
+
+/**
+ * Builds the `quickbooks_migration_records` row for one source record. Shared by
+ * the per-record and batch archive paths so both persist byte-identical rows.
+ * `local_id` / `imported_at` / `local_table` / `extraction_partition` are only
+ * emitted when supplied, so a source-only archive never clobbers a link written
+ * by a later pass.
+ */
+function buildMigrationRecordRow(input: MigrationRecordInput) {
   const raw = parseQuickBooksRaw(input.row)
   const sourceId = String(raw.Id ?? input.row._quickbooksId ?? input.row.sourceId ?? '')
   if (!sourceId) throw new Error(`QuickBooks ${input.entityType} record is missing Id.`)
   const metadata = raw.MetaData && typeof raw.MetaData === 'object' ? raw.MetaData as Row : {}
-  const record = {
-    company_id: input.companyId,
-    realm_id: input.realmId,
-    entity_type: input.entityType,
-    source_id: sourceId,
-    sync_token: raw.SyncToken === undefined ? null : String(raw.SyncToken),
-    source_created_at: metadata.CreateTime ?? null,
-    source_updated_at: metadata.LastUpdatedTime ?? null,
-    is_active: raw.Active === undefined ? null : Boolean(raw.Active),
-    is_deleted: String(raw.status ?? '').toLowerCase() === 'deleted',
-    source_payload: raw,
-    payload_hash: sourcePayloadHash(raw,input.entityType),
-    relationships: collectRelationships(raw),
-    custom_fields: Array.isArray(raw.CustomField) ? raw.CustomField : [],
-    currency_code: raw.CurrencyRef && typeof raw.CurrencyRef === 'object' ? String((raw.CurrencyRef as Row).value ?? '') || null : null,
-    exchange_rate: raw.ExchangeRate === undefined ? null : Number(raw.ExchangeRate),
-    ...(input.localTable !== undefined ? { local_table:input.localTable } : {}),
-    ...(input.localId !== undefined ? { local_id:input.localId, imported_at:new Date().toISOString() } : {}),
-    ...(input.partition !== undefined ? { extraction_partition:input.partition } : {}),
-    updated_at: new Date().toISOString(),
+  return {
+    sourceId,
+    raw,
+    record: {
+      company_id: input.companyId,
+      realm_id: input.realmId,
+      entity_type: input.entityType,
+      source_id: sourceId,
+      sync_token: raw.SyncToken === undefined ? null : String(raw.SyncToken),
+      source_created_at: metadata.CreateTime ?? null,
+      source_updated_at: metadata.LastUpdatedTime ?? null,
+      is_active: raw.Active === undefined ? null : Boolean(raw.Active),
+      is_deleted: String(raw.status ?? '').toLowerCase() === 'deleted',
+      source_payload: raw,
+      payload_hash: sourcePayloadHash(raw,input.entityType),
+      relationships: collectRelationships(raw),
+      custom_fields: Array.isArray(raw.CustomField) ? raw.CustomField : [],
+      currency_code: raw.CurrencyRef && typeof raw.CurrencyRef === 'object' ? String((raw.CurrencyRef as Row).value ?? '') || null : null,
+      exchange_rate: raw.ExchangeRate === undefined ? null : Number(raw.ExchangeRate),
+      ...(input.localTable !== undefined ? { local_table:input.localTable } : {}),
+      ...(input.localId !== undefined ? { local_id:input.localId, imported_at:new Date().toISOString() } : {}),
+      ...(input.partition !== undefined ? { extraction_partition:input.partition } : {}),
+      updated_at: new Date().toISOString(),
+    },
   }
+}
+
+function localLinkRow(input: { companyId: string; realmId: string; entityType: string; sourceId: string; localTable: string; localId: string }) {
+  return { company_id:input.companyId, realm_id:input.realmId, entity_type:input.entityType, source_id:input.sourceId, local_table:input.localTable, local_id:input.localId, updated_at:new Date().toISOString() }
+}
+
+type CurrencyWork = { entityType: string; sourceId: string; raw: Row; currencyCode: string; exchangeRate: number | null }
+
+function archiveExchangeRateRow(companyId: string, home: string, work: CurrencyWork): { key: string; row: Record<string, unknown> } | null {
+  const metadata = work.raw.MetaData && typeof work.raw.MetaData === 'object' ? work.raw.MetaData as Row : {}
+  const date = String(work.raw.TxnDate ?? work.raw.TxnDateTime ?? metadata.CreateTime ?? '').slice(0,10)
+  if (!home || work.currencyCode === home || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null
+  return {
+    key: `${work.currencyCode}|${home}|${date}`,
+    row: { company_id:companyId, from_currency:work.currencyCode, to_currency:home, rate:work.exchangeRate, effective_date:`${date}T00:00:00.000Z`, source:'QUICKBOOKS_TRANSACTION', is_manual_override:true, notes:`QuickBooks ${work.entityType} ${work.sourceId}` },
+  }
+}
+
+async function persistArchiveCurrency(companyId: string, entityType: string, sourceId: string, raw: Row, currencyCode: string, exchangeRate: number | null) {
+  const currency = await createAdminClient().from('company_currencies').upsert({ company_id:companyId, code:currencyCode, name:currencyCode, is_primary:false, is_active:true }, { onConflict:'company_id,code' })
+  if (currency.error) throw currency.error
+  if (exchangeRate && Number(exchangeRate) > 0) {
+    const company = await createAdminClient().from('companies').select('currency').eq('id',companyId).single()
+    if (company.error) throw company.error
+    const built = archiveExchangeRateRow(companyId, String(company.data.currency ?? '').toUpperCase(), { entityType, sourceId, raw, currencyCode, exchangeRate })
+    if (built) {
+      const rate = await createAdminClient().from('exchange_rates').upsert(built.row, { onConflict:'company_id,from_currency,to_currency,effective_date' })
+      if (rate.error) throw rate.error
+    }
+  }
+}
+
+/**
+ * Batched form of {@link persistArchiveCurrency}: one `company_currencies` upsert
+ * for the page's distinct currency codes, one `companies` read, and one
+ * `exchange_rates` upsert for the distinct (from,to,date) tuples — instead of the
+ * per-record fan-out that live profiling showed dominating master-data archiving
+ * (`company_currencies` was ~2 calls/record for accounts and customers).
+ */
+async function persistArchiveCurrenciesBatch(companyId: string, works: CurrencyWork[]) {
+  if (works.length === 0) return
+  const db = createAdminClient()
+  const codes = [...new Set(works.map((work) => work.currencyCode))]
+  const currency = await db.from('company_currencies').upsert(codes.map((code) => ({ company_id:companyId, code, name:code, is_primary:false, is_active:true })), { onConflict:'company_id,code' })
+  if (currency.error) throw currency.error
+  const rateWorks = works.filter((work) => work.exchangeRate && Number(work.exchangeRate) > 0)
+  if (rateWorks.length === 0) return
+  const company = await db.from('companies').select('currency').eq('id',companyId).single()
+  if (company.error) throw company.error
+  const home = String(company.data.currency ?? '').toUpperCase()
+  const rateRows = new Map<string, Record<string, unknown>>()
+  for (const work of rateWorks) {
+    const built = archiveExchangeRateRow(companyId, home, work)
+    if (built && !rateRows.has(built.key)) rateRows.set(built.key, built.row)
+  }
+  if (rateRows.size) {
+    const rates = await db.from('exchange_rates').upsert([...rateRows.values()], { onConflict:'company_id,from_currency,to_currency,effective_date' })
+    if (rates.error) throw rates.error
+  }
+}
+
+export async function archiveQuickBooksRecord(input: MigrationRecordInput) {
+  const { sourceId, raw, record } = buildMigrationRecordRow(input)
   const { data, error } = await createAdminClient().from('quickbooks_migration_records').upsert(record, { onConflict: 'company_id,realm_id,entity_type,source_id' }).select('*').single()
   if (error) throw error
   if (record.currency_code) {
-    const currency = await createAdminClient().from('company_currencies').upsert({ company_id:input.companyId, code:record.currency_code, name:record.currency_code, is_primary:false, is_active:true }, { onConflict:'company_id,code' })
-    if (currency.error) throw currency.error
-    if(record.exchange_rate&&Number(record.exchange_rate)>0){const company=await createAdminClient().from('companies').select('currency').eq('id',input.companyId).single();if(company.error)throw company.error;const home=String(company.data.currency??'').toUpperCase(),date=String(raw.TxnDate??raw.TxnDateTime??metadata.CreateTime??'').slice(0,10);if(home&&record.currency_code!==home&&/^\d{4}-\d{2}-\d{2}$/.test(date)){const rate=await createAdminClient().from('exchange_rates').upsert({company_id:input.companyId,from_currency:record.currency_code,to_currency:home,rate:record.exchange_rate,effective_date:`${date}T00:00:00.000Z`,source:'QUICKBOOKS_TRANSACTION',is_manual_override:true,notes:`QuickBooks ${input.entityType} ${sourceId}`},{onConflict:'company_id,from_currency,to_currency,effective_date'});if(rate.error)throw rate.error}}
+    await persistArchiveCurrency(input.companyId, input.entityType, sourceId, raw, record.currency_code, record.exchange_rate)
   }
   if (input.localId && input.localTable) {
-    const linked = await createAdminClient().from('quickbooks_migration_local_links').upsert({ company_id:input.companyId, realm_id:input.realmId, entity_type:input.entityType, source_id:sourceId, local_table:input.localTable, local_id:input.localId, updated_at:new Date().toISOString() }, { onConflict:'company_id,realm_id,entity_type,source_id,local_table,local_id' })
+    const linked = await createAdminClient().from('quickbooks_migration_local_links').upsert(localLinkRow({ companyId:input.companyId, realmId:input.realmId, entityType:input.entityType, sourceId, localTable:input.localTable, localId:input.localId }), { onConflict:'company_id,realm_id,entity_type,source_id,local_table,local_id' })
     if (linked.error) throw linked.error
   }
   return data
+}
+
+export interface QuickBooksMigrationRecordState {
+  payloadHash: string | null
+  localId: string | null
+  localTable: string | null
+  importedAt: string | null
+  entityType: string
+}
+
+export interface QuickBooksMigrationPageState {
+  records: Map<string, QuickBooksMigrationRecordState>
+  links: Map<string, Array<{ localTable: string; localId: string }>>
+}
+
+/**
+ * One-shot read of the migration-tracking rows for an entire page of source ids.
+ * Replaces the per-record `quickbooks_migration_records` /
+ * `quickbooks_migration_local_links` reads that `isQuickBooksRecordUnchanged`
+ * and `assertQuickBooksRecordLinked` do individually. Two IN queries per page.
+ */
+export async function loadQuickBooksMigrationPageState(companyId: string, realmId: string, sourceIds: string[]): Promise<QuickBooksMigrationPageState> {
+  const unique = [...new Set(sourceIds.filter(Boolean))]
+  const state: QuickBooksMigrationPageState = { records: new Map(), links: new Map() }
+  if (unique.length === 0) return state
+  const db = createAdminClient()
+  const CHUNK = 200
+  for (let index = 0; index < unique.length; index += CHUNK) {
+    const slice = unique.slice(index, index + CHUNK)
+    const records = await db.from('quickbooks_migration_records').select('source_id,payload_hash,local_id,local_table,imported_at,entity_type').eq('company_id', companyId).eq('realm_id', realmId).in('source_id', slice)
+    if (records.error) throw records.error
+    for (const row of records.data ?? []) {
+      state.records.set(String(row.source_id), {
+        payloadHash: row.payload_hash === null || row.payload_hash === undefined ? null : String(row.payload_hash),
+        localId: row.local_id ? String(row.local_id) : null,
+        localTable: row.local_table ? String(row.local_table) : null,
+        importedAt: row.imported_at ? String(row.imported_at) : null,
+        entityType: String(row.entity_type ?? ''),
+      })
+    }
+    const links = await db.from('quickbooks_migration_local_links').select('source_id,local_table,local_id').eq('company_id', companyId).eq('realm_id', realmId).in('source_id', slice)
+    if (links.error) throw links.error
+    for (const row of links.data ?? []) {
+      const key = String(row.source_id)
+      const list = state.links.get(key) ?? []
+      list.push({ localTable: String(row.local_table), localId: String(row.local_id) })
+      state.links.set(key, list)
+    }
+  }
+  return state
+}
+
+export interface QuickBooksArchiveBatchEntry { realmId: string; entityType: string; row: Row; localTable?: string; localId?: string; partition?: string }
+
+/**
+ * Multi-row upsert of `quickbooks_migration_records` (and, for entries that
+ * carry a native id, `quickbooks_migration_local_links`) for a whole page.
+ * Behaviour matches `archiveQuickBooksRecord` per row — same builder, same
+ * conflict targets, same currency side-effects — just batched. Idempotent: a
+ * replayed page upserts the same rows.
+ */
+export async function archiveQuickBooksRecordsBatch(companyId: string, entries: QuickBooksArchiveBatchEntry[]): Promise<void> {
+  if (entries.length === 0) return
+  const db = createAdminClient()
+  const recordRows: Array<Record<string, unknown>> = []
+  const linkRows: Array<Record<string, unknown>> = []
+  const currencyWork: CurrencyWork[] = []
+  for (const entry of entries) {
+    const { sourceId, raw, record } = buildMigrationRecordRow({ companyId, realmId: entry.realmId, entityType: entry.entityType, row: entry.row, localTable: entry.localTable, localId: entry.localId, partition: entry.partition })
+    recordRows.push(record)
+    if (record.currency_code) currencyWork.push({ entityType: entry.entityType, sourceId, raw, currencyCode: record.currency_code, exchangeRate: record.exchange_rate })
+    if (entry.localId && entry.localTable) {
+      linkRows.push(localLinkRow({ companyId, realmId: entry.realmId, entityType: entry.entityType, sourceId, localTable: entry.localTable, localId: entry.localId }))
+    }
+  }
+  const records = await db.from('quickbooks_migration_records').upsert(recordRows, { onConflict: 'company_id,realm_id,entity_type,source_id' })
+  if (records.error) throw records.error
+  if (linkRows.length) {
+    const links = await db.from('quickbooks_migration_local_links').upsert(linkRows, { onConflict: 'company_id,realm_id,entity_type,source_id,local_table,local_id' })
+    if (links.error) throw links.error
+  }
+  await persistArchiveCurrenciesBatch(companyId, currencyWork)
+}
+
+/**
+ * Pure page-level equivalent of `assertQuickBooksRecordLinked`, verified against
+ * a pre-loaded {@link QuickBooksMigrationPageState}. Returns null when the row is
+ * durably linked to `expectedLocalId`, otherwise the failure message. No I/O.
+ */
+export function verifyQuickBooksRecordLinked(row: Row, expectedLocalId: string, state: QuickBooksMigrationPageState): string | null {
+  const entityType = String(row._quickbooksEntity ?? '')
+  const sourceId = quickBooksSourceIdOf(row)
+  if (!entityType || !sourceId) return null
+  const record = state.records.get(sourceId)
+  if (!record?.localId || !record.localTable || !record.importedAt) return `QuickBooks ${entityType} ${sourceId} was preserved but did not complete native materialization.`
+  if (record.localId !== expectedLocalId) return `QuickBooks ${entityType} ${sourceId} linked to an unexpected native record.`
+  const links = state.links.get(sourceId) ?? []
+  if (!links.some((link) => link.localTable === record.localTable && link.localId === expectedLocalId)) return `QuickBooks ${entityType} ${sourceId} has no durable native migration link.`
+  return null
+}
+
+/** Whether a source row is unchanged & materialized, judged from pre-loaded page state (no I/O). */
+export function isQuickBooksRecordUnchangedInState(row: Row, state: QuickBooksMigrationPageState): boolean {
+  const entityType = String(row._quickbooksEntity ?? '')
+  const sourceId = quickBooksSourceIdOf(row)
+  if (!entityType || !sourceId) return false
+  const record = state.records.get(sourceId)
+  if (!record?.localId || !record.importedAt) return false
+  return record.payloadHash === sourcePayloadHash(parseQuickBooksRaw(row), entityType)
 }
 
 export async function isQuickBooksRecordUnchanged(companyId:string,row:Row):Promise<boolean>{
