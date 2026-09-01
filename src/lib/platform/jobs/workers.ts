@@ -16,6 +16,27 @@ export function registerJobHandler(jobType: string, handler: JobHandler) {
   handlers.set(jobType, handler)
 }
 
+type PostCompleteHook = (
+  payload: Record<string, unknown>,
+  jobId: string,
+  result: Record<string, unknown> | void,
+) => Promise<void>
+
+const postCompleteHooks = new Map<string, PostCompleteHook>()
+
+/**
+ * Registers a best-effort hook that runs once a job's queue row is durably
+ * COMPLETED (after `completeJob`, never before). This is the seam that lets a
+ * job type schedule follow-up work without racing the unique "one active step"
+ * guard, which only rejects inserts while the current row is still
+ * PENDING/RUNNING. A hook failure is logged and swallowed — it must never fail
+ * the worker loop or the job that just completed, and `recoverOrphanedContinuations`
+ * remains the crash-safe fallback if a hook throws or never runs.
+ */
+export function registerPostCompleteHook(jobType: string, hook: PostCompleteHook) {
+  postCompleteHooks.set(jobType, hook)
+}
+
 export async function processJob(job: Record<string, unknown>) {
   const jobId = String(job.id)
   const jobType = String(job.job_type)
@@ -73,6 +94,20 @@ export async function processJob(job: Record<string, unknown>) {
         companyId: payload.companyId == null ? undefined : String(payload.companyId),
       })
       await completeJob(jobId, (result ?? {}) as Record<string, unknown>, attempt)
+      const postComplete = postCompleteHooks.get(jobType)
+      if (postComplete) {
+        try {
+          await postComplete(payload, jobId, result)
+        } catch (hookError) {
+          // Never fail a job that already completed successfully over a
+          // follow-up scheduling problem. recoverOrphanedContinuations covers it.
+          logger.error('quickbooks.worker.post_complete_hook_failed', {
+            platformJobId: jobId,
+            jobType,
+            error: hookError instanceof Error ? { message: hookError.message, name: hookError.name } : { message: String(hookError) },
+          })
+        }
+      }
     } finally {
       clearInterval(heartbeatTimer)
     }
@@ -231,6 +266,32 @@ registerJobHandler('QUICKBOOKS_IMPORT_STEP', async (payload, platformJobId, owne
         platformJobId,
       })
     }
+  })
+})
+
+// Runs only after the step's own queue row is COMPLETED, so the unique
+// "one active QUICKBOOKS_IMPORT_STEP per import job" index no longer blocks the
+// insert the way it does when a page tries to enqueue its own successor while
+// still RUNNING (see enqueueQuickBooksContinuationOnce in the import route).
+// A step reports `status: 'processing'` only when the page it just finished has
+// more pages behind it; any other status (completed/failed/cancelled/paused) is
+// terminal for this import job and gets no continuation.
+registerPostCompleteHook('QUICKBOOKS_IMPORT_STEP', async (payload, _platformJobId, result) => {
+  const status = result && typeof result === 'object' ? String((result as Record<string, unknown>).status ?? '') : ''
+  if (status !== 'processing') return
+  const importJobId = String(payload.importJobId ?? '')
+  const companyId = String(payload.companyId ?? '')
+  const moduleKey = String(payload.moduleKey ?? '')
+  const userId = String(payload.userId ?? '')
+  if (!importJobId || !companyId || !moduleKey || !userId) return
+  const { ensureContinuationForImportJob } = await import('@/lib/platform/continuation-scheduler')
+  const outcome = await ensureContinuationForImportJob({ importJobId, companyId, moduleKey, userId })
+  logger.info('quickbooks.worker.continuation.scheduled_after_complete', {
+    importJobId,
+    companyId,
+    createdPlatformJobId: outcome.created ? String(outcome.created.id ?? '') : null,
+    existingPlatformJobId: outcome.existing?.id ?? null,
+    existingStatus: outcome.existing?.status ?? null,
   })
 })
 

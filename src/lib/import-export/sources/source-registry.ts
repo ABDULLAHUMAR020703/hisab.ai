@@ -8,6 +8,7 @@ import { PreviewStageError, type PreviewStage, type PreviewStageState } from './
 import { withExternalRequestDiagnostics } from '@/lib/ops/external-request-diagnostics'
 import { MigrationTrace } from '../quickbooks/migration-telemetry'
 import { resolveSourcePageHasMore } from './source-page-state'
+import { logger } from '@/lib/ops/logger'
 
 export { resolveSourcePageHasMore } from './source-page-state'
 
@@ -285,6 +286,35 @@ export async function fetchSourceResourcePage(
       pageCheckpoint = { ...pageCheckpoint, fetched: priorFetched + pageRows.length }
     }
     if (!pageRows.length && pageCheckpoint.fetched === 0) hasMore = false
+
+    // Defense in depth against an unbounded continuation chain. A *resumed* page
+    // that extracted nothing new AND advanced no cursor component (STARTPOSITION,
+    // partition window, or cumulative count) cannot make progress on the next
+    // attempt either. Rather than let the post-completion hook and the recovery
+    // sweep reschedule it forever, treat the resource as exhausted. A
+    // legitimately empty date-partition window still advances `partition_start`,
+    // and an exhausted STARTPOSITION page already reports hasMore=false, so this
+    // only trips on a genuine non-advancing stall (e.g. a provider reporting
+    // hasMore=true with a frozen cursor).
+    if (hasMore && resumable && prior) {
+      const priorPartitionMs = prior.partition_start ? Date.parse(String(prior.partition_start)) : null
+      const nextPartitionMs = pageCheckpoint.partitionStart ? Date.parse(pageCheckpoint.partitionStart) : null
+      const cursorAdvanced =
+        Number(pageCheckpoint.fetched) > Number(prior.extracted_count ?? 0)
+        || Number(pageCheckpoint.startPosition) !== Number(prior.next_start_position ?? 1)
+        || priorPartitionMs !== nextPartitionMs
+      if (!cursorAdvanced) {
+        logger.warn('quickbooks.migration.checkpoint.stall_detected', {
+          companyId: tenantId,
+          realmId: context.realmId,
+          resourceKey,
+          startPosition: pageCheckpoint.startPosition,
+          partitionStart: pageCheckpoint.partitionStart ?? null,
+          extractedCount: pageCheckpoint.fetched,
+        })
+        hasMore = false
+      }
+    }
 
     return {
       resource: { ...result, rows: pageRows, hasMore },

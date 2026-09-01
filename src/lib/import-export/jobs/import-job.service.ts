@@ -197,17 +197,71 @@ export async function getImportJobsByIds(
   return (data ?? []).map((row) => mapJobRow(row as unknown as Record<string, unknown>))
 }
 
+/**
+ * Columns needed to merge an incoming progress write. Deliberately excludes
+ * payload_snapshot/mapping_snapshot/validation_summary/error_summary/skip_summary
+ * — large or unused JSON blobs that a full-row `SELECT *` would otherwise pull
+ * on every progress persist, which sits directly on the migration critical path
+ * (this read runs before every progress UPDATE, up to dozens of times per step).
+ */
+const IMPORT_JOB_PROGRESS_MERGE_COLUMNS = [
+  'id',
+  'company_id',
+  'status',
+  'processed_rows',
+  'total_rows',
+  'imported_count',
+  'updated_count',
+  'skipped_count',
+  'failed_count',
+  'valid_rows',
+  'invalid_rows',
+  'warning_count',
+  'progress_snapshot',
+  'activity_events',
+].join(',')
+
+interface ImportJobProgressMergeRow {
+  id: string
+  company_id: string
+  status: string
+  processed_rows: number
+  total_rows: number
+  imported_count: number
+  updated_count: number
+  skipped_count: number
+  failed_count: number
+  valid_rows: number | null
+  invalid_rows: number | null
+  warning_count: number | null
+  progress_snapshot: MigrationProgressSnapshot | null
+  activity_events: MigrationActivityEvent[] | null
+}
+
+async function getImportJobProgressState(jobId: string, companyId: string): Promise<ImportJobProgressMergeRow | null> {
+  await assertImportJobSchemaCompatibility()
+  const db = supabaseDb()
+  const { data, error } = await db
+    .from('import_jobs')
+    .select(IMPORT_JOB_PROGRESS_MERGE_COLUMNS)
+    .eq('id', jobId)
+    .eq('company_id', companyId)
+    .maybeSingle()
+  if (error) throw error
+  return data as unknown as ImportJobProgressMergeRow | null
+}
+
 export async function updateImportJobProgress(
   jobId: string,
   processedRows: number,
   counts?: { importedCount?: number; updatedCount?: number; skippedCount?: number; failedCount?: number; validRows?: number; invalidRows?: number; warningCount?: number },
   totalRows?: number,
-  observability?: { progressSnapshot?: MigrationProgressSnapshot; activityEvent?: MigrationActivityEvent },
+  observability?: { progressSnapshot?: MigrationProgressSnapshot; activityEvents?: MigrationActivityEvent[] },
   companyIdOverride?: string,
 ): Promise<void> {
   const db = supabaseDb()
   const companyId = companyIdOverride ?? await resolveCompanyId()
-  const current = await getImportJob(jobId, companyId)
+  const current = await getImportJobProgressState(jobId, companyId)
   if (!current) {
     const missing = new Error(`Import job progress update matched no row for job ${jobId} and company ${companyId}.`)
     logger.error('quickbooks.import_job.progress.persist_failed', {
@@ -221,16 +275,16 @@ export async function updateImportJobProgress(
 
   const merged = mergeImportJobProgress({
     status: current.status,
-    processedRows: current.processedRows,
-    totalRows: current.totalRows,
-    importedCount: current.importedCount,
-    updatedCount: current.updatedCount,
-    skippedCount: current.skippedCount,
-    failedCount: current.failedCount,
-    validRows: current.validRows,
-    invalidRows: current.invalidRows,
-    warningCount: current.warningCount,
-    progressSnapshot: current.progressSnapshot ?? null,
+    processedRows: current.processed_rows,
+    totalRows: current.total_rows,
+    importedCount: current.imported_count,
+    updatedCount: current.updated_count,
+    skippedCount: current.skipped_count,
+    failedCount: current.failed_count,
+    validRows: current.valid_rows,
+    invalidRows: current.invalid_rows,
+    warningCount: current.warning_count,
+    progressSnapshot: current.progress_snapshot ?? null,
   }, {
     processedRows,
     totalRows,
@@ -246,14 +300,15 @@ export async function updateImportJobProgress(
       processedRows,
       totalRows,
       hasProgressSnapshot: Boolean(observability?.progressSnapshot),
-      hasActivityEvent: Boolean(observability?.activityEvent),
+      hasActivityEvent: Boolean(observability?.activityEvents?.length),
       reason: 'completed_job_immutable',
     })
     return
   }
 
-  const events = observability?.activityEvent
-    ? [...(current.activityEvents ?? []), observability.activityEvent].slice(-100)
+  const priorEvents = Array.isArray(current.activity_events) ? current.activity_events : []
+  const events = observability?.activityEvents?.length
+    ? [...priorEvents, ...observability.activityEvents].slice(-100)
     : undefined
   const patch: Record<string, unknown> = {
     processed_rows: merged.processedRows,
@@ -277,7 +332,7 @@ export async function updateImportJobProgress(
     processedRows: merged.processedRows,
     totalRows: merged.totalRows,
     hasProgressSnapshot: true,
-    hasActivityEvent: Boolean(observability?.activityEvent),
+    hasActivityEvent: Boolean(observability?.activityEvents?.length),
     updatePayload: patch,
   })
 

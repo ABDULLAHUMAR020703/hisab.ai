@@ -30,7 +30,7 @@ import {
 } from '@/lib/import-export/wizard/migration-failure'
 import { CORRELATION_HEADER, getCorrelationId } from '@/lib/ops/correlation'
 import { withExternalRequestDiagnostics } from '@/lib/ops/external-request-diagnostics'
-import { MigrationTrace } from '@/lib/import-export/quickbooks/migration-telemetry'
+import { MigrationTrace, type MigrationTraceSnapshot } from '@/lib/import-export/quickbooks/migration-telemetry'
 import { fetchSourceResourcePage, getImportSource } from '@/lib/import-export/sources/source-registry'
 import { FrameworkBadRequestError } from '@/lib/import-export/errors'
 import { enqueueJob } from '@/lib/platform/jobs/queue'
@@ -580,46 +580,77 @@ export async function runImportJobStep(jobId: string, companyId: string, userId:
       platformJobId: ownership?.platformJobId,
       attempt: ownership?.attempt,
     })
-    const trace = new MigrationTrace(job.moduleKey, undefined, {
-      initialActiveProcessingMs: Number(job.progressSnapshot?.activeProcessingMs ?? 0),
-      onEvent: (event, snapshot) => {
-        progressWrites.enqueue(async () => {
-          if (ownership?.isLost()) {
+    // The old code did a read-then-write on import_jobs for every trace event,
+    // including the `stage_started` markers that carry no counts and no duration.
+    // Coalesce those: buffer them and flush at most once per
+    // PROGRESS_STAGE_EVENT_THROTTLE_MS. Everything that actually matters is
+    // flushed immediately — the first event of the step (UI shows "started"
+    // promptly), `batch_completed` (progress moved), `stage_failed` (failure must
+    // be visible at once for cancellation/observability), and every
+    // `stage_completed` (so each stage's duration lands while the job is still
+    // non-terminal, before finalizeImportJob can make it immutable). Buffered
+    // events are never dropped mid-step — they ride along on the next flush, and
+    // a final flush runs once handleImport returns, before the queue drains.
+    const PROGRESS_EVENT_MILESTONES = new Set(['batch_completed', 'stage_failed', 'stage_completed'])
+    const PROGRESS_STAGE_EVENT_THROTTLE_MS = 5000
+    let pendingActivityEvents: MigrationActivityEvent[] = []
+    let hasPersistedFirstEvent = false
+    let lastProgressFlushAt = 0
+
+    const flushProgress = (snapshot: MigrationTraceSnapshot) => {
+      if (pendingActivityEvents.length === 0) return
+      const eventsToFlush = pendingActivityEvents
+      pendingActivityEvents = []
+      lastProgressFlushAt = Date.now()
+      progressWrites.enqueue(async () => {
+        if (ownership?.isLost()) {
+          logger.info('quickbooks.import_job.progress.stale_ignored', {
+            importJobId: job.id,
+            companyId,
+            platformJobId: ownership.platformJobId,
+            attempt: ownership.attempt,
+            reason: 'ownership_lost',
+          })
+          return
+        }
+        try {
+          if (ownership) await ownership.assertOwned()
+        } catch (error) {
+          if (isOwnershipLostError(error)) {
             logger.info('quickbooks.import_job.progress.stale_ignored', {
               importJobId: job.id,
               companyId,
-              platformJobId: ownership.platformJobId,
-              attempt: ownership.attempt,
+              platformJobId: ownership?.platformJobId,
+              attempt: ownership?.attempt,
               reason: 'ownership_lost',
             })
             return
           }
-          try {
-            if (ownership) await ownership.assertOwned()
-          } catch (error) {
-            if (isOwnershipLostError(error)) {
-              logger.info('quickbooks.import_job.progress.stale_ignored', {
-                importJobId: job.id,
-                companyId,
-                platformJobId: ownership?.platformJobId,
-                attempt: ownership?.attempt,
-                reason: 'ownership_lost',
-              })
-              return
-            }
-            throw error
-          }
-          const eventProcessedRows = Math.max(job.processedRows, snapshot.processedRecords ?? 0)
-          await updateImportJobProgress(job.id, eventProcessedRows, {
-            importedCount: Math.max(job.importedCount, snapshot.importedCount ?? 0),
-            updatedCount: Math.max(job.updatedCount, snapshot.updatedCount ?? 0),
-            skippedCount: Math.max(job.skippedCount, snapshot.skippedCount ?? 0),
-            failedCount: Math.max(job.failedCount, snapshot.failedCount ?? 0),
-          }, Math.max(job.totalRows, snapshot.estimatedTotalRecords ?? 0), {
-            progressSnapshot: snapshot as MigrationProgressSnapshot,
-            activityEvent: event as MigrationActivityEvent,
-          }, companyId)
-        })
+          throw error
+        }
+        const eventProcessedRows = Math.max(job.processedRows, snapshot.processedRecords ?? 0)
+        await updateImportJobProgress(job.id, eventProcessedRows, {
+          importedCount: Math.max(job.importedCount, snapshot.importedCount ?? 0),
+          updatedCount: Math.max(job.updatedCount, snapshot.updatedCount ?? 0),
+          skippedCount: Math.max(job.skippedCount, snapshot.skippedCount ?? 0),
+          failedCount: Math.max(job.failedCount, snapshot.failedCount ?? 0),
+        }, Math.max(job.totalRows, snapshot.estimatedTotalRecords ?? 0), {
+          progressSnapshot: snapshot as MigrationProgressSnapshot,
+          activityEvents: eventsToFlush,
+        }, companyId)
+      })
+    }
+
+    const trace = new MigrationTrace(job.moduleKey, undefined, {
+      initialActiveProcessingMs: Number(job.progressSnapshot?.activeProcessingMs ?? 0),
+      onEvent: (event, snapshot) => {
+        pendingActivityEvents.push(event as MigrationActivityEvent)
+        const isMilestone = !hasPersistedFirstEvent || PROGRESS_EVENT_MILESTONES.has(event.type)
+        const throttleElapsed = Date.now() - lastProgressFlushAt >= PROGRESS_STAGE_EVENT_THROTTLE_MS
+        if (isMilestone || throttleElapsed) {
+          hasPersistedFirstEvent = true
+          flushProgress(snapshot)
+        }
       },
     })
     trace.setTotals(job.processedRows, job.totalRows)
@@ -643,6 +674,9 @@ export async function runImportJobStep(jobId: string, companyId: string, userId:
         ownership,
       ),
     )
+    // Persist whatever stage events were coalesced since the last milestone so
+    // the final activity timeline and snapshot are never missing the tail.
+    flushProgress(trace.snapshot())
     await progressWrites.drain()
     if (ownership) await ownership.assertOwned()
     return response
