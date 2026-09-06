@@ -327,6 +327,10 @@ export class QuickBooksIntegrationService implements AccountingProvider {
     const rows: unknown[] = []
     let fetchedCount = 0
     let pages = 0
+    // Tracks whether the last page filled `pageSize`. A short final page means
+    // the partition window is exhausted; a full final page (e.g. we stopped on
+    // `maxPages`) means the window still has more records to resume.
+    let lastPageWasFull = false
     const inactive = options.includeInactive && INACTIVE_ENTITIES.has(entity) ? 'Active IN (true, false)' : ''
     const predicate = [where, inactive].filter(Boolean).join(' AND ')
     let previousPageSignature:string|null=null
@@ -350,6 +354,7 @@ export class QuickBooksIntegrationService implements AccountingProvider {
       if (options.retainRows !== false) rows.push(...page)
       fetchedCount += page.length
       pages += 1
+      lastPageWasFull = page.length >= pageSize
       const pageHasMore = page.length >= pageSize && fetchedCount < maxRecords
       const partitionComplete = Boolean(partitionStart && page.length < pageSize)
       const checkpoint={ startPosition: start + page.length, partitionStart: partitionStart?.toISOString(), partitionEnd: partitionEnd?.toISOString(), extractedCount: offset + fetchedCount, hasMore: pageHasMore, partitionComplete }
@@ -358,7 +363,11 @@ export class QuickBooksIntegrationService implements AccountingProvider {
       if (page.length < pageSize || fetchedCount >= maxRecords || (options.maxPages && pages >= options.maxPages)) break
       start += page.length
     }
-    return { rows, count: fetchedCount, hasMore: Boolean(options.maxPages && pages >= options.maxPages && fetchedCount > 0), partitionComplete: Boolean(partitionStart && fetchedCount < maxRecords) }
+    // A partition window is complete only when its final page was short. When we
+    // stopped on `maxPages` mid-window the last page was full, so the window is
+    // NOT complete and the caller must resume it from the advanced STARTPOSITION
+    // rather than skipping to the next window.
+    return { rows, count: fetchedCount, hasMore: Boolean(options.maxPages && pages >= options.maxPages && fetchedCount > 0), partitionComplete: Boolean(partitionStart) && !lastPageWasFull }
   }
 
   private async requestTokens(body: URLSearchParams): Promise<ProviderTokenSet> {

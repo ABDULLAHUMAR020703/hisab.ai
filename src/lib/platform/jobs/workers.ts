@@ -135,7 +135,7 @@ export async function processJob(job: Record<string, unknown>) {
   }
 }
 
-export async function processJobBatch(limit = 5, jobType?: string) {
+export async function processJobBatch(limit = 5, jobType?: string | string[]) {
   const { claimNextJob } = await import('./queue')
   const processed: string[] = []
   for (let i = 0; i < limit; i++) {
@@ -288,6 +288,44 @@ registerPostCompleteHook('QUICKBOOKS_IMPORT_STEP', async (payload, _platformJobI
   const outcome = await ensureContinuationForImportJob({ importJobId, companyId, moduleKey, userId })
   logger.info('quickbooks.worker.continuation.scheduled_after_complete', {
     importJobId,
+    companyId,
+    createdPlatformJobId: outcome.created ? String(outcome.created.id ?? '') : null,
+    existingPlatformJobId: outcome.existing?.id ?? null,
+    existingStatus: outcome.existing?.status ?? null,
+  })
+})
+
+registerJobHandler('QUICKBOOKS_SNAPSHOT_STEP', async (payload, platformJobId, ownership) => {
+  const snapshotId = String(payload.snapshotId ?? '')
+  const companyId = String(payload.companyId ?? '')
+  const userId = String(payload.userId ?? '')
+  if (!snapshotId || !companyId || !userId) throw new Error('QuickBooks snapshot step payload is incomplete.')
+  logger.info('quickbooks.worker.snapshot_step.dispatch', { platformJobId, snapshotId, companyId, attempt: ownership.attempt })
+  await ownership.assertOwned()
+  const { runSnapshotStep } = await import('@/lib/import-export/quickbooks/snapshot/snapshot-step')
+  const outcome = await runSnapshotStep(snapshotId, companyId, userId, ownership)
+  await ownership.assertOwned()
+  return outcome as unknown as Record<string, unknown>
+})
+
+// Same durable-continuation model as QUICKBOOKS_IMPORT_STEP: the next extraction
+// step is scheduled only after this step's queue row is COMPLETED, so the
+// standard "one active step per snapshot" (PENDING+RUNNING) index never blocks
+// the insert. `done: false` means the orchestrator has more resources to extract
+// or a final validation pass to run; a hook failure is swallowed and the
+// operator's retry endpoint (POST /quickbooks-snapshots/:id/retry) is the
+// crash-safe fallback.
+registerPostCompleteHook('QUICKBOOKS_SNAPSHOT_STEP', async (payload, _platformJobId, result) => {
+  const done = result && typeof result === 'object' ? Boolean((result as Record<string, unknown>).done) : true
+  if (done) return
+  const snapshotId = String(payload.snapshotId ?? '')
+  const companyId = String(payload.companyId ?? '')
+  const userId = String(payload.userId ?? '')
+  if (!snapshotId || !companyId || !userId) return
+  const { ensureSnapshotContinuation } = await import('@/lib/platform/continuation-scheduler')
+  const outcome = await ensureSnapshotContinuation({ snapshotId, companyId, userId })
+  logger.info('quickbooks.worker.snapshot.continuation.scheduled_after_complete', {
+    snapshotId,
     companyId,
     createdPlatformJobId: outcome.created ? String(outcome.created.id ?? '') : null,
     existingPlatformJobId: outcome.existing?.id ?? null,

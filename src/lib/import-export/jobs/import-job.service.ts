@@ -67,6 +67,8 @@ export async function createImportJob(input: {
   batchSize?: number
   migrationSessionId?: string | null
   migrationResourceKey?: string | null
+  /** Source snapshot for snapshot-backed QuickBooks migrations. */
+  snapshotId?: string | null
   /** Trusted worker/internal callers pass the tenant explicitly. HTTP callers may omit this and resolve from the request. */
   companyId?: string
 }): Promise<ImportJobRecord> {
@@ -82,6 +84,7 @@ export async function createImportJob(input: {
       module_key: input.moduleKey,
       migration_session_id: input.migrationSessionId ?? null,
       migration_resource_key: input.migrationResourceKey ?? null,
+      snapshot_id: input.snapshotId ?? null,
       filename: input.filename,
       file_format: input.fileFormat,
       duplicate_strategy: input.duplicateStrategy ?? null,

@@ -83,6 +83,7 @@ export async function POST(request: Request) {
       sourceLabel?: string | null
       companyName?: string | null
       currency?: string | null
+      snapshotId?: string | null
     }
 
     const existing = await findActiveQuickBooksMigrationSession()
@@ -109,6 +110,7 @@ export async function POST(request: Request) {
       sourceLabel: body.sourceLabel,
       companyName: body.companyName,
       currency: body.currency,
+      snapshotId: typeof body.snapshotId === 'string' ? body.snapshotId : null,
     })
 
     return Response.json({ session }, { status: 201 })

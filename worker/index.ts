@@ -35,7 +35,7 @@ async function run() {
 
   try {
     while (!stopping) {
-      const result = await processJobBatch(1, 'QUICKBOOKS_IMPORT_STEP')
+      const result = await processJobBatch(1, ['QUICKBOOKS_IMPORT_STEP', 'QUICKBOOKS_SNAPSHOT_STEP'])
       if (result.processed === 0) await sleep(pollIntervalMs)
     }
   } finally {

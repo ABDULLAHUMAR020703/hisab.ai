@@ -494,12 +494,24 @@ export async function createQuickBooksMigrationSession(input: {
   sourceLabel?: string | null
   companyName?: string | null
   currency?: string | null
+  snapshotId?: string | null
   companyIdOverride?: string
 }): Promise<HydratedMigrationSession> {
   const companyId = input.companyIdOverride ?? await resolveCompanyId()
   // Refuse sandbox (or env-mismatched) connections before any session/job/queue work.
   const runtime = createAccountingIntegrationRuntime()
   await runtime.connections.assertMigrationConnectionReady(companyId, Provider.QUICKBOOKS)
+
+  // Snapshot-backed migration: the snapshot must be verified COMPLETE. No
+  // partial-snapshot migration path exists.
+  if (input.snapshotId) {
+    const { getSnapshot } = await import('@/lib/import-export/quickbooks/snapshot/snapshot.service')
+    const snapshot = await getSnapshot(input.snapshotId, companyId)
+    if (!snapshot) throw new FrameworkBadRequestError('QuickBooks snapshot not found.')
+    if (snapshot.status !== 'COMPLETE') {
+      throw new FrameworkBadRequestError('QuickBooks snapshot is not complete.')
+    }
+  }
 
   const existing = await findActiveQuickBooksMigrationSession(companyId)
   if (existing) {
@@ -513,6 +525,7 @@ export async function createQuickBooksMigrationSession(input: {
     sourceLabel: input.sourceLabel,
     companyName: input.companyName,
     currency: input.currency,
+    snapshotId: input.snapshotId ?? null,
     state: 'running',
   })
 
@@ -589,9 +602,11 @@ export async function bootstrapQuickBooksMigrationQueue(input: {
           filename,
           fileFormat: 'csv',
           duplicateStrategy,
+          ...(session.config.snapshotId ? { snapshotId: session.config.snapshotId } : {}),
         },
         migrationSessionId: session.id,
         migrationResourceKey: module.key,
+        snapshotId: session.config.snapshotId ?? null,
         companyId,
       })
     } catch (error) {
@@ -827,6 +842,7 @@ export async function updateQuickBooksMigrationSession(input: {
     sourceLabel: current.config.sourceLabel,
     companyName: current.config.companyName,
     currency: current.config.currency,
+    snapshotId: current.config.snapshotId ?? null,
     orchestrationOwner: current.config.orchestrationOwner ?? 'browser_legacy',
     state: input.state ?? current.config.state,
   })

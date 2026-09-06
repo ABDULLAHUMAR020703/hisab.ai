@@ -54,7 +54,7 @@ function contact(record: JsonRecord) {
   }
 }
 
-const RESOURCES: ImportSourceResource[] = [
+export const RESOURCES: ImportSourceResource[] = [
   { key: 'accounts', label: 'Chart of Accounts', moduleKey: 'accounts' },
   { key: 'customers', label: 'Customers', moduleKey: 'customers' },
   { key: 'vendors', label: 'Vendors', moduleKey: 'vendors' },
@@ -124,7 +124,7 @@ async function resolveExchangeRateQuery(
   return where ? { where, currencies } : null
 }
 
-const PARTITIONED_RESOURCES = new Set([
+export const PARTITIONED_RESOURCES = new Set([
   'invoices','bills','expenses','journal-entries','sales-receipts','purchase-orders','vendor-credits','estimates','customer-payments','vendor-payments',
   'credit-memos','deposits','transfers','inventory-adjustments',
 ])
@@ -380,7 +380,7 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
   }
 }
 
-function filterResourceRows(resourceKey: string, sourceRows: unknown[]): unknown[] {
+export function filterResourceRows(resourceKey: string, sourceRows: unknown[]): unknown[] {
   // Historical rates are never imported, so anything older than the newest row
   // for a pair is dropped before staging even if QuickBooks returns a series.
   if (resourceKey === 'exchange-rates') return latestExchangeRateRows(sourceRows)

@@ -37,7 +37,7 @@ export async function enqueueJob(input: EnqueueJobInput) {
   return data
 }
 
-export async function claimNextJob(jobType?: string) {
+export async function claimNextJob(jobType?: string | string[]) {
   const client = createAdminClient()
   const now = new Date().toISOString()
 
@@ -57,7 +57,11 @@ export async function claimNextJob(jobType?: string) {
     .order('priority', { ascending: false })
     .order('scheduled_at')
     .limit(1)
-  if (jobType) query = query.eq('job_type', jobType)
+  if (Array.isArray(jobType)) {
+    if (jobType.length) query = query.in('job_type', jobType)
+  } else if (jobType) {
+    query = query.eq('job_type', jobType)
+  }
   const { data: jobs } = await query
 
   const job = jobs?.[0]

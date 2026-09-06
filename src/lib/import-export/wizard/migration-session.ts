@@ -51,6 +51,8 @@ export interface QuickBooksMigrationSessionConfig {
   sourceLabel?: string | null
   companyName?: string | null
   currency?: string | null
+  /** Set when the migration reads from an immutable Supabase Storage snapshot instead of live QuickBooks. */
+  snapshotId?: string | null
   /** New sessions are worker-owned; omitted on historical browser-coordinated sessions. */
   orchestrationOwner?: QuickBooksMigrationOrchestrationOwner
 }
@@ -175,6 +177,7 @@ export function buildSessionConfig(input: {
   sourceLabel?: string | null
   companyName?: string | null
   currency?: string | null
+  snapshotId?: string | null
   state?: MigrationSessionState
   orchestrationOwner?: QuickBooksMigrationOrchestrationOwner
 }): QuickBooksMigrationSessionConfig {
@@ -195,6 +198,7 @@ export function buildSessionConfig(input: {
     sourceLabel: input.sourceLabel ?? null,
     companyName: input.companyName ?? null,
     currency: input.currency ?? null,
+    snapshotId: input.snapshotId ?? null,
     orchestrationOwner: input.orchestrationOwner ?? QUICKBOOKS_MIGRATION_ORCHESTRATION_OWNER,
   }
 }

@@ -117,3 +117,54 @@ export async function recoverOrphanedContinuations(companyId?: string, minAgeMs 
   logger.info('quickbooks.continuation.recover_summary', { created, skipped, scanned: (jobs ?? []).length })
   return { created, skipped, scanned: (jobs ?? []).length }
 }
+
+/**
+ * Schedules the next QUICKBOOKS_SNAPSHOT_STEP for a snapshot whose extraction is
+ * not finished. Same model as `ensureContinuationForImportJob`: check for an
+ * active queue row first, otherwise insert a durable job and tolerate the
+ * unique-index race. Called from the QUICKBOOKS_SNAPSHOT_STEP post-complete hook
+ * (after the current step's row is COMPLETED) and from the snapshot create /
+ * retry API routes for the first step.
+ */
+export async function ensureSnapshotContinuation(input: {
+  snapshotId: string
+  companyId: string
+  userId: string
+}): Promise<{ created?: Record<string, unknown>; existing?: { id: string; status: string; attempts: number | null } }> {
+  const admin = createAdminClient()
+  const findActive = async () => {
+    const { data, error } = await admin
+      .from('job_queue')
+      .select('id,status,attempts')
+      .eq('job_type', 'QUICKBOOKS_SNAPSHOT_STEP')
+      .eq('company_id', input.companyId)
+      .filter("payload->>snapshotId", 'eq', input.snapshotId)
+      .in('status', ['PENDING', 'RUNNING'])
+      .order('updated_at', { ascending: false })
+      .limit(1)
+    if (error) throw error
+    return data && data.length ? (data[0] as { id: unknown; status: unknown; attempts: unknown }) : null
+  }
+
+  const existing = await findActive()
+  if (existing) {
+    logger.info('quickbooks.snapshot.continuation.exists', { snapshotId: input.snapshotId, existingPlatformJobId: existing.id, existingStatus: existing.status })
+    return { existing: { id: String(existing.id), status: String(existing.status), attempts: (existing.attempts as number | null) ?? null } }
+  }
+
+  try {
+    const job = await enqueueJob({
+      jobType: 'QUICKBOOKS_SNAPSHOT_STEP',
+      companyId: input.companyId,
+      payload: { snapshotId: input.snapshotId, companyId: input.companyId, userId: input.userId },
+      maxAttempts: 5,
+    })
+    logger.info('quickbooks.snapshot.continuation.created', { snapshotId: input.snapshotId, continuationPlatformJobId: job.id })
+    return { created: job }
+  } catch (error) {
+    if ((error as { code?: string })?.code !== '23505') throw error
+    const raced = await findActive()
+    logger.info('quickbooks.snapshot.continuation.race_existing', { snapshotId: input.snapshotId, existingPlatformJobId: raced?.id ?? null })
+    return raced ? { existing: { id: String(raced.id), status: String(raced.status), attempts: (raced.attempts as number | null) ?? null } } : {}
+  }
+}

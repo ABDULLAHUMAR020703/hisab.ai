@@ -167,7 +167,16 @@ async function handleImport(
 
     let importBody = body
     if (existingJob && sourceResource) {
-      sourcePage = await trace.measure('extraction', () => fetchSourceResourcePage(companyId, sourceKey, resourceKey))
+      // Snapshot-backed migration: read one raw page from the immutable Supabase
+      // Storage snapshot instead of calling QuickBooks. Same SourceResourcePage
+      // contract, so nothing else in this route changes.
+      const snapshotId = typeof body.snapshotId === 'string' ? body.snapshotId : null
+      sourcePage = snapshotId
+        ? await trace.measure('extraction', async () => {
+            const { fetchSnapshotResourcePage } = await import('@/lib/import-export/quickbooks/snapshot/snapshot-source')
+            return fetchSnapshotResourcePage({ companyId, snapshotId, resourceKey, importJobId: existingJob.id })
+          })
+        : await trace.measure('extraction', () => fetchSourceResourcePage(companyId, sourceKey, resourceKey))
       const normalized = sourcePage.resource
       const fullMapping = Object.fromEntries(definition.fields
         .filter((field) => field.importable !== false)
