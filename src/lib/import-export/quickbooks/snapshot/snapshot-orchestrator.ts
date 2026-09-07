@@ -4,8 +4,9 @@ import { logger } from '@/lib/ops/logger'
 import { isTerminalEntityStatus } from './snapshot-model'
 import { SNAPSHOT_RESOURCES } from './snapshot-resources'
 import { extractSnapshotResource } from './snapshot-extractor'
+import { listAttachmentLedger } from './snapshot-attachment-ledger'
 import { writeSnapshotManifest } from './snapshot-manifest'
-import { readRawPage } from './snapshot-storage'
+import { listObjectStats, readRawPage } from './snapshot-storage'
 import { validateSnapshot } from './snapshot-validation'
 import {
   getSnapshot,
@@ -99,10 +100,18 @@ async function finalizeSnapshot(
   processedResource: string | null = null,
 ): Promise<SnapshotStepOutcome> {
   const refreshed = await refreshSnapshotSummary(input.snapshotId)
-  const manifest = await writeSnapshotManifest(refreshed)
+  // One Storage walk for the whole finalize: manifest (x2) + validation.
+  const objectStats = await listObjectStats(refreshed.storagePrefix)
+  const manifest = await writeSnapshotManifest(refreshed, { objectStats })
+
+  const attachmentLedger = manifest.requestedResources.includes('attachments')
+    ? await listAttachmentLedger(input.snapshotId)
+    : []
 
   const validation = await validateSnapshot(manifest, {
     readPage: (relativeFile) => readRawPage(refreshed.storagePrefix, relativeFile),
+    attachmentLedger,
+    attachmentObjectBytes: new Map(objectStats.map((stat) => [stat.path, stat.bytes])),
   })
   // A snapshot can only be COMPLETE when the summary says COMPLETE AND validation passes.
   const finalStatus =
@@ -114,7 +123,7 @@ async function finalizeSnapshot(
 
   await saveSnapshotValidation(input.snapshotId, validation, finalStatus)
   const finalSnapshot = await getSnapshot(input.snapshotId, input.companyId)
-  if (finalSnapshot) await writeSnapshotManifest(finalSnapshot)
+  if (finalSnapshot) await writeSnapshotManifest(finalSnapshot, { objectStats })
 
   logger.info('quickbooks.snapshot.finalized', {
     snapshotId: input.snapshotId,

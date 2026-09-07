@@ -177,16 +177,56 @@ export async function collectObjectPaths(prefix: string, listPage: ListPageFn, s
   return out
 }
 
-/** Recursively lists every object under `prefix/subPath`, returning paths relative to `prefix`. */
-export async function listObjects(prefix: string, subPath = ''): Promise<string[]> {
-  const listPage: ListPageFn = async (fullPath, offset) => {
+function snapshotListPage(): ListPageFn {
+  return async (fullPath, offset) => {
     const { data, error } = await storage()
       .from(SNAPSHOT_BUCKET)
       .list(fullPath, { limit: 100, offset, sortBy: { column: 'name', order: 'asc' } })
     if (error) throw new Error(`Snapshot list failed for ${fullPath}: ${error.message}`)
     return (data ?? []) as StorageEntry[]
   }
-  return collectObjectPaths(prefix, listPage, subPath)
+}
+
+/** Recursively lists every object under `prefix/subPath`, returning paths relative to `prefix`. */
+export async function listObjects(prefix: string, subPath = ''): Promise<string[]> {
+  return collectObjectPaths(prefix, snapshotListPage(), subPath)
+}
+
+export interface StorageObjectStat {
+  /** Path relative to `prefix`. */
+  path: string
+  bytes: number
+}
+
+/** Pure recursive walk collecting object path + byte size (folders excluded). */
+export async function collectObjectStats(
+  prefix: string,
+  listPage: ListPageFn,
+  subPath = '',
+): Promise<StorageObjectStat[]> {
+  const full = subPath ? `${prefix}/${subPath}` : prefix
+  const out: StorageObjectStat[] = []
+  for (let offset = 0; ; offset += 100) {
+    const rows = await listPage(full, offset)
+    if (!rows || rows.length === 0) break
+    for (const entry of rows) {
+      if (!entry.name || entry.name === '.emptyFolderPlaceholder') continue
+      const rel = subPath ? `${subPath}/${entry.name}` : entry.name
+      if (isStorageFolder(entry)) {
+        out.push(...(await collectObjectStats(prefix, listPage, rel)))
+      } else {
+        const size = Number((entry.metadata as Record<string, unknown> | null | undefined)?.size ?? 0)
+        out.push({ path: rel, bytes: Number.isFinite(size) ? size : 0 })
+      }
+    }
+    if (rows.length < 100) break
+  }
+  return out
+}
+
+/** Recursively lists every object under `prefix` with its byte size (relative paths). */
+export async function listObjectStats(prefix: string, subPath = ''): Promise<StorageObjectStat[]> {
+  return collectObjectStats(prefix, snapshotListPage(), subPath)
 }
 
 /** Greedy size-bounded chunking: keeps a chunk under `maxBytes` when serialized. */

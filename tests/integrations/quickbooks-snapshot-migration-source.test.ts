@@ -108,8 +108,11 @@ test('reader refuses a non-COMPLETE snapshot and never falls back to QuickBooks'
   const src = read('src/lib/import-export/quickbooks/snapshot/snapshot-source.ts')
   assert.match(src, /status !== 'COMPLETE'/)
   assert.match(src, /QuickBooks snapshot is not complete/)
-  assert.match(src, /normalizeRecords\(\s*resourceKey,\s*filterResourceRows\(resourceKey, rawRecords\)/)
-  assert.doesNotMatch(src, /getEntityRecords|fetchResource|executeForProvider/, 'reader must not call QuickBooks')
+  // Same filter + normalize as the live adapter (the attachment ledger lookup is
+  // the only extra step, and it never calls QuickBooks).
+  assert.match(src, /const filteredRaw = filterResourceRows\(resourceKey, rawRecords\)/)
+  assert.match(src, /normalizeRecords\(resourceKey, filteredRaw, snapshot\.realmId\)/)
+  assert.doesNotMatch(src, /getEntityRecords|fetchResource|executeForProvider|downloadAttachment/, 'reader must not call QuickBooks')
 })
 
 test('import route uses the snapshot page reader when the job carries a snapshotId', () => {

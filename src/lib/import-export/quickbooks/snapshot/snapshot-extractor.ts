@@ -1,4 +1,5 @@
 import 'server-only'
+import { createHash } from 'node:crypto'
 import type { AccountingProvider, ProviderAccessContext } from '@/integrations/accounting/contracts/accounting-provider'
 import { quickBooksErrorStatus } from '@/integrations/accounting/providers/quickbooks/quickbooks-integration.service'
 import {
@@ -7,14 +8,36 @@ import {
   quickBooksExchangeRateWhere,
 } from '../exchange-rates'
 import { logger } from '@/lib/ops/logger'
-import { getCheckpoint, saveCheckpoint, type SnapshotCheckpointRow } from './snapshot.service'
+import {
+  appendSnapshotWarning,
+  getCheckpoint,
+  getSnapshot,
+  listCheckpoints,
+  patchSnapshotAttachmentBudget,
+  saveCheckpoint,
+  type SnapshotCheckpointRow,
+} from './snapshot.service'
 import {
   getSnapshotResourceSpec,
   UNSUPPORTED_HTTP_STATUSES,
   type SnapshotResourceSpec,
 } from './snapshot-resources'
-import { writeJson, writeRawPage } from './snapshot-storage'
-import type { SnapshotPartitionWindow } from './snapshot-model'
+import { writeBinary, writeRawPage } from './snapshot-storage'
+import { isTerminalEntityStatus, type SnapshotAttachmentLedgerEntry, type SnapshotPartitionWindow } from './snapshot-model'
+import {
+  attachmentFitsBudget,
+  computeAttachmentBudget,
+  RESERVED_SAFETY_BYTES,
+  STORAGE_QUOTA_BYTES,
+} from './snapshot-attachment-budget'
+import {
+  capturedBytesOf,
+  firstAttachableEntityRef,
+  listAttachmentLedger,
+  summariseAttachmentLedger,
+  upsertAttachmentLedgerEntry,
+} from './snapshot-attachment-ledger'
+import { measureProjectStorageUsage } from './snapshot-storage-usage'
 
 /** Provider pages fetched per worker invocation before re-enqueueing. */
 export const SNAPSHOT_PAGES_PER_STEP = Math.max(1, Number(process.env.QB_SNAPSHOT_PAGES_PER_STEP ?? 40))
@@ -339,11 +362,276 @@ async function extractExchangeRates(input: {
   }
 }
 
+function errMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/** Storage + ledger side effects for the attachment phase, injectable for tests. */
+export interface AttachmentExtractionPorts {
+  writeRawPage: typeof writeRawPage
+  writeBinary: (relativeFile: string, bytes: Uint8Array, contentType: string) => Promise<void>
+  saveCheckpoint: (patch: Parameters<typeof saveCheckpoint>[2]) => Promise<void>
+  loadLedger: () => Promise<SnapshotAttachmentLedgerEntry[]>
+  upsertLedger: (entry: SnapshotAttachmentLedgerEntry) => Promise<void>
+  appendWarning: (message: string) => Promise<void>
+  downloadBinary: (attachableId: string) => Promise<{ bytes: Uint8Array; contentType: string | null }>
+}
+
 /**
- * Attachable metadata pages + best-effort binary download. A failed binary
- * download is a recorded warning, not a resource failure — the metadata (which
- * carries the QBO references) is still captured.
+ * Decides one attachment's fate against the remaining budget. The storage
+ * ceiling is enforced HERE — never by letting Supabase reject an upload.
  */
+export async function captureOneAttachment(input: {
+  meta: Record<string, unknown>
+  id: string
+  budgetBytes: number
+  capturedBytes: number
+  ports: Pick<AttachmentExtractionPorts, 'writeBinary' | 'downloadBinary'>
+}): Promise<SnapshotAttachmentLedgerEntry> {
+  const { meta, id, budgetBytes, capturedBytes, ports } = input
+  const fileName = String(meta.FileName ?? '').trim()
+  const contentTypeMeta = typeof meta.ContentType === 'string' && meta.ContentType ? meta.ContentType : null
+  const reportedSize = Number(meta.Size ?? 0)
+  const sourceSize = Number.isFinite(reportedSize) && reportedSize > 0 ? reportedSize : null
+  const remaining = Math.max(0, budgetBytes - capturedBytes)
+
+  const base: SnapshotAttachmentLedgerEntry = {
+    attachableId: id,
+    entityRef: firstAttachableEntityRef(meta),
+    fileName: fileName || null,
+    contentType: contentTypeMeta,
+    sourceSize,
+    storagePath: null,
+    status: 'pending',
+    reason: null,
+    capturedBytes: null,
+    checksum: null,
+  }
+
+  if (!fileName) return { ...base, status: 'unavailable', reason: 'Attachable has no FileName' }
+  if (budgetBytes <= 0) {
+    return { ...base, status: 'skipped_budget', reason: 'attachment storage budget is exhausted; no binaries captured' }
+  }
+  // Pre-check against the QuickBooks-reported size — do not even download
+  // something we already know cannot be stored.
+  if (sourceSize != null && !attachmentFitsBudget({ budgetBytes, capturedBytes, sizeBytes: sourceSize })) {
+    return { ...base, status: 'skipped_budget', reason: `reported ${sourceSize} B exceeds ${remaining} B remaining budget` }
+  }
+
+  let bytes: Uint8Array
+  let contentType: string
+  try {
+    const download = await ports.downloadBinary(id)
+    bytes = download.bytes
+    contentType = contentTypeMeta ?? download.contentType ?? 'application/octet-stream'
+  } catch (error) {
+    return { ...base, status: 'failed', reason: `download failed: ${errMessage(error)}`.slice(0, 2000) }
+  }
+
+  // Authoritative check with the real byte length (covers a missing/wrong
+  // reported Size).
+  if (!attachmentFitsBudget({ budgetBytes, capturedBytes, sizeBytes: bytes.length })) {
+    return {
+      ...base,
+      sourceSize: sourceSize ?? bytes.length,
+      status: 'skipped_budget',
+      reason: `actual ${bytes.length} B exceeds ${remaining} B remaining budget`,
+    }
+  }
+
+  const safe = fileName.replace(/[^A-Za-z0-9._-]/g, '_')
+  const relativePath = `attachments/${id}/${safe}`
+  try {
+    await ports.writeBinary(relativePath, bytes, contentType)
+  } catch (error) {
+    return { ...base, status: 'failed', reason: `storage write failed: ${errMessage(error)}`.slice(0, 2000) }
+  }
+  return {
+    ...base,
+    contentType,
+    sourceSize: sourceSize ?? bytes.length,
+    storagePath: relativePath,
+    status: 'captured',
+    capturedBytes: bytes.length,
+    checksum: createHash('sha256').update(bytes).digest('hex'),
+  }
+}
+
+/**
+ * Attachable metadata pages + storage-budgeted best-effort binary capture.
+ *
+ * Metadata (the raw Attachable pages, which carry every QBO reference) is
+ * ALWAYS captured. Each binary is captured only if it fits the remaining
+ * budget; otherwise it is recorded SKIPPED_BUDGET. A per-attachment ledger row
+ * records every candidate. Budget exhaustion is never a resource failure.
+ * Injectable ports keep the loop testable without a live provider/Storage.
+ */
+export async function runAttachmentExtraction(input: {
+  provider: AccountingProvider
+  context: ProviderAccessContext
+  entity: string
+  resourceKey: string
+  snapshotId: string
+  storagePrefix: string
+  budgetBytes: number
+  pagesPerStep: number
+  pageSize: number
+  checkpoint: Pick<SnapshotCheckpointRow, 'pagesWritten' | 'recordsWritten' | 'nextStartPosition'>
+  ports: AttachmentExtractionPorts
+}): Promise<ExtractResourceResult> {
+  const { provider, context, ports, budgetBytes } = input
+  if (!provider.getEntityRecords) throw new Error('Provider does not support entity queries.')
+
+  const ledger = new Map<string, SnapshotAttachmentLedgerEntry>(
+    (await ports.loadLedger()).map((entry) => [entry.attachableId, entry]),
+  )
+  let capturedBytes = capturedBytesOf([...ledger.values()])
+  let page = input.checkpoint.pagesWritten
+  let records = input.checkpoint.recordsWritten
+  let pagesThisStep = 0
+  let recordsThisStep = 0
+  let last: ProviderCheckpoint | undefined
+
+  await provider.getEntityRecords(context, input.entity, {
+    pageSize: input.pageSize,
+    maxPages: input.pagesPerStep,
+    startPosition: input.checkpoint.nextStartPosition,
+    retainRows: false,
+    onPage: async (rows, cp) => {
+      if (rows.length > 0) {
+        page += 1
+        // The raw metadata page (upsert: idempotent) and every per-attachment
+        // ledger row (idempotent by PK) are written BEFORE the cursor advances,
+        // so a crash mid-page replays the whole page on resume — no attachment
+        // is ever dropped, and an already-CAPTURED binary is never re-downloaded.
+        const written = await ports.writeRawPage({
+          prefix: input.storagePrefix,
+          resourceKey: input.resourceKey,
+          entity: input.entity,
+          snapshotId: input.snapshotId,
+          page,
+          startPosition: cp.startPosition - rows.length,
+          records: rows,
+        })
+
+        for (const raw of rows) {
+          const meta = raw as Record<string, unknown>
+          const id = String(meta.Id ?? '')
+          if (!id) continue
+          const existing = ledger.get(id)
+          if (existing && existing.status === 'captured') continue // resume: never re-download
+          const entry = await captureOneAttachment({ meta, id, budgetBytes, capturedBytes, ports })
+          ledger.set(id, entry)
+          await ports.upsertLedger(entry)
+          if (entry.status === 'captured') capturedBytes += entry.capturedBytes ?? 0
+        }
+
+        records += rows.length
+        pagesThisStep += 1
+        recordsThisStep += rows.length
+        await ports.saveCheckpoint({
+          nextStartPosition: cp.startPosition,
+          pagesWritten: page,
+          recordsWritten: records,
+          lastPageFile: written.at(-1)?.file ?? null,
+          attachmentSummary: summariseAttachmentLedger([...ledger.values()], {
+            budgetBytes,
+            metadataRecords: records,
+          }),
+        })
+      }
+      last = cp
+    },
+    onCheckpoint: async (cp) => {
+      last = cp
+    },
+  })
+
+  const hasMore = Boolean(last?.hasMore)
+  const done = !hasMore
+  const summary = summariseAttachmentLedger([...ledger.values()], { budgetBytes, metadataRecords: records })
+  await ports.saveCheckpoint({
+    status: done ? 'completed' : 'running',
+    pagesWritten: page,
+    recordsWritten: records,
+    attachmentSummary: summary,
+    lastError: null,
+  })
+  if (done && ((summary.skippedBudget ?? 0) > 0 || (summary.failed ?? 0) > 0 || (summary.unavailable ?? 0) > 0)) {
+    await ports.appendWarning(
+      `attachments: ${summary.captured}/${summary.totalCandidates} binaries captured ` +
+        `(${summary.capturedBytes} B of ${budgetBytes} B budget); ` +
+        `${summary.skippedBudget} skipped for storage budget, ${summary.failed} failed, ` +
+        `${summary.unavailable} unavailable — accounting data is unaffected. ` +
+        `Per-file detail: quickbooks_snapshot_attachments (snapshot_id=${input.snapshotId}).`,
+    )
+  }
+  return { resourceKey: input.resourceKey, status: done ? 'completed' : 'running', pagesThisStep, recordsThisStep, done }
+}
+
+/**
+ * Establishes the attachment-phase storage budget exactly once, when the
+ * attachment phase begins (guaranteed after every non-attachment resource is
+ * terminal — `attachments` is last in RESOURCE_ORDER). Fails safe: if project
+ * storage usage cannot be measured, the budget is 0 and no binary is captured.
+ */
+async function ensureAttachmentBudget(snapshotId: string, companyId: string): Promise<number> {
+  const snapshot = await getSnapshot(snapshotId, companyId)
+  if (!snapshot) throw new Error(`Snapshot ${snapshotId} not found for company ${companyId}.`)
+  if (snapshot.attachmentBudgetBytes != null) return snapshot.attachmentBudgetBytes
+
+  const checkpoints = await listCheckpoints(snapshotId)
+  const pendingCore = checkpoints.filter(
+    (c) => c.resourceKey !== 'attachments' && !isTerminalEntityStatus(c.status),
+  )
+  if (pendingCore.length > 0) {
+    throw new Error(
+      `attachment phase started before core resources are terminal: ${pendingCore.map((c) => c.resourceKey).join(', ')}`,
+    )
+  }
+
+  const quotaBytes = STORAGE_QUOTA_BYTES
+  const reservedSafetyBytes = RESERVED_SAFETY_BYTES
+  let baselineBytes: number
+  try {
+    baselineBytes = (await measureProjectStorageUsage()).totalBytes
+  } catch (error) {
+    baselineBytes = quotaBytes // forces the budget to 0
+    await appendSnapshotWarning(
+      snapshotId,
+      `attachment budget: project storage usage could not be measured (${errMessage(error)}); ` +
+        `capturing attachment metadata only, no binaries`,
+    )
+  }
+
+  const attachmentBudgetBytes = computeAttachmentBudget({
+    quotaBytes,
+    currentUsageBytes: baselineBytes,
+    reservedSafetyBytes,
+  })
+  await patchSnapshotAttachmentBudget(snapshotId, {
+    storageQuotaBytes: quotaBytes,
+    storageBaselineBytes: baselineBytes,
+    attachmentReservedBytes: reservedSafetyBytes,
+    attachmentBudgetBytes,
+  })
+  if (attachmentBudgetBytes <= 0) {
+    await appendSnapshotWarning(
+      snapshotId,
+      `attachment budget is 0 B (quota ${quotaBytes}, in use ${baselineBytes}, reserved ${reservedSafetyBytes}); ` +
+        `attachment binaries will not be captured — accounting data is unaffected`,
+    )
+  }
+  logger.info('quickbooks.snapshot.attachments.budget', {
+    snapshotId,
+    quotaBytes,
+    baselineBytes,
+    reservedSafetyBytes,
+    attachmentBudgetBytes,
+  })
+  return attachmentBudgetBytes
+}
+
 async function extractAttachments(input: {
   provider: AccountingProvider
   context: ProviderAccessContext
@@ -356,106 +644,50 @@ async function extractAttachments(input: {
   const { provider, context, spec } = input
   if (!provider.getEntityRecords) throw new Error('Provider does not support entity queries.')
 
-  let page = input.checkpoint.pagesWritten
-  let records = input.checkpoint.recordsWritten
-  let pagesThisStep = 0
-  let recordsThisStep = 0
-  let last: ProviderCheckpoint | undefined
-  const index: Array<Record<string, unknown>> = []
-  // Metadata capture (raw Attachable pages) is independent of binary download.
-  let binariesDownloaded = input.checkpoint.attachmentSummary?.binariesDownloaded ?? 0
-  let binariesFailed = input.checkpoint.attachmentSummary?.binariesFailed ?? 0
+  const budgetBytes = await ensureAttachmentBudget(input.snapshotId, input.companyId)
 
-  await provider.getEntityRecords(context, spec.entity, {
-    pageSize: PAGE_SIZE,
-    maxPages: SNAPSHOT_PAGES_PER_STEP,
-    startPosition: input.checkpoint.nextStartPosition,
-    retainRows: false,
-    onPage: async (rows, cp) => {
-      if (rows.length > 0) {
-        page += 1
-        await writeRawPage({
-          prefix: input.storagePrefix,
-          resourceKey: spec.resourceKey,
-          entity: spec.entity,
-          snapshotId: input.snapshotId,
-          page,
-          startPosition: cp.startPosition - rows.length,
-          records: rows,
-        })
-        records += rows.length
-        pagesThisStep += 1
-        recordsThisStep += rows.length
-        for (const raw of rows) {
-          const meta = raw as Record<string, unknown>
-          const id = String(meta.Id ?? '')
-          const fileName = String(meta.FileName ?? '').trim()
-          if (!id || !fileName || !provider.downloadAttachment) {
-            index.push({ id, fileName, downloaded: false, reason: 'no filename or provider download unavailable' })
-            binariesFailed += 1
-            continue
-          }
-          try {
-            const download = await provider.downloadAttachment(context, id)
-            const response = download.content ? null : await fetch(download.url, { signal: AbortSignal.timeout(60_000) })
-            if (response && !response.ok) throw new Error(`HTTP ${response.status}`)
-            const bytes = download.content
-              ? new Uint8Array(download.content)
-              : new Uint8Array(await response!.arrayBuffer())
-            const safe = fileName.replace(/[^A-Za-z0-9._-]/g, '_')
-            const contentType =
-              download.contentType ?? response?.headers.get('content-type') ?? 'application/octet-stream'
-            const { writeBinary } = await import('./snapshot-storage')
-            await writeBinary(input.storagePrefix, `attachments/${id}/${safe}`, bytes, contentType)
-            index.push({ id, fileName, storagePath: `attachments/${id}/${safe}`, contentType, downloaded: true })
-            binariesDownloaded += 1
-          } catch (error) {
-            const reason = error instanceof Error ? error.message : String(error)
-            const { appendSnapshotWarning } = await import('./snapshot.service')
-            await appendSnapshotWarning(input.snapshotId, `attachment binary ${id} (${fileName}) not downloaded: ${reason}`)
-            index.push({ id, fileName, downloaded: false, reason })
-            binariesFailed += 1
-          }
-        }
-        await saveCheckpoint(input.snapshotId, spec.resourceKey, {
-          nextStartPosition: cp.startPosition,
-          pagesWritten: page,
-          recordsWritten: records,
-          attachmentSummary: { metadataRecords: records, binariesDownloaded, binariesFailed },
-        })
+  const ports: AttachmentExtractionPorts = {
+    writeRawPage,
+    writeBinary: (relativeFile, bytes, contentType) =>
+      writeBinary(input.storagePrefix, relativeFile, bytes, contentType),
+    saveCheckpoint: (patch) => saveCheckpoint(input.snapshotId, spec.resourceKey, patch),
+    loadLedger: () => listAttachmentLedger(input.snapshotId),
+    upsertLedger: (entry) => upsertAttachmentLedgerEntry(input.snapshotId, input.companyId, entry),
+    appendWarning: (message) => appendSnapshotWarning(input.snapshotId, message),
+    downloadBinary: async (attachableId) => {
+      if (!provider.downloadAttachment) throw new Error('provider does not support attachment download')
+      const download = await provider.downloadAttachment(context, attachableId)
+      if (download.content) {
+        return { bytes: new Uint8Array(download.content), contentType: download.contentType ?? null }
       }
-      last = cp
+      const response = await fetch(download.url, { signal: AbortSignal.timeout(60_000) })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      return {
+        bytes: new Uint8Array(await response.arrayBuffer()),
+        contentType: download.contentType ?? response.headers.get('content-type'),
+      }
     },
-    onCheckpoint: async (cp) => {
-      last = cp
-    },
-  })
-
-  if (index.length) {
-    const prior =
-      (await (await import('./snapshot-storage')).readJson<Array<Record<string, unknown>>>(
-        input.storagePrefix,
-        `${spec.resourceKey}/index.json`,
-      )) ?? []
-    await writeJson(input.storagePrefix, `${spec.resourceKey}/index.json`, [...prior, ...index])
   }
 
-  const hasMore = Boolean(last?.hasMore)
-  const done = !hasMore
-  const attachmentSummary = { metadataRecords: records, binariesDownloaded, binariesFailed }
-  await saveCheckpoint(input.snapshotId, spec.resourceKey, {
-    status: done ? 'completed' : 'running',
-    pagesWritten: page,
-    recordsWritten: records,
-    attachmentSummary,
-    lastError: null,
+  const result = await runAttachmentExtraction({
+    provider,
+    context,
+    entity: spec.entity,
+    resourceKey: spec.resourceKey,
+    snapshotId: input.snapshotId,
+    storagePrefix: input.storagePrefix,
+    budgetBytes,
+    pagesPerStep: SNAPSHOT_PAGES_PER_STEP,
+    pageSize: PAGE_SIZE,
+    checkpoint: input.checkpoint,
+    ports,
   })
-  if (done && binariesFailed > 0) {
-    const { appendSnapshotWarning } = await import('./snapshot.service')
-    await appendSnapshotWarning(
-      input.snapshotId,
-      `attachments: metadata captured for ${records} record(s); ${binariesDownloaded} binary file(s) downloaded, ${binariesFailed} failed (see attachments/index.json)`,
-    )
-  }
-  return { resourceKey: spec.resourceKey, status: done ? 'completed' : 'running', pagesThisStep, recordsThisStep, done }
+  logger.info('quickbooks.snapshot.attachments.step', {
+    snapshotId: input.snapshotId,
+    budgetBytes,
+    pagesThisStep: result.pagesThisStep,
+    recordsThisStep: result.recordsThisStep,
+    done: result.done,
+  })
+  return result
 }

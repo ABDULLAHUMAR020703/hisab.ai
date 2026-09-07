@@ -6,16 +6,23 @@ import {
 } from './snapshot-model'
 import { requiredSnapshotResourceKeys } from './snapshot-resources'
 import { listCheckpoints, type SnapshotRow } from './snapshot.service'
-import { listObjects, manifestPath, readJson, writeJson } from './snapshot-storage'
+import { listObjectStats, manifestPath, readJson, writeJson, type StorageObjectStat } from './snapshot-storage'
 
 /**
  * Builds the manifest from the DB snapshot row + checkpoints + the actual objects
  * present in Storage. The manifest is the snapshot's portable source of truth:
  * migration reads it to enumerate pages without touching QuickBooks.
+ *
+ * `opts.objectStats` lets the caller supply an already-collected Storage listing
+ * so finalize does not walk the (attachment-heavy) tree more than once.
  */
-export async function buildSnapshotManifest(snapshot: SnapshotRow): Promise<SnapshotManifest> {
+export async function buildSnapshotManifest(
+  snapshot: SnapshotRow,
+  opts: { objectStats?: StorageObjectStat[] } = {},
+): Promise<SnapshotManifest> {
   const checkpoints = await listCheckpoints(snapshot.id)
-  const objectPaths = await listObjects(snapshot.storagePrefix)
+  const objectStats = opts.objectStats ?? (await listObjectStats(snapshot.storagePrefix))
+  const objectPaths = objectStats.map((stat) => stat.path)
 
   const filesByResource = new Map<string, string[]>()
   for (const path of objectPaths) {
@@ -67,8 +74,11 @@ export async function buildSnapshotManifest(snapshot: SnapshotRow): Promise<Snap
   }
 }
 
-export async function writeSnapshotManifest(snapshot: SnapshotRow): Promise<SnapshotManifest> {
-  const manifest = await buildSnapshotManifest(snapshot)
+export async function writeSnapshotManifest(
+  snapshot: SnapshotRow,
+  opts: { objectStats?: StorageObjectStat[] } = {},
+): Promise<SnapshotManifest> {
+  const manifest = await buildSnapshotManifest(snapshot, opts)
   await writeJson(snapshot.storagePrefix, 'manifest.json', manifest)
   return manifest
 }

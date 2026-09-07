@@ -9,6 +9,7 @@ import { logger } from '@/lib/ops/logger'
 import { parseSnapshotPageFileName } from './snapshot-model'
 import { buildSnapshotManifest, readSnapshotManifest } from './snapshot-manifest'
 import { getSnapshot, getReadCursor, upsertReadCursor } from './snapshot.service'
+import { listAttachmentLedger } from './snapshot-attachment-ledger'
 import { readRawPage } from './snapshot-storage'
 
 /**
@@ -74,11 +75,35 @@ export async function fetchSnapshotResourcePage(input: {
   }
 
   const adapter = new QuickBooksImportAdapter()
-  const normalizedRows = adapter.normalizeRecords(
-    resourceKey,
-    filterResourceRows(resourceKey, rawRecords),
-    snapshot.realmId,
-  )
+  const filteredRaw = filterResourceRows(resourceKey, rawRecords)
+  const normalizedRows = adapter.normalizeRecords(resourceKey, filteredRaw, snapshot.realmId)
+
+  // Attachments: resolve each captured binary from the snapshot's own Storage
+  // prefix (zero-copy — same `quickbooks-migration` bucket the live import
+  // writes to). `_hisabAttachment` is the exact shape `materializeAttachment`
+  // consumes. QuickBooks is never called. Skipped / failed attachments get no
+  // `_hisabAttachment`, so `materializeAttachment` returns null for them.
+  if (resourceKey === 'attachments') {
+    const captured = new Map(
+      (await listAttachmentLedger(snapshotId))
+        .filter((entry) => entry.status === 'captured' && entry.storagePath)
+        .map((entry) => [entry.attachableId, entry]),
+    )
+    if (captured.size) {
+      filteredRaw.forEach((raw, index) => {
+        const id = String((raw as Record<string, unknown>)?.Id ?? '')
+        const entry = id ? captured.get(id) : undefined
+        const row = normalizedRows[index]
+        if (entry && row) {
+          row._hisabAttachment = JSON.stringify({
+            storagePath: `${snapshot.storagePrefix}/${entry.storagePath}`,
+            fileName: entry.fileName ?? `quickbooks-${id}`,
+            mimeType: entry.contentType ?? 'application/octet-stream',
+          })
+        }
+      })
+    }
+  }
 
   const recordsRead = cursor.recordsRead + rawRecords.length
   const hasMore = cursor.nextPage < totalPages

@@ -61,6 +61,7 @@ class FakeQuery implements PromiseLike<Result> {
   gt(column: string, value: unknown) { this.filters.push([column, 'gt', value]); return this }
   gte(column: string, value: unknown) { this.filters.push([column, 'gte', value]); return this }
   contains(column: string, value: Record<string, unknown>) { this.filters.push([column, 'contains', value]); return this }
+  is(column: string, value: unknown) { this.filters.push([column, 'is', value]); return this }
   in(column: string, values: unknown[]) { this.filters.push([column, 'in', values]); return this }
   not(column: string, _op: string, value: unknown) { this.filters.push([column, 'not', value]); return this }
   filter(expr: string, _op: string, value: unknown) {
@@ -97,6 +98,7 @@ class FakeQuery implements PromiseLike<Result> {
         cell = row[column]
       }
       if (op === 'eq') return cell === value
+      if (op === 'is') return value === null ? cell === null || cell === undefined : cell === value
       if (op === 'neq') return cell !== value
       if (op === 'not') return cell !== value
       if (op === 'in') return (value as unknown[]).includes(cell)
@@ -223,11 +225,11 @@ class FakeBucket {
   }
 
   async list(prefix: string, opts?: { limit?: number; offset?: number }) {
-    const base = prefix.endsWith('/') ? prefix : `${prefix}/`
+    const base = prefix ? (prefix.endsWith('/') ? prefix : `${prefix}/`) : ''
     const children = new Map<string, { isFile: boolean }>()
     for (const key of this.objects.keys()) {
-      if (!key.startsWith(base)) continue
-      const rest = key.slice(base.length)
+      if (base && !key.startsWith(base)) continue
+      const rest = base ? key.slice(base.length) : key
       const slash = rest.indexOf('/')
       if (slash === -1) children.set(rest, { isFile: true })
       else children.set(rest.slice(0, slash), { isFile: false })
@@ -256,7 +258,10 @@ export interface FakeSupabase {
   objects: Map<string, FakeStorageObject>
   client: {
     from(table: string): FakeQuery
-    storage: { from(bucket: string): FakeBucket }
+    storage: {
+      from(bucket: string): FakeBucket
+      listBuckets(): Promise<{ data: Array<{ id: string }> | null; error: { message: string } | null }>
+    }
   }
 }
 
@@ -269,7 +274,12 @@ export function createFakeSupabase(options?: {
   const indexes = options?.uniqueIndexes ?? []
   const client = {
     from: (table: string) => new FakeQuery(db, table, indexes),
-    storage: { from: () => new FakeBucket(objects, options?.failUpload) },
+    storage: {
+      from: () => new FakeBucket(objects, options?.failUpload),
+      // The fake models one object store; report a single quota bucket so the
+      // project-usage probe counts it once.
+      listBuckets: async () => ({ data: [{ id: 'quickbooks-migration' }], error: null }),
+    },
   }
   return { db, objects, client }
 }

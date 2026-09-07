@@ -47,8 +47,44 @@ export interface SnapshotEntitySummary {
 
 export interface SnapshotAttachmentSummary {
   metadataRecords: number
+  /** Legacy alias for `captured` — kept so pre-070 snapshots stay readable. */
   binariesDownloaded: number
+  /** Legacy alias for `failed`. */
   binariesFailed: number
+  // Best-effort storage-budgeted capture (migration 070+). All optional so a
+  // snapshot written before this feature still parses.
+  totalCandidates?: number
+  captured?: number
+  skippedBudget?: number
+  failed?: number
+  unavailable?: number
+  capturedBytes?: number
+  budgetBytes?: number
+  /** captured / totalCandidates, 0-100, rounded to 1 dp. */
+  coveragePercent?: number
+}
+
+/** Per-attachment capture outcome (row of `quickbooks_snapshot_attachments`). */
+export type SnapshotAttachmentCaptureStatus =
+  | 'pending'
+  | 'captured'
+  | 'skipped_budget'
+  | 'failed'
+  | 'unavailable'
+
+export interface SnapshotAttachmentLedgerEntry {
+  attachableId: string
+  entityRef: { type: string; value: string } | null
+  fileName: string | null
+  contentType: string | null
+  /** QuickBooks-reported size in bytes; null/0 when QuickBooks omits it. */
+  sourceSize: number | null
+  /** Path relative to the snapshot prefix; set only when `status === 'captured'`. */
+  storagePath: string | null
+  status: SnapshotAttachmentCaptureStatus
+  reason: string | null
+  capturedBytes: number | null
+  checksum: string | null
 }
 
 export interface SnapshotManifest {
@@ -83,6 +119,9 @@ export interface SnapshotValidationIssue {
     | 'missing_file'
     | 'required_failed'
     | 'required_unsupported'
+    | 'attachment_missing_object'
+    | 'attachment_size_mismatch'
+    | 'attachment_ledger_inconsistent'
   message: string
 }
 

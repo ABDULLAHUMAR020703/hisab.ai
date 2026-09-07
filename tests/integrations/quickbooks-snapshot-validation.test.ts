@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { validateSnapshot } from '../../src/lib/import-export/quickbooks/snapshot/snapshot-validation'
 import type {
+  SnapshotAttachmentLedgerEntry,
   SnapshotEntitySummary,
   SnapshotManifest,
 } from '../../src/lib/import-export/quickbooks/snapshot/snapshot-model'
@@ -154,4 +155,74 @@ test('clean snapshot with completed required resources passes', async () => {
     { readPage: async (file) => pages[file] ?? [] },
   )
   assert.equal(report.ok, true, JSON.stringify(report.issues))
+})
+
+// --- attachment ledger integrity (migration 070) ---
+
+const ledgerEntry = (over: Partial<SnapshotAttachmentLedgerEntry>): SnapshotAttachmentLedgerEntry => ({
+  attachableId: 'x', entityRef: null, fileName: 'f.pdf', contentType: 'application/pdf', sourceSize: null,
+  storagePath: null, status: 'pending', reason: null, capturedBytes: null, checksum: null, ...over,
+})
+
+const attManifest = (ledgerRequested = true) =>
+  manifest(
+    { attachments: { status: 'completed', entity: 'Attachable', records: 2 } },
+    { requiredResources: [], requestedResources: ledgerRequested ? ['attachments'] : ['accounts'] },
+  )
+
+test('K: COMPLETE-eligible with SKIPPED_BUDGET attachments — no blocking issue', async () => {
+  const report = await validateSnapshot(attManifest(), {
+    attachmentLedger: [
+      ledgerEntry({ attachableId: 'a1', status: 'captured', storagePath: 'attachments/a1/f.pdf', capturedBytes: 10 }),
+      ledgerEntry({ attachableId: 'a2', status: 'skipped_budget', reason: 'over budget' }),
+    ],
+    attachmentObjectBytes: new Map([['attachments/a1/f.pdf', 10]]),
+  })
+  assert.equal(report.ok, true, JSON.stringify(report.issues))
+})
+
+test('captured attachment with no Storage object → attachment_missing_object, not ok', async () => {
+  const report = await validateSnapshot(attManifest(), {
+    attachmentLedger: [ledgerEntry({ attachableId: 'a1', status: 'captured', storagePath: 'attachments/a1/f.pdf', capturedBytes: 10 })],
+    attachmentObjectBytes: new Map(),
+  })
+  assert.equal(report.ok, false)
+  assert.ok(report.issues.some((i) => i.code === 'attachment_missing_object'))
+})
+
+test('captured attachment size mismatch vs Storage → attachment_size_mismatch, not ok', async () => {
+  const report = await validateSnapshot(attManifest(), {
+    attachmentLedger: [ledgerEntry({ attachableId: 'a1', status: 'captured', storagePath: 'attachments/a1/f.pdf', capturedBytes: 10 })],
+    attachmentObjectBytes: new Map([['attachments/a1/f.pdf', 999]]),
+  })
+  assert.equal(report.ok, false)
+  assert.ok(report.issues.some((i) => i.code === 'attachment_size_mismatch'))
+})
+
+test('a skipped attachment that still references a Storage path → ledger inconsistent', async () => {
+  const report = await validateSnapshot(attManifest(), {
+    attachmentLedger: [ledgerEntry({ attachableId: 'a1', status: 'skipped_budget', storagePath: 'attachments/a1/f.pdf' })],
+  })
+  assert.equal(report.ok, false)
+  assert.ok(report.issues.some((i) => i.code === 'attachment_ledger_inconsistent'))
+})
+
+test('duplicate ledger entries for one attachable → ledger inconsistent', async () => {
+  const report = await validateSnapshot(attManifest(), {
+    attachmentLedger: [
+      ledgerEntry({ attachableId: 'dup', status: 'failed' }),
+      ledgerEntry({ attachableId: 'dup', status: 'failed' }),
+    ],
+  })
+  assert.equal(report.ok, false)
+  assert.ok(report.issues.some((i) => i.code === 'attachment_ledger_inconsistent'))
+})
+
+test('attachment ledger is ignored when attachments was not requested', async () => {
+  const report = await validateSnapshot(attManifest(false), {
+    attachmentLedger: [ledgerEntry({ attachableId: 'a1', status: 'captured', storagePath: 'x', capturedBytes: 1 })],
+    attachmentObjectBytes: new Map(),
+    readPage: async () => [{ Id: 'a1' }],
+  })
+  assert.ok(!report.issues.some((i) => i.code.startsWith('attachment_')))
 })

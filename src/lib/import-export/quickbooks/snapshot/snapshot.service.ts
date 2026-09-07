@@ -31,6 +31,12 @@ export interface SnapshotRow {
   validation: SnapshotValidationReport | null
   startedAt: string
   completedAt: string | null
+  // Attachment-phase storage budget context (migration 070); null until the
+  // attachment phase starts.
+  storageQuotaBytes: number | null
+  storageBaselineBytes: number | null
+  attachmentReservedBytes: number | null
+  attachmentBudgetBytes: number | null
 }
 
 export interface SnapshotCheckpointRow {
@@ -71,6 +77,10 @@ function mapSnapshot(row: Record<string, unknown>): SnapshotRow {
     validation: (row.validation ?? null) as SnapshotValidationReport | null,
     startedAt: String(row.started_at),
     completedAt: row.completed_at ? String(row.completed_at) : null,
+    storageQuotaBytes: row.storage_quota_bytes == null ? null : Number(row.storage_quota_bytes),
+    storageBaselineBytes: row.storage_baseline_bytes == null ? null : Number(row.storage_baseline_bytes),
+    attachmentReservedBytes: row.attachment_reserved_bytes == null ? null : Number(row.attachment_reserved_bytes),
+    attachmentBudgetBytes: row.attachment_budget_bytes == null ? null : Number(row.attachment_budget_bytes),
   }
 }
 
@@ -371,6 +381,33 @@ export async function upsertReadCursor(input: {
       },
       { onConflict: 'import_job_id,resource_key' },
     )
+  if (error) throw error
+}
+
+/**
+ * Persists the attachment-phase storage-budget context once, at the start of
+ * the attachment phase. Idempotent: only writes when not already set.
+ */
+export async function patchSnapshotAttachmentBudget(
+  snapshotId: string,
+  budget: {
+    storageQuotaBytes: number
+    storageBaselineBytes: number
+    attachmentReservedBytes: number
+    attachmentBudgetBytes: number
+  },
+): Promise<void> {
+  const { error } = await createAdminClient()
+    .from('quickbooks_migration_snapshots')
+    .update({
+      storage_quota_bytes: budget.storageQuotaBytes,
+      storage_baseline_bytes: budget.storageBaselineBytes,
+      attachment_reserved_bytes: budget.attachmentReservedBytes,
+      attachment_budget_bytes: budget.attachmentBudgetBytes,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', snapshotId)
+    .is('attachment_budget_bytes', null)
   if (error) throw error
 }
 

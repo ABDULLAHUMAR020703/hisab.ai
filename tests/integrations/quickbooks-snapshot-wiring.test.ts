@@ -77,3 +77,59 @@ test('orchestrator only marks COMPLETE when the summary is COMPLETE and validati
   const orch = read('src/lib/import-export/quickbooks/snapshot/snapshot-orchestrator.ts')
   assert.match(orch, /refreshed\.status === 'COMPLETE' && validation\.ok/)
 })
+
+test('migration 070 provisions the attachment ledger + storage-budget columns', () => {
+  const sql = read('supabase/migrations/070_quickbooks_snapshot_attachment_ledger.sql')
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS public\.quickbooks_snapshot_attachments/)
+  assert.match(sql, /PRIMARY KEY \(snapshot_id, attachable_id\)/)
+  assert.match(sql, /status IN \('pending','captured','skipped_budget','failed','unavailable'\)/)
+  assert.match(sql, /ON DELETE CASCADE/)
+  assert.match(sql, /ADD COLUMN IF NOT EXISTS attachment_budget_bytes BIGINT/)
+  assert.match(sql, /ENABLE ROW LEVEL SECURITY/)
+})
+
+test('A: attachments is the LAST resource in the extraction order (core data first)', async () => {
+  const { SNAPSHOT_RESOURCES } = await import('../../src/lib/import-export/quickbooks/snapshot/snapshot-resources')
+  assert.equal(SNAPSHOT_RESOURCES[SNAPSHOT_RESOURCES.length - 1].resourceKey, 'attachments')
+  assert.equal(
+    SNAPSHOT_RESOURCES.filter((s) => s.tier !== 'optional').every(
+      (s, i, core) => core.findIndex((c) => c.resourceKey === 'attachments') === -1,
+    ),
+    true,
+    'attachments is never a required-tier resource',
+  )
+})
+
+test('the storage budget = quota - usage - reserve, with a 170 MB reserve', async () => {
+  const mod = await import('../../src/lib/import-export/quickbooks/snapshot/snapshot-attachment-budget')
+  assert.equal(mod.STORAGE_QUOTA_BYTES, 1_000_000_000)
+  assert.equal(mod.RESERVED_SAFETY_BYTES, 170_000_000)
+  const src = read('src/lib/import-export/quickbooks/snapshot/snapshot-attachment-budget.ts')
+  assert.match(src, /input\.quotaBytes - input\.currentUsageBytes - input\.reservedSafetyBytes/)
+})
+
+test('extractor sizes the budget before capture and fails safe when usage cannot be measured', () => {
+  const extractor = read('src/lib/import-export/quickbooks/snapshot/snapshot-extractor.ts')
+  assert.match(extractor, /measureProjectStorageUsage\(\)/)
+  assert.match(extractor, /attachment phase started before core resources are terminal/)
+  // measurement failure => baseline = quota => budget 0 => no binaries
+  assert.match(extractor, /baselineBytes = quotaBytes \/\/ forces the budget to 0/)
+})
+
+test('R: the storage ceiling is enforced in-app — no attachment is uploaded to provoke a quota error', () => {
+  const extractor = read('src/lib/import-export/quickbooks/snapshot/snapshot-extractor.ts')
+  const capture = extractor.slice(
+    extractor.indexOf('export async function captureOneAttachment'),
+    extractor.indexOf('export async function runAttachmentExtraction'),
+  )
+  // The budget check(s) come before writeBinary in captureOneAttachment.
+  assert.ok(capture.indexOf('attachmentFitsBudget') < capture.indexOf('ports.writeBinary('))
+})
+
+test('snapshot-backed migration resolves captured attachments from the ledger, never QuickBooks', () => {
+  const src = read('src/lib/import-export/quickbooks/snapshot/snapshot-source.ts')
+  assert.match(src, /listAttachmentLedger\(snapshotId\)/)
+  assert.match(src, /entry\.status === 'captured' && entry\.storagePath/)
+  assert.match(src, /_hisabAttachment = JSON\.stringify\(\{/)
+  assert.match(src, /\$\{snapshot\.storagePrefix\}\/\$\{entry\.storagePath\}/)
+})

@@ -60,16 +60,24 @@ export function renderSnapshotReport(manifest: SnapshotManifest): string {
   const attachments = manifest.entities['attachments']
   if (attachments && manifest.requestedResources.includes('attachments')) {
     const s = attachments.attachmentSummary
-    lines.push('ATTACHMENTS')
+    lines.push('ATTACHMENTS  (best-effort within the storage budget)')
     lines.push(`  Metadata (Attachable) records: ${attachments.records}  [${attachments.status}]`)
     if (s) {
-      lines.push(`  Binary files downloaded:      ${s.binariesDownloaded}`)
-      lines.push(`  Binary files FAILED:          ${s.binariesFailed}${s.binariesFailed ? '  (per-file detail in attachments/index.json; each is listed under Warnings)' : ''}`)
-      if (s.binariesFailed > 0) {
-        lines.push('  NOTE: attachment metadata is captured but some binary files were not downloaded.')
+      const total = s.totalCandidates ?? s.binariesDownloaded + s.binariesFailed
+      const captured = s.captured ?? s.binariesDownloaded
+      const fmtMb = (bytes?: number) => (bytes == null ? '?' : `${(bytes / 1_000_000).toFixed(1)} MB`)
+      lines.push(`  Binary files CAPTURED:        ${captured}${total ? ` / ${total}` : ''}  (${fmtMb(s.capturedBytes)})`)
+      if (s.budgetBytes != null) lines.push(`  Attachment storage budget:    ${fmtMb(s.budgetBytes)}`)
+      if ((s.skippedBudget ?? 0) > 0) lines.push(`  Skipped (storage budget):     ${s.skippedBudget}`)
+      if ((s.failed ?? 0) > 0) lines.push(`  FAILED:                       ${s.failed}`)
+      if ((s.unavailable ?? 0) > 0) lines.push(`  Unavailable (no file):        ${s.unavailable}`)
+      if (s.coveragePercent != null) lines.push(`  Coverage:                     ${s.coveragePercent}%`)
+      if ((s.skippedBudget ?? 0) > 0 || (s.failed ?? 0) > 0) {
+        lines.push('  NOTE: attachment metadata is fully captured; some binaries were not.')
+        lines.push('        Per-file detail: quickbooks_snapshot_attachments. Accounting data is unaffected.')
       }
     } else {
-      lines.push('  Binary download: not run / no summary recorded.')
+      lines.push('  Binary capture: not run / no summary recorded.')
     }
     lines.push('')
   }

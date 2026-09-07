@@ -249,9 +249,10 @@ test('a fresh read cursor for a new import job re-reads the snapshot from page 1
   assert.equal(first.resource.rows.length, 2, 'a new job starts at page 1, not where another job left off')
 })
 
-test('attachments: metadata capture succeeds and is never conflated with binary-download failures', { skip: MOCKS }, async (t) => {
-  const [service, orchestrator, manifestMod, reportMod, provider] = await Promise.all([
+test('attachments: metadata always captured; binaries captured within budget, per-file ledger', { skip: MOCKS }, async (t) => {
+  const [service, ledgerMod, orchestrator, manifestMod, reportMod, provider] = await Promise.all([
     import('../../src/lib/import-export/quickbooks/snapshot/snapshot.service'),
+    import('../../src/lib/import-export/quickbooks/snapshot/snapshot-attachment-ledger'),
     import('../../src/lib/import-export/quickbooks/snapshot/snapshot-orchestrator'),
     import('../../src/lib/import-export/quickbooks/snapshot/snapshot-manifest'),
     import('../../src/lib/import-export/quickbooks/snapshot/snapshot-report'),
@@ -259,9 +260,9 @@ test('attachments: metadata capture succeeds and is never conflated with binary-
   ])
 
   const ATTACHABLES = [
-    { Id: 'att-1', FileName: 'ok.pdf' },
-    { Id: 'att-2', FileName: 'broken.pdf' },
-    { Id: 'att-3', FileName: '' }, // no filename -> counts as a binary failure, metadata still kept
+    { Id: 'att-1', FileName: 'ok.pdf', ContentType: 'application/pdf', Size: 7 },
+    { Id: 'att-2', FileName: 'broken.pdf' }, // download 403 -> FAILED
+    { Id: 'att-3', FileName: '' }, // no filename -> UNAVAILABLE, metadata still kept
   ]
   const qbProvider = new provider.QuickBooksIntegrationService(CONFIG, ((async (input: string | URL) => {
     const q = new URL(String(input)).searchParams.get('query') ?? ''
@@ -298,20 +299,107 @@ test('attachments: metadata capture succeeds and is never conflated with binary-
   const cp = (await service.listCheckpoints(snap.id)).find((c) => c.resourceKey === 'attachments')!
   assert.equal(cp.status, 'completed', 'metadata pagination completed')
   assert.equal(cp.recordsWritten, 3, 'all 3 Attachable metadata records captured')
-  assert.deepEqual(cp.attachmentSummary, { metadataRecords: 3, binariesDownloaded: 1, binariesFailed: 2 })
 
-  // The failures are preserved explicitly as warnings — not swallowed.
-  assert.ok(final!.warnings.some((w) => w.includes('att-2') && w.includes('403')))
-  assert.ok(final!.warnings.some((w) => w.includes('2 failed')))
+  const s = cp.attachmentSummary!
+  assert.equal(s.totalCandidates, 3)
+  assert.equal(s.captured, 1)
+  assert.equal(s.failed, 1)
+  assert.equal(s.unavailable, 1)
+  assert.equal(s.skippedBudget, 0)
+  assert.equal(s.capturedBytes, 7)
+  assert.equal(s.coveragePercent, 33.3)
 
-  // attachments is OPTIONAL, so binary failures do not falsely block/allow COMPLETE
-  // in a way that hides them — the summary + warnings carry the truth.
+  // Per-attachment truth lives in the durable ledger, not swallowed.
+  const ledger = await ledgerMod.listAttachmentLedger(snap.id)
+  const byId = new Map(ledger.map((e) => [e.attachableId, e]))
+  assert.equal(byId.get('att-1')!.status, 'captured')
+  assert.equal(byId.get('att-1')!.storagePath, 'attachments/att-1/ok.pdf')
+  assert.ok(byId.get('att-1')!.checksum, 'captured entry carries a checksum')
+  assert.equal(byId.get('att-2')!.status, 'failed')
+  assert.match(byId.get('att-2')!.reason ?? '', /403/)
+  assert.equal(byId.get('att-2')!.storagePath, null)
+  assert.equal(byId.get('att-3')!.status, 'unavailable')
+
+  // A summary warning is preserved (per-file detail is in the ledger).
+  assert.ok(final!.warnings.some((w) => w.includes('1 failed') && w.includes('1 unavailable')))
+
+  // attachments is OPTIONAL and completed -> the snapshot is COMPLETE.
+  assert.equal(final!.status, 'COMPLETE')
+
   const report = reportMod.renderSnapshotReport(await manifestMod.buildSnapshotManifest(final!))
   assert.match(report, /ATTACHMENTS/)
   assert.match(report, /Metadata \(Attachable\) records: 3/)
-  assert.match(report, /Binary files downloaded:\s+1/)
-  assert.match(report, /Binary files FAILED:\s+2/)
-  assert.match(report, /attachment metadata is captured but some binary files were not downloaded/)
+  assert.match(report, /Binary files CAPTURED:\s+1 \/ 3/)
+  assert.match(report, /Coverage:\s+33\.3%/)
 
-  t.diagnostic(`attachments: metadata 3/3, binaries 1 ok / 2 failed, warnings preserved`)
+  t.diagnostic(`attachments: metadata 3/3, captured 1, failed 1, unavailable 1; ledger + warning preserved`)
+})
+
+test('M/N/O: snapshot-backed migration resolves the captured binary from Storage, zero QuickBooks calls', { skip: MOCKS }, async (t) => {
+  const [service, ledgerMod, orchestrator, source, provider] = await Promise.all([
+    import('../../src/lib/import-export/quickbooks/snapshot/snapshot.service'),
+    import('../../src/lib/import-export/quickbooks/snapshot/snapshot-attachment-ledger'),
+    import('../../src/lib/import-export/quickbooks/snapshot/snapshot-orchestrator'),
+    import('../../src/lib/import-export/quickbooks/snapshot/snapshot-source'),
+    import('../../src/integrations/accounting/providers/quickbooks/quickbooks-integration.service'),
+  ])
+
+  const ATTACHABLES = [
+    { Id: 'att-cap', FileName: 'invoice.pdf', ContentType: 'application/pdf', Size: 7,
+      AttachableRef: [{ EntityRef: { type: 'Invoice', value: 'i1' } }] },
+    { Id: 'att-skip', FileName: 'huge.pdf', Size: 5_000_000_000,
+      AttachableRef: [{ EntityRef: { type: 'Invoice', value: 'i2' } }] },
+  ]
+  const qbProvider = new provider.QuickBooksIntegrationService(CONFIG, ((async (input: string | URL) => {
+    const q = new URL(String(input)).searchParams.get('query') ?? ''
+    const pos = Number(/STARTPOSITION (\d+)/.exec(q)?.[1] ?? '1')
+    const max = Number(/MAXRESULTS (\d+)/.exec(q)?.[1] ?? '1000')
+    return json({ QueryResponse: { Attachable: ATTACHABLES.slice(pos - 1, pos - 1 + max), startPosition: pos, maxResults: max } })
+  }) as unknown as typeof fetch), NOW) as unknown as {
+    getEntityRecords: unknown
+    downloadAttachment: (ctx: unknown, id: string) => Promise<{ url: string; content?: ArrayBuffer; contentType?: string }>
+  }
+  qbProvider.downloadAttachment = async () => ({ url: '', content: new TextEncoder().encode('PDFDATA').buffer as ArrayBuffer, contentType: 'application/pdf' })
+
+  const snap = await service.createSnapshot({ companyId: COMPANY, realmId: CONTEXT.realmId, userId: USER, requestedResources: ['attachments'] })
+  for (let i = 0; i < 20; i += 1) {
+    const outcome = await orchestrator.runSnapshotOrchestratorStep({ provider: qbProvider as never, context: CONTEXT, snapshotId: snap.id, companyId: COMPANY, userId: USER })
+    if (outcome.done) break
+  }
+  const final = await service.getSnapshot(snap.id, COMPANY)
+  assert.equal(final!.status, 'COMPLETE')
+  const captured = (await ledgerMod.listAttachmentLedger(snap.id)).find((e) => e.attachableId === 'att-cap')!
+  assert.equal(captured.status, 'captured')
+
+  // Read the attachments page through the migration reader; count QuickBooks calls.
+  const realFetch = globalThis.fetch
+  let qboCalls = 0
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('intuit.com')) qboCalls += 1
+    return realFetch(input as never, init)
+  }) as typeof fetch
+  t.after(() => { globalThis.fetch = realFetch })
+
+  const page = await source.fetchSnapshotResourcePage({ companyId: COMPANY, snapshotId: snap.id, resourceKey: 'attachments', importJobId: 'job-att' })
+  assert.equal(qboCalls, 0, 'snapshot-backed attachment read must not call QuickBooks')
+
+  const rows = page.resource.rows as Array<Record<string, string>>
+  const capRow = rows.find((r) => JSON.parse(r._quickbooksRaw).Id === 'att-cap')!
+  const skipRow = rows.find((r) => JSON.parse(r._quickbooksRaw).Id === 'att-skip')!
+
+  // O: skipped attachment -> no _hisabAttachment -> materializeAttachment returns null (no crash).
+  assert.equal(skipRow._hisabAttachment, undefined)
+
+  // M: captured attachment -> _hisabAttachment points at the snapshot's own Storage object.
+  const stored = JSON.parse(capRow._hisabAttachment) as { storagePath: string; fileName: string; mimeType: string }
+  assert.equal(stored.storagePath, `${final!.storagePrefix}/attachments/att-cap/invoice.pdf`)
+  assert.equal(stored.fileName, 'invoice.pdf')
+  assert.equal(stored.mimeType, 'application/pdf')
+
+  // The binary is really in Storage at that path.
+  const obj = fake.objects.get(stored.storagePath)
+  assert.ok(obj, 'the captured binary exists in Supabase Storage')
+  assert.equal(new TextDecoder().decode(obj!.bytes), 'PDFDATA')
+
+  t.diagnostic(`snapshot attachment migration: captured resolved from Storage, ${qboCalls} QuickBooks calls`)
 })

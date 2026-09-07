@@ -1,5 +1,6 @@
 import {
   parseSnapshotPageFileName,
+  type SnapshotAttachmentLedgerEntry,
   type SnapshotEntityStatus,
   type SnapshotManifest,
   type SnapshotValidationIssue,
@@ -19,6 +20,10 @@ export interface SnapshotValidationOptions {
   /** Loads the raw records of one page file (relative to the snapshot prefix). */
   readPage?: (relativeFile: string) => Promise<unknown[]>
   now?: () => Date
+  /** Per-attachment capture ledger — verified against Storage when supplied. */
+  attachmentLedger?: SnapshotAttachmentLedgerEntry[]
+  /** Object path (relative to the snapshot prefix) -> byte size, from the Storage walk. */
+  attachmentObjectBytes?: Map<string, number>
 }
 
 const RAW_ID_ENTITIES_WITHOUT_ID = new Set(['Preferences'])
@@ -131,6 +136,58 @@ export async function validateSnapshot(
           resourceKey,
           code: 'count_mismatch',
           message: `${resourceKey} manifest reports ${summary.records} records but page files contain ${deepRecordCount}.`,
+        })
+      }
+    }
+  }
+
+  // Attachment ledger integrity. Attachments are optional, so SKIPPED_BUDGET /
+  // FAILED / UNAVAILABLE entries never block COMPLETE — but a ledger that
+  // claims CAPTURED must have a real, correctly-sized Storage object, because
+  // snapshot-backed migration points a `documents.file_path` straight at it.
+  if (options.attachmentLedger && manifest.requestedResources.includes('attachments')) {
+    const seen = new Set<string>()
+    for (const entry of options.attachmentLedger) {
+      if (seen.has(entry.attachableId)) {
+        issues.push({
+          resourceKey: 'attachments',
+          code: 'attachment_ledger_inconsistent',
+          message: `duplicate ledger entry for attachable ${entry.attachableId}`,
+        })
+        continue
+      }
+      seen.add(entry.attachableId)
+
+      if (entry.status === 'captured') {
+        if (!entry.storagePath) {
+          issues.push({
+            resourceKey: 'attachments',
+            code: 'attachment_ledger_inconsistent',
+            message: `captured attachment ${entry.attachableId} has no storage path`,
+          })
+          continue
+        }
+        if (options.attachmentObjectBytes) {
+          const actual = options.attachmentObjectBytes.get(entry.storagePath)
+          if (actual === undefined) {
+            issues.push({
+              resourceKey: 'attachments',
+              code: 'attachment_missing_object',
+              message: `captured attachment ${entry.attachableId} has no Storage object at ${entry.storagePath}`,
+            })
+          } else if (entry.capturedBytes != null && actual !== entry.capturedBytes) {
+            issues.push({
+              resourceKey: 'attachments',
+              code: 'attachment_size_mismatch',
+              message: `attachment ${entry.attachableId}: ledger ${entry.capturedBytes} B vs Storage ${actual} B`,
+            })
+          }
+        }
+      } else if (entry.storagePath) {
+        issues.push({
+          resourceKey: 'attachments',
+          code: 'attachment_ledger_inconsistent',
+          message: `${entry.status} attachment ${entry.attachableId} still references Storage path ${entry.storagePath}`,
         })
       }
     }
