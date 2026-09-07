@@ -149,6 +149,9 @@ export function isTerminalEntityStatus(status: SnapshotEntityStatus): boolean {
  *
  * Optional resources never block COMPLETE, but a `failed` optional resource
  * still forces PARTIAL so the operator sees it.
+ *
+ * A snapshot with NO required resources (e.g. an attachments-only request) can
+ * never be COMPLETE — COMPLETE must mean the accounting data is present.
  */
 export function computeSnapshotStatus(
   entities: Record<string, Pick<SnapshotEntitySummary, 'status'>>,
@@ -159,6 +162,9 @@ export function computeSnapshotStatus(
 
   const allValues = Object.values(entities).map((entity) => entity.status)
   if (allValues.some((status) => !isTerminalEntityStatus(status))) return 'RUNNING'
+
+  // No required resources requested → this is not a COMPLETE production snapshot.
+  if (required.length === 0) return 'PARTIAL'
 
   const requiredCompleted = required.every((status) => status === 'completed')
   if (requiredCompleted) {

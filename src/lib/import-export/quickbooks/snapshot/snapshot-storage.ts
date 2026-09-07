@@ -177,13 +177,26 @@ export async function collectObjectPaths(prefix: string, listPage: ListPageFn, s
   return out
 }
 
+/** Attempts per directory-page list before giving up (transient Storage 5xx). */
+export const SNAPSHOT_LIST_ATTEMPTS = Math.max(1, Number(process.env.QB_SNAPSHOT_LIST_ATTEMPTS ?? 6))
+
 function snapshotListPage(): ListPageFn {
   return async (fullPath, offset) => {
-    const { data, error } = await storage()
-      .from(SNAPSHOT_BUCKET)
-      .list(fullPath, { limit: 100, offset, sortBy: { column: 'name', order: 'asc' } })
-    if (error) throw new Error(`Snapshot list failed for ${fullPath}: ${error.message}`)
-    return (data ?? []) as StorageEntry[]
+    let lastMessage = 'unknown error'
+    for (let attempt = 1; attempt <= SNAPSHOT_LIST_ATTEMPTS; attempt += 1) {
+      const { data, error } = await storage()
+        .from(SNAPSHOT_BUCKET)
+        .list(fullPath, { limit: 100, offset, sortBy: { column: 'name', order: 'asc' } })
+      if (!error) return (data ?? []) as StorageEntry[]
+      lastMessage = error.message
+      if (attempt < SNAPSHOT_LIST_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, Math.min(400 * attempt, 4_000)))
+      }
+    }
+    // Still a transport error after retries — the caller (finalize) turns this
+    // into a step failure that the job queue retries; it never marks a snapshot
+    // permanently invalid.
+    throw new Error(`Snapshot list failed for ${fullPath} after ${SNAPSHOT_LIST_ATTEMPTS} attempts: ${lastMessage}`)
   }
 }
 

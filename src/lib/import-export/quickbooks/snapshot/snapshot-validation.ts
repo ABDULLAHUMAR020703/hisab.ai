@@ -22,8 +22,12 @@ export interface SnapshotValidationOptions {
   now?: () => Date
   /** Per-attachment capture ledger — verified against Storage when supplied. */
   attachmentLedger?: SnapshotAttachmentLedgerEntry[]
-  /** Object path (relative to the snapshot prefix) -> byte size, from the Storage walk. */
-  attachmentObjectBytes?: Map<string, number>
+  /**
+   * Every object path (relative to the snapshot prefix) -> byte size, from the
+   * finalize Storage walk. When supplied, manifest file references and captured
+   * attachment objects are verified to exist with the recorded size.
+   */
+  storageObjectBytes?: Map<string, number>
 }
 
 const RAW_ID_ENTITIES_WITHOUT_ID = new Set(['Preferences'])
@@ -75,6 +79,19 @@ export async function validateSnapshot(
     const pageFiles = summary.files
       .map((file) => ({ file, parsed: parseSnapshotPageFileName(file.split('/').slice(1).join('/')) }))
       .filter((entry) => entry.parsed) as Array<{ file: string; parsed: { page: number; part: number } }>
+
+    // Every manifest page reference must resolve to a real Storage object.
+    if (options.storageObjectBytes) {
+      for (const entry of pageFiles) {
+        if (!options.storageObjectBytes.has(entry.file)) {
+          issues.push({
+            resourceKey,
+            code: 'missing_file',
+            message: `${resourceKey} manifest references ${entry.file} but no Storage object exists there.`,
+          })
+        }
+      }
+    }
 
     // Page numbering must be contiguous from 1.
     const pageNumbers = [...new Set(pageFiles.map((entry) => entry.parsed.page))].sort((a, b) => a - b)
@@ -147,6 +164,7 @@ export async function validateSnapshot(
   // snapshot-backed migration points a `documents.file_path` straight at it.
   if (options.attachmentLedger && manifest.requestedResources.includes('attachments')) {
     const seen = new Set<string>()
+    let capturedCount = 0
     for (const entry of options.attachmentLedger) {
       if (seen.has(entry.attachableId)) {
         issues.push({
@@ -159,6 +177,7 @@ export async function validateSnapshot(
       seen.add(entry.attachableId)
 
       if (entry.status === 'captured') {
+        capturedCount += 1
         if (!entry.storagePath) {
           issues.push({
             resourceKey: 'attachments',
@@ -167,8 +186,8 @@ export async function validateSnapshot(
           })
           continue
         }
-        if (options.attachmentObjectBytes) {
-          const actual = options.attachmentObjectBytes.get(entry.storagePath)
+        if (options.storageObjectBytes) {
+          const actual = options.storageObjectBytes.get(entry.storagePath)
           if (actual === undefined) {
             issues.push({
               resourceKey: 'attachments',
@@ -190,6 +209,16 @@ export async function validateSnapshot(
           message: `${entry.status} attachment ${entry.attachableId} still references Storage path ${entry.storagePath}`,
         })
       }
+    }
+
+    // The attachment summary count must reconcile with the ledger.
+    const summaryCaptured = manifest.entities['attachments']?.attachmentSummary?.captured
+    if (summaryCaptured != null && summaryCaptured !== capturedCount) {
+      issues.push({
+        resourceKey: 'attachments',
+        code: 'attachment_ledger_inconsistent',
+        message: `attachment summary reports ${summaryCaptured} captured but the ledger has ${capturedCount}`,
+      })
     }
   }
 

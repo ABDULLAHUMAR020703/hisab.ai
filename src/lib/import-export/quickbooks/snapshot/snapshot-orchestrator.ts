@@ -1,8 +1,8 @@
 import 'server-only'
 import type { AccountingProvider, ProviderAccessContext } from '@/integrations/accounting/contracts/accounting-provider'
 import { logger } from '@/lib/ops/logger'
-import { isTerminalEntityStatus } from './snapshot-model'
-import { SNAPSHOT_RESOURCES } from './snapshot-resources'
+import { computeSnapshotStatus, isTerminalEntityStatus } from './snapshot-model'
+import { requiredSnapshotResourceKeys, SNAPSHOT_RESOURCES } from './snapshot-resources'
 import { extractSnapshotResource } from './snapshot-extractor'
 import { listAttachmentLedger } from './snapshot-attachment-ledger'
 import { writeSnapshotManifest } from './snapshot-manifest'
@@ -11,6 +11,7 @@ import { validateSnapshot } from './snapshot-validation'
 import {
   getSnapshot,
   listCheckpoints,
+  markSnapshotRefinalizing,
   refreshSnapshotSummary,
   saveSnapshotValidation,
 } from './snapshot.service'
@@ -44,7 +45,12 @@ export async function runSnapshotOrchestratorStep(input: {
 }): Promise<SnapshotStepOutcome> {
   const snapshot = await getSnapshot(input.snapshotId, input.companyId)
   if (!snapshot) throw new Error(`Snapshot ${input.snapshotId} not found for company ${input.companyId}.`)
-  if (snapshot.status === 'COMPLETE' || snapshot.status === 'FAILED') {
+  // Terminal only when it also carries a validation report — a COMPLETE/PARTIAL
+  // row without one means finalization was interrupted and must run again.
+  const finalizedTerminal =
+    snapshot.status === 'FAILED' ||
+    ((snapshot.status === 'COMPLETE' || snapshot.status === 'PARTIAL') && snapshot.validation != null)
+  if (finalizedTerminal) {
     return { snapshotId: input.snapshotId, processedResource: null, snapshotStatus: snapshot.status, done: true }
   }
 
@@ -99,44 +105,64 @@ async function finalizeSnapshot(
   input: { snapshotId: string; companyId: string },
   processedResource: string | null = null,
 ): Promise<SnapshotStepOutcome> {
+  // refreshSnapshotSummary may persist a terminal status (COMPLETE/PARTIAL/
+  // FAILED) from the checkpoints. If the manifest walk or validation then
+  // throws, that terminal row must NOT survive without a validation report —
+  // reset it to RUNNING so the queued retry re-finalizes.
   const refreshed = await refreshSnapshotSummary(input.snapshotId)
-  // One Storage walk for the whole finalize: manifest (x2) + validation.
-  const objectStats = await listObjectStats(refreshed.storagePrefix)
-  const manifest = await writeSnapshotManifest(refreshed, { objectStats })
+  // The intended terminal status is derived from the checkpoints (not the
+  // persisted row, which refreshSnapshotSummary caps at PARTIAL until validated).
+  const checkpoints = await listCheckpoints(input.snapshotId)
+  const intended = computeSnapshotStatus(
+    Object.fromEntries(checkpoints.map((c) => [c.resourceKey, { status: c.status }])),
+    requiredSnapshotResourceKeys(refreshed.requestedResources),
+  )
+  try {
+    // One Storage walk for the whole finalize: manifest (x2) + validation.
+    const objectStats = await listObjectStats(refreshed.storagePrefix)
+    const manifest = await writeSnapshotManifest(refreshed, { objectStats })
 
-  const attachmentLedger = manifest.requestedResources.includes('attachments')
-    ? await listAttachmentLedger(input.snapshotId)
-    : []
+    const attachmentLedger = manifest.requestedResources.includes('attachments')
+      ? await listAttachmentLedger(input.snapshotId)
+      : []
 
-  const validation = await validateSnapshot(manifest, {
-    readPage: (relativeFile) => readRawPage(refreshed.storagePrefix, relativeFile),
-    attachmentLedger,
-    attachmentObjectBytes: new Map(objectStats.map((stat) => [stat.path, stat.bytes])),
-  })
-  // A snapshot can only be COMPLETE when the summary says COMPLETE AND validation passes.
-  const finalStatus =
-    refreshed.status === 'COMPLETE' && validation.ok
-      ? 'COMPLETE'
-      : refreshed.status === 'COMPLETE'
-        ? 'PARTIAL'
-        : refreshed.status
+    const validation = await validateSnapshot(manifest, {
+      readPage: (relativeFile) => readRawPage(refreshed.storagePrefix, relativeFile),
+      attachmentLedger,
+      storageObjectBytes: new Map(objectStats.map((stat) => [stat.path, stat.bytes])),
+    })
+    // A snapshot can only be COMPLETE when the checkpoints say COMPLETE AND validation passes.
+    const finalStatus =
+      intended === 'COMPLETE' && validation.ok
+        ? 'COMPLETE'
+        : intended === 'COMPLETE'
+          ? 'PARTIAL'
+          : intended
 
-  await saveSnapshotValidation(input.snapshotId, validation, finalStatus)
-  const finalSnapshot = await getSnapshot(input.snapshotId, input.companyId)
-  if (finalSnapshot) await writeSnapshotManifest(finalSnapshot, { objectStats })
+    await saveSnapshotValidation(input.snapshotId, validation, finalStatus)
+    const finalSnapshot = await getSnapshot(input.snapshotId, input.companyId)
+    if (finalSnapshot) await writeSnapshotManifest(finalSnapshot, { objectStats })
 
-  logger.info('quickbooks.snapshot.finalized', {
-    snapshotId: input.snapshotId,
-    status: finalStatus,
-    validationOk: validation.ok,
-    issues: validation.issues.length,
-  })
+    logger.info('quickbooks.snapshot.finalized', {
+      snapshotId: input.snapshotId,
+      status: finalStatus,
+      validationOk: validation.ok,
+      issues: validation.issues.length,
+    })
 
-  return {
-    snapshotId: input.snapshotId,
-    processedResource,
-    snapshotStatus: finalStatus,
-    done: true,
+    return {
+      snapshotId: input.snapshotId,
+      processedResource,
+      snapshotStatus: finalStatus,
+      done: true,
+    }
+  } catch (error) {
+    await markSnapshotRefinalizing(input.snapshotId).catch(() => {})
+    logger.error('quickbooks.snapshot.finalize_failed', {
+      snapshotId: input.snapshotId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    throw error
   }
 }
 

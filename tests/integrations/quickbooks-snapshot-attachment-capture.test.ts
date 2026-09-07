@@ -12,9 +12,12 @@ import type { SnapshotAttachmentLedgerEntry } from '../../src/lib/import-export/
 const requireModule = createRequire(import.meta.url)
 requireModule('../../scripts/zatca/setup-server-only.cjs')
 
-const { runAttachmentExtraction, captureOneAttachment } = requireModule(
+const { runAttachmentExtraction, captureOneAttachment, isRecoverableAuthError } = requireModule(
   '../../src/lib/import-export/quickbooks/snapshot/snapshot-extractor',
 ) as typeof import('../../src/lib/import-export/quickbooks/snapshot/snapshot-extractor')
+const { ProviderAuthenticationException } = requireModule(
+  '../../src/integrations/accounting/utils/exceptions',
+) as typeof import('../../src/integrations/accounting/utils/exceptions')
 
 /** Fake provider that replays canned Attachable metadata pages. */
 function providerReplaying(pages: unknown[][]) {
@@ -258,6 +261,88 @@ test('budget 0: every binary is skipped cleanly, metadata still flows, resource 
   assert.equal(h.downloads.length, 0)
   assert.equal(h.ledger.get('a1')!.status, 'skipped_budget')
   assert.equal(result.status, 'completed')
+})
+
+// --- Phase 2: OAuth refresh is not swallowed ---
+
+test('Phase 2: an OAuth failure PROPAGATES out of captureOneAttachment (not a failed ledger row)', async () => {
+  await assert.rejects(
+    () =>
+      captureOneAttachment({
+        meta: { Id: 'a1', FileName: 'a.pdf', Size: 10 },
+        id: 'a1',
+        budgetBytes: 1_000,
+        capturedBytes: 0,
+        ports: {
+          writeBinary: async () => {},
+          downloadBinary: async () => {
+            throw new ProviderAuthenticationException()
+          },
+        },
+      }),
+    (error: unknown) => error instanceof ProviderAuthenticationException,
+  )
+})
+
+test('Phase 2: isRecoverableAuthError recognises the provider auth exception and a 401 cause', () => {
+  assert.equal(isRecoverableAuthError(new ProviderAuthenticationException()), true)
+  assert.equal(isRecoverableAuthError({ cause: { quickBooksStatus: 401 } }), true)
+  assert.equal(isRecoverableAuthError(new Error('403 Forbidden')), false)
+  assert.equal(isRecoverableAuthError({ cause: { quickBooksStatus: 500 } }), false)
+})
+
+test('Phase 2: runAttachmentExtraction rethrows an OAuth failure; a refresh+replay then completes it — no double download', async () => {
+  const pages = [[
+    { Id: 'a1', FileName: 'a1.pdf', Size: 100 },
+    { Id: 'a2', FileName: 'a2.pdf', Size: 100 },
+    { Id: 'a3', FileName: 'a3.pdf', Size: 100 },
+  ]]
+  let token = 'stale'
+  const downloads: string[] = []
+  const h = harness({
+    binary: (id) => {
+      downloads.push(`${token}:${id}`)
+      // With the stale token, a2 onwards fails auth; the fresh token works.
+      if (token === 'stale' && id !== 'a1') throw new ProviderAuthenticationException()
+      return { bytes: bytesOf(100), contentType: null }
+    },
+  })
+
+  // Reproduction of ConnectionService.executeWithAccessToken: run once, on an
+  // auth failure "refresh" the token and replay the whole step exactly once.
+  let refreshes = 0
+  const runStep = () =>
+    runAttachmentExtraction({
+      provider: providerReplaying(pages),
+      context: { accessToken: token, realmId: '900' } as never,
+      entity: 'Attachable',
+      resourceKey: 'attachments',
+      snapshotId: 's1',
+      storagePrefix: 'c1/quickbooks/900/snapshots/s1',
+      budgetBytes: 1_000,
+      pagesPerStep: 40,
+      pageSize: 1000,
+      checkpoint: { pagesWritten: 0, recordsWritten: 0, nextStartPosition: 1 },
+      ports: h.ports,
+    })
+
+  let result
+  try {
+    result = await runStep()
+  } catch (error) {
+    assert.ok(isRecoverableAuthError(error), 'the auth failure bubbled up for the connection layer to handle')
+    refreshes += 1
+    token = 'fresh'
+    result = await runStep() // replay after refresh
+  }
+
+  assert.equal(refreshes, 1, 'exactly one refresh')
+  assert.equal(result!.status, 'completed')
+  assert.equal([...h.ledger.values()].filter((e) => e.status === 'captured').length, 3)
+  // a1 captured on the first attempt is NOT re-downloaded on the replay.
+  assert.equal(downloads.filter((d) => d.endsWith(':a1')).length, 1)
+  assert.deepEqual(downloads, ['stale:a1', 'stale:a2', 'fresh:a2', 'fresh:a3'])
+  assert.equal(h.writes.length, 3, 'three distinct Storage writes, none duplicated')
 })
 
 test('captureOneAttachment: no FileName -> UNAVAILABLE, never downloaded', async () => {

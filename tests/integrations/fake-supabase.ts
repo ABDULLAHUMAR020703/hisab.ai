@@ -201,7 +201,11 @@ export interface FakeStorageObject {
 }
 
 class FakeBucket {
-  constructor(private readonly objects: Map<string, FakeStorageObject>, private readonly failUpload?: (path: string) => boolean) {}
+  constructor(
+    private readonly objects: Map<string, FakeStorageObject>,
+    private readonly failUpload?: (path: string) => boolean,
+    private readonly failList?: (path: string) => boolean,
+  ) {}
 
   async upload(path: string, body: ArrayBuffer | Uint8Array | Buffer | string, opts?: { contentType?: string }) {
     if (this.failUpload?.(path)) return { data: null, error: { message: `forced upload failure for ${path}` } }
@@ -225,6 +229,7 @@ class FakeBucket {
   }
 
   async list(prefix: string, opts?: { limit?: number; offset?: number }) {
+    if (this.failList?.(prefix)) return { data: null, error: { message: `forced list failure for ${prefix}` } }
     const base = prefix ? (prefix.endsWith('/') ? prefix : `${prefix}/`) : ''
     const children = new Map<string, { isFile: boolean }>()
     for (const key of this.objects.keys()) {
@@ -267,6 +272,7 @@ export interface FakeSupabase {
 
 export function createFakeSupabase(options?: {
   failUpload?: (path: string) => boolean
+  failList?: (path: string) => boolean
   uniqueIndexes?: FakeUniqueIndex[]
 }): FakeSupabase {
   const db = new Map<string, Row[]>()
@@ -275,7 +281,7 @@ export function createFakeSupabase(options?: {
   const client = {
     from: (table: string) => new FakeQuery(db, table, indexes),
     storage: {
-      from: () => new FakeBucket(objects, options?.failUpload),
+      from: () => new FakeBucket(objects, options?.failUpload, options?.failList),
       // The fake models one object store; report a single quota bucket so the
       // project-usage probe counts it once.
       listBuckets: async () => ({ data: [{ id: 'quickbooks-migration' }], error: null }),

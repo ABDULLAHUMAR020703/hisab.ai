@@ -2,6 +2,7 @@ import 'server-only'
 import { createHash } from 'node:crypto'
 import type { AccountingProvider, ProviderAccessContext } from '@/integrations/accounting/contracts/accounting-provider'
 import { quickBooksErrorStatus } from '@/integrations/accounting/providers/quickbooks/quickbooks-integration.service'
+import { ProviderAuthenticationException } from '@/integrations/accounting/utils/exceptions'
 import {
   companyCurrencyCodes,
   currentExchangeRateAsOfDate,
@@ -255,6 +256,17 @@ export async function extractSnapshotResource(input: {
     })
     return result
   } catch (error) {
+    // A refreshable OAuth failure is not a resource failure — let it bubble to
+    // the step wrapper (executeWithAccessToken) so the token refreshes and the
+    // step replays from the checkpoint / ledger.
+    if (isRecoverableAuthError(error)) {
+      logger.info('quickbooks.snapshot.resource.auth_refresh_needed', {
+        snapshotId: input.snapshotId,
+        resource: input.resourceKey,
+        entity: spec.entity,
+      })
+      throw error
+    }
     const status = quickBooksErrorStatus(error)
     if (status !== null && UNSUPPORTED_HTTP_STATUSES.has(status)) {
       const reason = error instanceof Error ? error.message : String(error)
@@ -366,6 +378,19 @@ function errMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+/**
+ * True for an Intuit OAuth failure that the platform's connection layer knows
+ * how to recover by refreshing the access token. These must NOT be swallowed
+ * into a `failed` ledger entry — they have to propagate so
+ * `ConnectionService.executeWithAccessToken` (which wraps the whole snapshot
+ * step) refreshes the token and replays the step. `runAttachmentExtraction` is
+ * idempotent on replay (ledger `captured` skip + page cursor), so no attachment
+ * is re-downloaded and no Storage object is duplicated.
+ */
+export function isRecoverableAuthError(error: unknown): boolean {
+  return error instanceof ProviderAuthenticationException || quickBooksErrorStatus(error) === 401
+}
+
 /** Storage + ledger side effects for the attachment phase, injectable for tests. */
 export interface AttachmentExtractionPorts {
   writeRawPage: typeof writeRawPage
@@ -425,6 +450,10 @@ export async function captureOneAttachment(input: {
     bytes = download.bytes
     contentType = contentTypeMeta ?? download.contentType ?? 'application/octet-stream'
   } catch (error) {
+    // A refreshable OAuth failure must bubble to the step wrapper so the token
+    // is refreshed and the step replays — never silently become a `failed`
+    // attachment.
+    if (isRecoverableAuthError(error)) throw error
     return { ...base, status: 'failed', reason: `download failed: ${errMessage(error)}`.slice(0, 2000) }
   }
 

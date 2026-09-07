@@ -19,6 +19,10 @@ const requireModule = createRequire(import.meta.url)
 requireModule('../../scripts/zatca/setup-server-only.cjs')
 
 process.env.QB_SNAPSHOT_PAGES_PER_STEP = '1'
+process.env.QB_SNAPSHOT_LIST_ATTEMPTS = '2'
+
+/** Flipped on by one test to simulate a transient Storage listing outage. */
+let breakStorageList = false
 
 // This suite drives the assembled path over an in-memory Supabase and needs the
 // module-mock loader. Run: npm run test:quickbooks-snapshot
@@ -87,7 +91,7 @@ let mod: {
 
 before(async () => {
   if (MOCKS) return
-  fake = createFakeSupabase()
+  fake = createFakeSupabase({ failList: () => breakStorageList })
   // The module-mock loader bypasses the Module._load `server-only` shim, so stub it here too.
   mock.module('server-only', { namedExports: {}, defaultExport: {} })
   mock.module('@/lib/supabase/admin', {
@@ -323,8 +327,9 @@ test('attachments: metadata always captured; binaries captured within budget, pe
   // A summary warning is preserved (per-file detail is in the ledger).
   assert.ok(final!.warnings.some((w) => w.includes('1 failed') && w.includes('1 unavailable')))
 
-  // attachments is OPTIONAL and completed -> the snapshot is COMPLETE.
-  assert.equal(final!.status, 'COMPLETE')
+  // An attachments-ONLY snapshot has no required resources, so it is never
+  // COMPLETE — the accounting data is not there. It settles at PARTIAL.
+  assert.equal(final!.status, 'PARTIAL')
 
   const report = reportMod.renderSnapshotReport(await manifestMod.buildSnapshotManifest(final!))
   assert.match(report, /ATTACHMENTS/)
@@ -344,24 +349,27 @@ test('M/N/O: snapshot-backed migration resolves the captured binary from Storage
     import('../../src/integrations/accounting/providers/quickbooks/quickbooks-integration.service'),
   ])
 
+  const ACCTS = [{ Id: 'a1', Name: 'Cash', AcctNum: '1000', AccountType: 'Bank', Active: true }]
   const ATTACHABLES = [
     { Id: 'att-cap', FileName: 'invoice.pdf', ContentType: 'application/pdf', Size: 7,
-      AttachableRef: [{ EntityRef: { type: 'Invoice', value: 'i1' } }] },
+      AttachableRef: [{ EntityRef: { type: 'Account', value: 'a1' } }] },
     { Id: 'att-skip', FileName: 'huge.pdf', Size: 5_000_000_000,
-      AttachableRef: [{ EntityRef: { type: 'Invoice', value: 'i2' } }] },
+      AttachableRef: [{ EntityRef: { type: 'Account', value: 'a1' } }] },
   ]
   const qbProvider = new provider.QuickBooksIntegrationService(CONFIG, ((async (input: string | URL) => {
     const q = new URL(String(input)).searchParams.get('query') ?? ''
+    const entity = /FROM (\w+)/.exec(q)?.[1] ?? ''
     const pos = Number(/STARTPOSITION (\d+)/.exec(q)?.[1] ?? '1')
     const max = Number(/MAXRESULTS (\d+)/.exec(q)?.[1] ?? '1000')
-    return json({ QueryResponse: { Attachable: ATTACHABLES.slice(pos - 1, pos - 1 + max), startPosition: pos, maxResults: max } })
+    const src = entity === 'Account' ? ACCTS : ATTACHABLES
+    return json({ QueryResponse: { [entity]: src.slice(pos - 1, pos - 1 + max), startPosition: pos, maxResults: max } })
   }) as unknown as typeof fetch), NOW) as unknown as {
     getEntityRecords: unknown
     downloadAttachment: (ctx: unknown, id: string) => Promise<{ url: string; content?: ArrayBuffer; contentType?: string }>
   }
   qbProvider.downloadAttachment = async () => ({ url: '', content: new TextEncoder().encode('PDFDATA').buffer as ArrayBuffer, contentType: 'application/pdf' })
 
-  const snap = await service.createSnapshot({ companyId: COMPANY, realmId: CONTEXT.realmId, userId: USER, requestedResources: ['attachments'] })
+  const snap = await service.createSnapshot({ companyId: COMPANY, realmId: CONTEXT.realmId, userId: USER, requestedResources: ['accounts', 'attachments'] })
   for (let i = 0; i < 20; i += 1) {
     const outcome = await orchestrator.runSnapshotOrchestratorStep({ provider: qbProvider as never, context: CONTEXT, snapshotId: snap.id, companyId: COMPANY, userId: USER })
     if (outcome.done) break
@@ -402,4 +410,54 @@ test('M/N/O: snapshot-backed migration resolves the captured binary from Storage
   assert.equal(new TextDecoder().decode(obj!.bytes), 'PDFDATA')
 
   t.diagnostic(`snapshot attachment migration: captured resolved from Storage, ${qboCalls} QuickBooks calls`)
+})
+
+test('C5: a transient Storage-listing failure during finalize never leaves a COMPLETE row without validation', { skip: MOCKS }, async (t) => {
+  const [service, orchestrator, source, provider] = await Promise.all([
+    import('../../src/lib/import-export/quickbooks/snapshot/snapshot.service'),
+    import('../../src/lib/import-export/quickbooks/snapshot/snapshot-orchestrator'),
+    import('../../src/lib/import-export/quickbooks/snapshot/snapshot-source'),
+    import('../../src/integrations/accounting/providers/quickbooks/quickbooks-integration.service'),
+  ])
+  const qb = new provider.QuickBooksIntegrationService(CONFIG, ((async (input: string | URL) => {
+    const q = new URL(String(input)).searchParams.get('query') ?? ''
+    const entity = /FROM (\w+)/.exec(q)?.[1] ?? ''
+    return json({ QueryResponse: { [entity]: [{ Id: 'a1', Name: 'Cash', AcctNum: '1000', AccountType: 'Bank', Active: true }], startPosition: 1, maxResults: 1000 } })
+  }) as unknown as typeof fetch), NOW)
+
+  const snap = await service.createSnapshot({ companyId: COMPANY, realmId: CONTEXT.realmId, userId: USER, requestedResources: ['accounts'] })
+
+  // Break Storage listing, then drive to (attempted) finalize.
+  breakStorageList = true
+  t.after(() => { breakStorageList = false })
+  let threw = false
+  try {
+    for (let i = 0; i < 10; i += 1) {
+      const outcome = await orchestrator.runSnapshotOrchestratorStep({ provider: qb as never, context: CONTEXT, snapshotId: snap.id, companyId: COMPANY, userId: USER })
+      if (outcome.done) break
+    }
+  } catch {
+    threw = true
+  }
+  assert.ok(threw, 'finalize surfaced the listing failure as a step error (the job queue would retry)')
+
+  const mid = await service.getSnapshot(snap.id, COMPANY)
+  assert.notEqual(mid!.status, 'COMPLETE', 'no COMPLETE row while validation could not run')
+  assert.equal(mid!.validation, null)
+  // The unvalidated snapshot is NOT consumable by migration.
+  await assert.rejects(
+    () => source.fetchSnapshotResourcePage({ companyId: COMPANY, snapshotId: snap.id, resourceKey: 'accounts', importJobId: 'j1' }),
+    /not complete/,
+  )
+
+  // Storage recovers; the next step finalizes cleanly.
+  breakStorageList = false
+  for (let i = 0; i < 10; i += 1) {
+    const outcome = await orchestrator.runSnapshotOrchestratorStep({ provider: qb as never, context: CONTEXT, snapshotId: snap.id, companyId: COMPANY, userId: USER })
+    if (outcome.done) break
+  }
+  const done = await service.getSnapshot(snap.id, COMPANY)
+  assert.equal(done!.status, 'COMPLETE')
+  assert.equal(done!.validation?.ok, true)
+  t.diagnostic('C5: finalize listing outage -> RUNNING (retryable), recovery -> COMPLETE + validated')
 })

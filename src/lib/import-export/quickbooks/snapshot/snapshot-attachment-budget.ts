@@ -14,18 +14,57 @@
  * The ceiling is enforced by us, never by provoking a Supabase quota rejection.
  */
 
-const numericEnv = (name: string, fallback: number): number => {
-  const raw = process.env[name]
-  if (raw == null || raw === '') return fallback
-  const parsed = Number(raw)
-  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback
+export const DEFAULT_STORAGE_QUOTA_BYTES = 1_000_000_000 // Free plan, 1 GB decimal
+export const DEFAULT_RESERVED_SAFETY_BYTES = 170_000_000
+
+const parseIntEnv = (raw: string | undefined): number | null => {
+  if (raw == null || raw === '') return null
+  const value = Number(raw)
+  return Number.isFinite(value) && Number.isInteger(value) ? value : NaN
 }
 
-/** Total project-wide File Storage quota (Free plan = 1 GB decimal). */
-export const STORAGE_QUOTA_BYTES = numericEnv('QB_SNAPSHOT_STORAGE_QUOTA_BYTES', 1_000_000_000)
+/** A quota override is honoured only when it is a positive integer. */
+export function sanitizeQuotaBytes(raw: string | undefined, fallback = DEFAULT_STORAGE_QUOTA_BYTES): number {
+  const value = parseIntEnv(raw)
+  if (value === null) return fallback
+  if (Number.isNaN(value) || value <= 0) {
+    console.warn(`[quickbooks-snapshot] ignoring invalid QB_SNAPSHOT_STORAGE_QUOTA_BYTES=${JSON.stringify(raw)}; using ${fallback}`)
+    return fallback
+  }
+  return value
+}
+
+/**
+ * A reserve override is honoured only when it is a non-negative integer that is
+ * STRICTLY smaller than the quota — so the safety buffer can never be
+ * configured away.
+ */
+export function sanitizeReserveBytes(
+  raw: string | undefined,
+  quotaBytes: number,
+  fallback = DEFAULT_RESERVED_SAFETY_BYTES,
+): number {
+  const value = parseIntEnv(raw)
+  if (value === null) return Math.min(fallback, Math.max(0, quotaBytes - 1))
+  if (Number.isNaN(value) || value < 0 || value >= quotaBytes) {
+    console.warn(`[quickbooks-snapshot] ignoring invalid QB_SNAPSHOT_STORAGE_RESERVED_BYTES=${JSON.stringify(raw)}; using ${fallback}`)
+    return Math.min(fallback, Math.max(0, quotaBytes - 1))
+  }
+  return value
+}
+
+/**
+ * Total project-wide File Storage quota. Overridable via
+ * QB_SNAPSHOT_STORAGE_QUOTA_BYTES for non-production tiers; a non-positive or
+ * non-integer value is rejected in favour of the safe default.
+ */
+export const STORAGE_QUOTA_BYTES = sanitizeQuotaBytes(process.env.QB_SNAPSHOT_STORAGE_QUOTA_BYTES)
 
 /** Reserved head-room never available to attachment capture. */
-export const RESERVED_SAFETY_BYTES = numericEnv('QB_SNAPSHOT_STORAGE_RESERVED_BYTES', 170_000_000)
+export const RESERVED_SAFETY_BYTES = sanitizeReserveBytes(
+  process.env.QB_SNAPSHOT_STORAGE_RESERVED_BYTES,
+  STORAGE_QUOTA_BYTES,
+)
 
 export interface AttachmentBudgetInputs {
   quotaBytes: number
@@ -33,9 +72,19 @@ export interface AttachmentBudgetInputs {
   reservedSafetyBytes: number
 }
 
-/** Deterministic: `max(0, quota - usage - reserve)`. */
+/**
+ * Deterministic budget: `max(0, quota - usage - reserve)`, and never more than
+ * `quota - usage - reserve`. Defensive against a caller passing an unsafe
+ * (non-positive quota, negative usage/reserve, reserve >= quota) combination —
+ * any such case collapses the budget to 0 rather than producing an unsafe
+ * figure.
+ */
 export function computeAttachmentBudget(input: AttachmentBudgetInputs): number {
-  const budget = input.quotaBytes - input.currentUsageBytes - input.reservedSafetyBytes
+  const quota = Number.isFinite(input.quotaBytes) ? input.quotaBytes : 0
+  const usage = Number.isFinite(input.currentUsageBytes) ? Math.max(0, input.currentUsageBytes) : Number.POSITIVE_INFINITY
+  const reserve = Number.isFinite(input.reservedSafetyBytes) ? Math.max(0, input.reservedSafetyBytes) : Number.POSITIVE_INFINITY
+  if (quota <= 0 || reserve >= quota) return 0
+  const budget = quota - usage - reserve
   return budget > 0 ? Math.floor(budget) : 0
 }
 

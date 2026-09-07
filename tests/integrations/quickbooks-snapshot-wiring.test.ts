@@ -73,9 +73,13 @@ test('extractor writes each raw page to storage before advancing its checkpoint'
   assert.ok(writeIdx > -1 && cursorIdx > -1 && writeIdx < cursorIdx, 'page upload must precede checkpoint advance')
 })
 
-test('orchestrator only marks COMPLETE when the summary is COMPLETE and validation passes', () => {
+test('orchestrator only marks COMPLETE when the checkpoints say COMPLETE and validation passes', () => {
   const orch = read('src/lib/import-export/quickbooks/snapshot/snapshot-orchestrator.ts')
-  assert.match(orch, /refreshed\.status === 'COMPLETE' && validation\.ok/)
+  assert.match(orch, /intended === 'COMPLETE' && validation\.ok/)
+  // A finalize failure must reset the row so it is re-finalized, never left terminal without validation.
+  assert.match(orch, /markSnapshotRefinalizing/)
+  const service = read('src/lib/import-export/quickbooks/snapshot/snapshot.service.ts')
+  assert.match(service, /COMPLETE is written ONLY by saveSnapshotValidation/)
 })
 
 test('migration 070 provisions the attachment ledger + storage-budget columns', () => {
@@ -104,8 +108,14 @@ test('the storage budget = quota - usage - reserve, with a 170 MB reserve', asyn
   const mod = await import('../../src/lib/import-export/quickbooks/snapshot/snapshot-attachment-budget')
   assert.equal(mod.STORAGE_QUOTA_BYTES, 1_000_000_000)
   assert.equal(mod.RESERVED_SAFETY_BYTES, 170_000_000)
+  assert.equal(mod.DEFAULT_STORAGE_QUOTA_BYTES, 1_000_000_000)
+  assert.equal(mod.DEFAULT_RESERVED_SAFETY_BYTES, 170_000_000)
+  assert.equal(
+    mod.computeAttachmentBudget({ quotaBytes: 1_000_000_000, currentUsageBytes: 25_000_000, reservedSafetyBytes: 170_000_000 }),
+    805_000_000,
+  )
   const src = read('src/lib/import-export/quickbooks/snapshot/snapshot-attachment-budget.ts')
-  assert.match(src, /input\.quotaBytes - input\.currentUsageBytes - input\.reservedSafetyBytes/)
+  assert.match(src, /quota - usage - reserve/)
 })
 
 test('extractor sizes the budget before capture and fails safe when usage cannot be measured', () => {

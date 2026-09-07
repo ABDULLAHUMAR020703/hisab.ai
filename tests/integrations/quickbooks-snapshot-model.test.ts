@@ -70,6 +70,13 @@ test('an unsupported OPTIONAL resource still allows COMPLETE', () => {
   )
 })
 
+test('Phase 7: a snapshot with NO required resources is never COMPLETE (attachments-only -> PARTIAL)', () => {
+  assert.equal(computeSnapshotStatus(entities({ attachments: 'completed' }), []), 'PARTIAL')
+  assert.equal(computeSnapshotStatus(entities({ attachments: 'completed', classes: 'completed' }), []), 'PARTIAL')
+  // still RUNNING while an optional resource is mid-flight
+  assert.equal(computeSnapshotStatus(entities({ attachments: 'running' }), []), 'RUNNING')
+})
+
 test('only COMPLETE snapshots are consumable by migration', () => {
   assert.equal(isSnapshotConsumable('COMPLETE'), true)
   for (const status of ['RUNNING', 'PARTIAL', 'FAILED'] as const) {

@@ -81,6 +81,69 @@ The same endpoint resumes a `PARTIAL` / `FAILED` snapshot — failed / stuck
 resources reset to `pending`, completed resources are kept, extraction continues
 from each resource's checkpoint.
 
+### Production operation — creating a snapshot exactly once
+
+- **Use the authenticated, tenant-scoped API** `POST /api/import-export/quickbooks-snapshots`
+  (or the server-side `createSnapshot(...)` with the tenant's `companyId` /
+  `realmId` hard-coded). **Do not** use `scripts/quickbooks/snapshot.ts create`
+  for a specific client — its `resolveConnection()` picks the most-recently-updated
+  `CONNECTED` connection across **all** tenants and can bind to the wrong company.
+- Create the snapshot **once**. If the create call times out or returns an
+  ambiguous result, **inspect the DB / job state before retrying**:
+  `SELECT id,status,created_at FROM quickbooks_migration_snapshots WHERE company_id=… AND realm_id=… ORDER BY created_at DESC;`
+  and `SELECT id,status FROM job_queue WHERE job_type='QUICKBOOKS_SNAPSHOT_STEP' AND status IN ('PENDING','RUNNING');`
+- Never manually enqueue a `QUICKBOOKS_SNAPSHOT_STEP` — the create route and the
+  post-complete hook are the only things that should.
+
+### Authentication during a long attachment extraction
+
+Attachment capture can run for tens of minutes and a QBO access token lives
+~1 hour. An access-token expiry mid-step is **recovered automatically**: the
+provider auth exception propagates to `ConnectionService.executeWithAccessToken`,
+which refreshes the token and replays the step. The replay is idempotent — an
+already-`captured` attachment is not re-downloaded and no Storage object is
+duplicated. It is **not** silently turned into a `failed` attachment.
+
+If the **refresh token** itself is dead, the step keeps failing, the job
+dead-letters, and the snapshot sits `RUNNING` with a stalled heartbeat —
+reconnect QuickBooks, then `POST …/retry`.
+
+### The storage-budget model (Free plan, 1 GB project-wide)
+
+- Required-core and required-transactional resources are captured **first** and
+  are never sacrificed for attachments. `attachments` is always the last resource.
+- At the start of the attachment phase, project-wide Storage usage is measured
+  across **every** bucket (`company-files` included). The attachment byte budget is
+  `quota (1,000,000,000) − measured usage − reserve (170,000,000)`, persisted on
+  the snapshot row (`attachment_budget_bytes`).
+- Each attachment is captured only if it fits the remaining budget (checked
+  against the QuickBooks-reported size, then re-checked against the real bytes);
+  otherwise it is recorded `skipped_budget` and **never uploaded**. The ceiling is
+  enforced in application code, not by a Supabase quota rejection.
+- **Budget exhaustion is not a snapshot failure.** The snapshot can still reach
+  `COMPLETE` if every required resource is `completed` and validation passes.
+- The `QB_SNAPSHOT_STORAGE_QUOTA_BYTES` / `QB_SNAPSHOT_STORAGE_RESERVED_BYTES`
+  env overrides are sanitised — a non-positive quota, or a reserve ≥ quota, is
+  rejected in favour of the safe defaults. In production **neither is set**.
+- Per-attachment outcome (`captured` / `skipped_budget` / `failed` / `unavailable`,
+  size, sha256, Storage path, reason) is in `quickbooks_snapshot_attachments`.
+  The report's ATTACHMENTS block shows `CAPTURED n / total` and `Coverage %`.
+
+### Retention and cleanup of raw snapshots
+
+- Snapshot page files and attachment binaries are **immutable** once written.
+- Snapshot-backed migration points `documents.file_path` **directly** at the
+  snapshot's attachment objects (zero-copy). **A snapshot whose attachments have
+  been migrated must be retained** — deleting its Storage prefix breaks those
+  `documents` rows.
+- A superseded snapshot's Storage prefix is cleared **only** through the approved
+  cleanup procedure (recursive delete scoped to exactly
+  `<companyId>/quickbooks/<realmId>/snapshots/<snapshotId>/`), never the Supabase
+  dashboard "delete folder" (it times out on the attachment folder tree).
+- The DB row is kept as an inert audit record; do not delete it.
+- **Retention duration is an operator decision** — this project has not set one.
+  Until it does, keep every `COMPLETE` snapshot that has been (or may be) migrated.
+
 ---
 
 ## 3. Verify the snapshot before migrating
@@ -144,9 +207,13 @@ quickbooks-migration/                       (private bucket, public = false, 100
     accounts/page-000001.json
     invoices/page-000001.json  page-000002.json ...        (page-NNNNNN-part-NN.json if a page > ~40 MB)
     customer-payments/page-000001.json                     (raw QBO Payment entities)
-    attachments/<attachableId>/<file>   attachments/index.json
+    attachments/<attachableId>/<file>                      (only for CAPTURED attachments)
     ...
 ```
+
+The per-attachment index is the `quickbooks_snapshot_attachments` DB table (not a
+Storage object) — one row per Attachable with its capture status, size, sha256,
+and Storage path.
 
 Each `page-*.json` holds the raw QuickBooks entities exactly as the API returned them
 (`Id`, `SyncToken`, `MetaData`, `Line`, refs, `CustomField`), plus page metadata. The

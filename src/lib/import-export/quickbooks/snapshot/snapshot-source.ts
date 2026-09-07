@@ -31,7 +31,9 @@ export async function fetchSnapshotResourcePage(input: {
 
   const snapshot = await getSnapshot(snapshotId, companyId)
   if (!snapshot) throw new Error(`QuickBooks snapshot ${snapshotId} not found for company ${companyId}.`)
-  if (snapshot.status !== 'COMPLETE') {
+  // COMPLETE must also mean validated — defends against a COMPLETE row left
+  // without a validation report by an interrupted finalize.
+  if (snapshot.status !== 'COMPLETE' || !snapshot.validation?.ok) {
     throw new Error(`QuickBooks snapshot is not complete.`)
   }
 

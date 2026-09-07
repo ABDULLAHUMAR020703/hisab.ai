@@ -288,15 +288,19 @@ export async function refreshSnapshotSummary(snapshotId: string): Promise<Snapsh
   }
 
   const required = requiredSnapshotResourceKeys(snapshot.requestedResources)
-  const nextStatus = computeSnapshotStatus(entities, required)
+  const computed = computeSnapshotStatus(entities, required)
+  // COMPLETE is written ONLY by saveSnapshotValidation, after validation passes.
+  // Until then a would-be-COMPLETE snapshot sits at PARTIAL, so a COMPLETE row
+  // can never exist without a validation report.
+  const nextStatus = computed === 'COMPLETE' ? 'PARTIAL' : computed
 
   const patch: Record<string, unknown> = {
     entities,
     status: nextStatus,
     updated_at: new Date().toISOString(),
   }
-  if ((nextStatus === 'COMPLETE' || nextStatus === 'FAILED' || nextStatus === 'PARTIAL') && !snapshot.completedAt) {
-    // completed_at marks "extraction finished" — set once the snapshot is terminal.
+  if ((computed === 'COMPLETE' || nextStatus === 'FAILED' || nextStatus === 'PARTIAL') && !snapshot.completedAt) {
+    // completed_at marks "extraction finished" — set once every resource is terminal.
     patch.completed_at = new Date().toISOString()
   }
 
@@ -308,6 +312,22 @@ export async function refreshSnapshotSummary(snapshotId: string): Promise<Snapsh
     .single()
   if (error) throw error
   return mapSnapshot(data)
+}
+
+/**
+ * Puts a snapshot back to RUNNING so a queued retry re-finalizes it. Used when
+ * finalization (manifest walk / validation) throws AFTER `refreshSnapshotSummary`
+ * has already persisted a terminal status — a COMPLETE row must never exist
+ * without a validation report. Checkpoints (all terminal, all correct) are left
+ * untouched.
+ */
+export async function markSnapshotRefinalizing(snapshotId: string): Promise<void> {
+  const { error } = await createAdminClient()
+    .from('quickbooks_migration_snapshots')
+    .update({ status: 'RUNNING', validation: null, completed_at: null, updated_at: new Date().toISOString() })
+    .eq('id', snapshotId)
+    .neq('status', 'RUNNING')
+  if (error) throw error
 }
 
 export async function saveSnapshotValidation(

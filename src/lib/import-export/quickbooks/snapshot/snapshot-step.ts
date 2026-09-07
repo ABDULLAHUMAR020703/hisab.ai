@@ -23,7 +23,13 @@ export async function runSnapshotStep(
   return withCompanyContext(companyId, async () => {
     const snapshot = await getSnapshot(snapshotId, companyId)
     if (!snapshot) throw new Error(`Snapshot ${snapshotId} not found for company ${companyId}.`)
-    if (snapshot.status === 'COMPLETE' || snapshot.status === 'FAILED') {
+    // Terminal only when finalized (validation report present). A COMPLETE /
+    // PARTIAL row with no validation means finalization was interrupted — fall
+    // through so the orchestrator re-runs it.
+    const finalized =
+      snapshot.status === 'FAILED' ||
+      ((snapshot.status === 'COMPLETE' || snapshot.status === 'PARTIAL') && snapshot.validation != null)
+    if (finalized) {
       return { snapshotId, processedResource: null, snapshotStatus: snapshot.status, done: true }
     }
 

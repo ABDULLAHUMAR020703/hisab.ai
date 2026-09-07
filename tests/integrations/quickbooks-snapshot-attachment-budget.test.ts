@@ -11,7 +11,7 @@ import { createRequire } from 'node:module'
 const requireModule = createRequire(import.meta.url)
 requireModule('../../scripts/zatca/setup-server-only.cjs')
 
-const { computeAttachmentBudget, attachmentFitsBudget } = requireModule(
+const { computeAttachmentBudget, attachmentFitsBudget, sanitizeQuotaBytes, sanitizeReserveBytes, DEFAULT_STORAGE_QUOTA_BYTES, DEFAULT_RESERVED_SAFETY_BYTES } = requireModule(
   '../../src/lib/import-export/quickbooks/snapshot/snapshot-attachment-budget',
 ) as typeof import('../../src/lib/import-export/quickbooks/snapshot/snapshot-attachment-budget')
 const { measureStorageUsageBytes } = requireModule(
@@ -49,6 +49,47 @@ test('budget can never be negative — over-quota usage yields 0', () => {
     computeAttachmentBudget({ quotaBytes: QUOTA, currentUsageBytes: QUOTA - RESERVE, reservedSafetyBytes: RESERVE }),
     0,
   )
+})
+
+test('Phase 4: computeAttachmentBudget collapses unsafe inputs to 0', () => {
+  assert.equal(computeAttachmentBudget({ quotaBytes: 0, currentUsageBytes: 0, reservedSafetyBytes: 0 }), 0)
+  assert.equal(computeAttachmentBudget({ quotaBytes: -1, currentUsageBytes: 0, reservedSafetyBytes: 0 }), 0)
+  // reserve >= quota -> nothing available
+  assert.equal(computeAttachmentBudget({ quotaBytes: 100, currentUsageBytes: 0, reservedSafetyBytes: 100 }), 0)
+  assert.equal(computeAttachmentBudget({ quotaBytes: 100, currentUsageBytes: 0, reservedSafetyBytes: 500 }), 0)
+  // negative usage/reserve are clamped, never inflate the budget
+  assert.equal(
+    computeAttachmentBudget({ quotaBytes: QUOTA, currentUsageBytes: -5_000_000, reservedSafetyBytes: RESERVE }),
+    QUOTA - RESERVE,
+  )
+  assert.equal(computeAttachmentBudget({ quotaBytes: QUOTA, currentUsageBytes: 0, reservedSafetyBytes: -1 }), QUOTA)
+  assert.equal(computeAttachmentBudget({ quotaBytes: NaN, currentUsageBytes: 0, reservedSafetyBytes: 0 }), 0)
+})
+
+test('Phase 4: sanitizeQuotaBytes rejects non-positive / non-integer overrides', () => {
+  assert.equal(sanitizeQuotaBytes(undefined), DEFAULT_STORAGE_QUOTA_BYTES)
+  assert.equal(sanitizeQuotaBytes(''), DEFAULT_STORAGE_QUOTA_BYTES)
+  assert.equal(sanitizeQuotaBytes('0'), DEFAULT_STORAGE_QUOTA_BYTES)
+  assert.equal(sanitizeQuotaBytes('-5'), DEFAULT_STORAGE_QUOTA_BYTES)
+  assert.equal(sanitizeQuotaBytes('not-a-number'), DEFAULT_STORAGE_QUOTA_BYTES)
+  assert.equal(sanitizeQuotaBytes('1.5'), DEFAULT_STORAGE_QUOTA_BYTES)
+  assert.equal(sanitizeQuotaBytes('5000000000'), 5_000_000_000) // a valid override IS honoured
+})
+
+test('Phase 4: sanitizeReserveBytes rejects negative or >= quota; buffer can never be configured away', () => {
+  assert.equal(sanitizeReserveBytes(undefined, 1_000_000_000), DEFAULT_RESERVED_SAFETY_BYTES)
+  assert.equal(sanitizeReserveBytes('-1', 1_000_000_000), DEFAULT_RESERVED_SAFETY_BYTES)
+  assert.equal(sanitizeReserveBytes('1000000000', 1_000_000_000), DEFAULT_RESERVED_SAFETY_BYTES, 'reserve == quota rejected')
+  assert.equal(sanitizeReserveBytes('999999999999', 1_000_000_000), DEFAULT_RESERVED_SAFETY_BYTES, 'reserve > quota rejected')
+  assert.equal(sanitizeReserveBytes('bad', 1_000_000_000), DEFAULT_RESERVED_SAFETY_BYTES)
+  assert.equal(sanitizeReserveBytes('200000000', 1_000_000_000), 200_000_000) // valid override honoured
+  // A tiny (unrealistic) quota still keeps a reserve strictly below it.
+  assert.ok(sanitizeReserveBytes(undefined, 100) < 100)
+})
+
+test('Phase 4: production defaults are the safe values', () => {
+  assert.equal(DEFAULT_STORAGE_QUOTA_BYTES, 1_000_000_000)
+  assert.equal(DEFAULT_RESERVED_SAFETY_BYTES, 170_000_000)
 })
 
 test('E/F: attachmentFitsBudget — exact boundary fits, one byte over does not', () => {

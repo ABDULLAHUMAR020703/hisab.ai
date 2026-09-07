@@ -176,7 +176,7 @@ test('K: COMPLETE-eligible with SKIPPED_BUDGET attachments — no blocking issue
       ledgerEntry({ attachableId: 'a1', status: 'captured', storagePath: 'attachments/a1/f.pdf', capturedBytes: 10 }),
       ledgerEntry({ attachableId: 'a2', status: 'skipped_budget', reason: 'over budget' }),
     ],
-    attachmentObjectBytes: new Map([['attachments/a1/f.pdf', 10]]),
+    storageObjectBytes: new Map([['attachments/a1/f.pdf', 10]]),
   })
   assert.equal(report.ok, true, JSON.stringify(report.issues))
 })
@@ -184,7 +184,7 @@ test('K: COMPLETE-eligible with SKIPPED_BUDGET attachments — no blocking issue
 test('captured attachment with no Storage object → attachment_missing_object, not ok', async () => {
   const report = await validateSnapshot(attManifest(), {
     attachmentLedger: [ledgerEntry({ attachableId: 'a1', status: 'captured', storagePath: 'attachments/a1/f.pdf', capturedBytes: 10 })],
-    attachmentObjectBytes: new Map(),
+    storageObjectBytes: new Map(),
   })
   assert.equal(report.ok, false)
   assert.ok(report.issues.some((i) => i.code === 'attachment_missing_object'))
@@ -193,7 +193,7 @@ test('captured attachment with no Storage object → attachment_missing_object, 
 test('captured attachment size mismatch vs Storage → attachment_size_mismatch, not ok', async () => {
   const report = await validateSnapshot(attManifest(), {
     attachmentLedger: [ledgerEntry({ attachableId: 'a1', status: 'captured', storagePath: 'attachments/a1/f.pdf', capturedBytes: 10 })],
-    attachmentObjectBytes: new Map([['attachments/a1/f.pdf', 999]]),
+    storageObjectBytes: new Map([['attachments/a1/f.pdf', 999]]),
   })
   assert.equal(report.ok, false)
   assert.ok(report.issues.some((i) => i.code === 'attachment_size_mismatch'))
@@ -221,8 +221,42 @@ test('duplicate ledger entries for one attachable → ledger inconsistent', asyn
 test('attachment ledger is ignored when attachments was not requested', async () => {
   const report = await validateSnapshot(attManifest(false), {
     attachmentLedger: [ledgerEntry({ attachableId: 'a1', status: 'captured', storagePath: 'x', capturedBytes: 1 })],
-    attachmentObjectBytes: new Map(),
+    storageObjectBytes: new Map(),
     readPage: async () => [{ Id: 'a1' }],
   })
   assert.ok(!report.issues.some((i) => i.code.startsWith('attachment_')))
+})
+
+test('Phase 5: a manifest page reference with no Storage object -> missing_file, not ok', async () => {
+  const report = await validateSnapshot(
+    manifest({
+      accounts: { status: 'completed', entity: 'Account', pages: 1, records: 1, files: ['accounts/page-000001.json'] },
+      invoices: { status: 'completed', entity: 'Invoice', pages: 1, records: 1, files: ['invoices/page-000001.json'] },
+    }),
+    {
+      readPage: async () => [{ Id: 'x' }],
+      storageObjectBytes: new Map([['accounts/page-000001.json', 50]]), // invoices page absent
+    },
+  )
+  assert.equal(report.ok, false)
+  assert.ok(report.issues.some((i) => i.code === 'missing_file' && i.message.includes('invoices/page-000001.json')))
+})
+
+test('Phase 5: attachment summary count that disagrees with the ledger -> inconsistent, not ok', async () => {
+  const m = manifest(
+    { attachments: { status: 'completed', entity: 'Attachable', records: 2 } },
+    { requiredResources: [], requestedResources: ['attachments'] },
+  )
+  m.entities['attachments'].attachmentSummary = {
+    metadataRecords: 2, binariesDownloaded: 1, binariesFailed: 0, captured: 1, totalCandidates: 2, capturedBytes: 10,
+  }
+  const report = await validateSnapshot(m, {
+    attachmentLedger: [
+      ledgerEntry({ attachableId: 'a1', status: 'captured', storagePath: 'attachments/a1/f.pdf', capturedBytes: 10 }),
+      ledgerEntry({ attachableId: 'a2', status: 'captured', storagePath: 'attachments/a2/f.pdf', capturedBytes: 10 }),
+    ],
+    storageObjectBytes: new Map([['attachments/a1/f.pdf', 10], ['attachments/a2/f.pdf', 10]]),
+  })
+  assert.equal(report.ok, false)
+  assert.ok(report.issues.some((i) => i.code === 'attachment_ledger_inconsistent' && /summary reports 1 captured but the ledger has 2/.test(i.message)))
 })
