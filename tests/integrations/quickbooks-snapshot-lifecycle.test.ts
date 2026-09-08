@@ -412,6 +412,56 @@ test('M/N/O: snapshot-backed migration resolves the captured binary from Storage
   t.diagnostic(`snapshot attachment migration: captured resolved from Storage, ${qboCalls} QuickBooks calls`)
 })
 
+test('SELF-HEAL: finalize reconciles a stale checkpoint attachment summary from the full ledger', { skip: MOCKS }, async (t) => {
+  const [service, orchestrator, provider] = await Promise.all([
+    import('../../src/lib/import-export/quickbooks/snapshot/snapshot.service'),
+    import('../../src/lib/import-export/quickbooks/snapshot/snapshot-orchestrator'),
+    import('../../src/integrations/accounting/providers/quickbooks/quickbooks-integration.service'),
+  ])
+  const ACCTS = [{ Id: 'a1', Name: 'Cash', AcctNum: '1000', AccountType: 'Bank', Active: true }]
+  const ATTS = [
+    { Id: 'x1', FileName: 'a.pdf', ContentType: 'application/pdf', Size: 7, AttachableRef: [{ EntityRef: { type: 'Account', value: 'a1' } }] },
+    { Id: 'x2', FileName: 'b.pdf', ContentType: 'application/pdf', Size: 7, AttachableRef: [{ EntityRef: { type: 'Account', value: 'a1' } }] },
+  ]
+  const qb = new provider.QuickBooksIntegrationService(CONFIG, ((async (input: string | URL) => {
+    const q = new URL(String(input)).searchParams.get('query') ?? ''
+    const entity = /FROM (\w+)/.exec(q)?.[1] ?? ''
+    return json({ QueryResponse: { [entity]: entity === 'Account' ? ACCTS : ATTS, startPosition: 1, maxResults: 1000 } })
+  }) as unknown as typeof fetch), NOW) as unknown as { getEntityRecords: unknown; downloadAttachment: unknown }
+  ;(qb as { downloadAttachment: unknown }).downloadAttachment = async () => ({ url: '', content: new TextEncoder().encode('PDFDATA').buffer as ArrayBuffer, contentType: 'application/pdf' })
+
+  const snap = await service.createSnapshot({ companyId: COMPANY, realmId: CONTEXT.realmId, userId: USER, requestedResources: ['accounts', 'attachments'] })
+  for (let i = 0; i < 20; i += 1) {
+    const o = await orchestrator.runSnapshotOrchestratorStep({ provider: qb as never, context: CONTEXT, snapshotId: snap.id, companyId: COMPANY, userId: USER })
+    if (o.done) break
+  }
+  assert.equal((await service.getSnapshot(snap.id, COMPANY))!.status, 'COMPLETE')
+
+  // Corrupt the checkpoint summary the way a mid-run replay would (undercount),
+  // and knock the snapshot out of its finalized state so it re-finalizes.
+  const cpRows = fake.db.get('quickbooks_snapshot_checkpoints')!
+  const attCp = cpRows.find((r) => r.snapshot_id === snap.id && r.resource_key === 'attachments')!
+  attCp.attachment_summary = { metadataRecords: 2, binariesDownloaded: 1, binariesFailed: 0, captured: 1, totalCandidates: 1, skippedBudget: 0, failed: 0, unavailable: 0, capturedBytes: 7 }
+  // reopenSnapshotForRetry clears validation + status so the orchestrator re-finalizes.
+  const retried = await service.reopenSnapshotForRetry(snap.id, COMPANY)
+  assert.deepEqual(retried, [], 'no checkpoints needed resetting (none failed/running)')
+
+  // Re-finalize (fixed provider replay would re-run resources; here all are
+  // terminal so it goes straight to finalize).
+  for (let i = 0; i < 5; i += 1) {
+    const o = await orchestrator.runSnapshotOrchestratorStep({ provider: qb as never, context: CONTEXT, snapshotId: snap.id, companyId: COMPANY, userId: USER })
+    if (o.done) break
+  }
+
+  const healed = await service.getSnapshot(snap.id, COMPANY)
+  assert.equal(healed!.status, 'COMPLETE', JSON.stringify(healed!.validation))
+  assert.equal(healed!.validation?.ok, true)
+  const s = healed!.entities['attachments'].attachmentSummary!
+  assert.equal(s.captured, 2, 'summary reconciled to the true ledger count')
+  assert.equal(s.totalCandidates, 2)
+  t.diagnostic('finalize recomputed the attachment summary from the full ledger -> validation.ok -> COMPLETE')
+})
+
 test('C5: a transient Storage-listing failure during finalize never leaves a COMPLETE row without validation', { skip: MOCKS }, async (t) => {
   const [service, orchestrator, source, provider] = await Promise.all([
     import('../../src/lib/import-export/quickbooks/snapshot/snapshot.service'),

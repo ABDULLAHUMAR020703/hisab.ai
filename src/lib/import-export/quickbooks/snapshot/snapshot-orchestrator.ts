@@ -4,7 +4,7 @@ import { logger } from '@/lib/ops/logger'
 import { computeSnapshotStatus, isTerminalEntityStatus } from './snapshot-model'
 import { requiredSnapshotResourceKeys, SNAPSHOT_RESOURCES } from './snapshot-resources'
 import { extractSnapshotResource } from './snapshot-extractor'
-import { listAttachmentLedger } from './snapshot-attachment-ledger'
+import { listAttachmentLedger, summariseAttachmentLedger } from './snapshot-attachment-ledger'
 import { writeSnapshotManifest } from './snapshot-manifest'
 import { listObjectStats, readRawPage } from './snapshot-storage'
 import { validateSnapshot } from './snapshot-validation'
@@ -13,6 +13,7 @@ import {
   listCheckpoints,
   markSnapshotRefinalizing,
   refreshSnapshotSummary,
+  saveCheckpoint,
   saveSnapshotValidation,
 } from './snapshot.service'
 
@@ -118,16 +119,30 @@ async function finalizeSnapshot(
     requiredSnapshotResourceKeys(refreshed.requestedResources),
   )
   try {
-    // One Storage walk for the whole finalize: manifest (x2) + validation.
-    const objectStats = await listObjectStats(refreshed.storagePrefix)
-    const manifest = await writeSnapshotManifest(refreshed, { objectStats })
+    // Reconcile the attachments summary from the COMPLETE (paginated) ledger
+    // BEFORE anything reads it. A step that died mid-run — e.g. an OAuth-refresh
+    // replay — can leave a stale cached summary on the checkpoint; the ledger is
+    // authoritative. Self-heals any snapshot with a summary/ledger drift.
+    const requestedAttachments = refreshed.requestedResources.includes('attachments')
+    const attachmentLedger = requestedAttachments ? await listAttachmentLedger(input.snapshotId) : []
+    if (requestedAttachments) {
+      const attCheckpoint = checkpoints.find((c) => c.resourceKey === 'attachments')
+      await saveCheckpoint(input.snapshotId, 'attachments', {
+        attachmentSummary: summariseAttachmentLedger(attachmentLedger, {
+          budgetBytes: refreshed.attachmentBudgetBytes ?? undefined,
+          metadataRecords: attCheckpoint?.recordsWritten,
+        }),
+      })
+    }
+    // Rebuild the row's `entities` from the now-reconciled checkpoints.
+    const reconciled = requestedAttachments ? await refreshSnapshotSummary(input.snapshotId) : refreshed
 
-    const attachmentLedger = manifest.requestedResources.includes('attachments')
-      ? await listAttachmentLedger(input.snapshotId)
-      : []
+    // One Storage walk for the whole finalize: manifest (x2) + validation.
+    const objectStats = await listObjectStats(reconciled.storagePrefix)
+    const manifest = await writeSnapshotManifest(reconciled, { objectStats })
 
     const validation = await validateSnapshot(manifest, {
-      readPage: (relativeFile) => readRawPage(refreshed.storagePrefix, relativeFile),
+      readPage: (relativeFile) => readRawPage(reconciled.storagePrefix, relativeFile),
       attachmentLedger,
       storageObjectBytes: new Map(objectStats.map((stat) => [stat.path, stat.bytes])),
     })
