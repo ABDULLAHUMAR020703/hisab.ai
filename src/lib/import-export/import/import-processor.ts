@@ -341,7 +341,8 @@ async function processQuickBooksMasterPage(input: ProcessImportInput): Promise<I
     const realmId = String((chunk[0]?.mapped as Record<string, unknown>)?._realmId ?? '')
 
     // Phase A — one read of the migration-tracking state for the whole page.
-    const state = await measure('page_state_prefetch', () => loadQuickBooksMigrationPageState(companyId, realmId, chunk.map((row) => quickBooksSourceIdOf(row.mapped as Record<string, unknown>))))
+    const pageEntityType = String((chunk[0]?.mapped as Record<string, unknown>)?._quickbooksEntity ?? '')
+    const state = await measure('page_state_prefetch', () => loadQuickBooksMigrationPageState(companyId, realmId, chunk.map((row) => quickBooksSourceIdOf(row.mapped as Record<string, unknown>)), pageEntityType || undefined))
 
     // Phase B — classify every row in memory (no I/O). Mirrors the per-record
     // decision tree: skip-fast (unchanged & already materialized) → skip →
@@ -444,7 +445,8 @@ async function processQuickBooksMasterPage(input: ProcessImportInput): Promise<I
     if (input.assertActive) await input.assertActive()
     const toVerify = linked.filter((plan) => !plan.failed && plan.kind !== 'skip')
     if (toVerify.length) {
-      const verifyState = await measure('link_verification_batch', () => loadQuickBooksMigrationPageState(companyId, realmId, toVerify.map((plan) => quickBooksSourceIdOf(plan.row.mapped as Record<string, unknown>))))
+      const verifyEntityType = String((toVerify[0]?.row.mapped as Record<string, unknown>)?._quickbooksEntity ?? '')
+      const verifyState = await measure('link_verification_batch', () => loadQuickBooksMigrationPageState(companyId, realmId, toVerify.map((plan) => quickBooksSourceIdOf(plan.row.mapped as Record<string, unknown>)), verifyEntityType || undefined))
       for (const plan of toVerify) {
         const failure = verifyQuickBooksRecordLinked(plan.row.mapped as Record<string, unknown>, plan.localId!, verifyState)
         if (!failure) continue

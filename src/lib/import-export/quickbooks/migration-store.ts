@@ -35,6 +35,19 @@ export function quickBooksSourceIdOf(row: Row): string {
   return String(raw.Id ?? row._quickbooksId ?? row.sourceId ?? '')
 }
 
+/**
+ * Key for the {@link QuickBooksMigrationPageState} maps. QuickBooks reuses small
+ * integer ids across entity types (Account "2", Customer "2", Vendor "2" all
+ * exist), and `quickbooks_migration_records` is keyed by
+ * `(company, realm, entity_type, source_id)` — so the page-state maps MUST be
+ * keyed by `(entityType, sourceId)`, never `sourceId` alone, or a link check
+ * for Customer "2" can read the Account "2" row and wrongly report
+ * "linked to an unexpected native record".
+ */
+function pageStateKey(entityType: string, sourceId: string): string {
+  return `${entityType}::${sourceId}`
+}
+
 interface MigrationRecordInput { companyId: string; realmId: string; entityType: string; row: Row; localTable?: string; localId?: string; partition?: string }
 
 /**
@@ -168,7 +181,12 @@ export interface QuickBooksMigrationPageState {
  * `quickbooks_migration_local_links` reads that `isQuickBooksRecordUnchanged`
  * and `assertQuickBooksRecordLinked` do individually. Two IN queries per page.
  */
-export async function loadQuickBooksMigrationPageState(companyId: string, realmId: string, sourceIds: string[]): Promise<QuickBooksMigrationPageState> {
+export async function loadQuickBooksMigrationPageState(
+  companyId: string,
+  realmId: string,
+  sourceIds: string[],
+  entityType?: string,
+): Promise<QuickBooksMigrationPageState> {
   const unique = [...new Set(sourceIds.filter(Boolean))]
   const state: QuickBooksMigrationPageState = { records: new Map(), links: new Map() }
   if (unique.length === 0) return state
@@ -176,10 +194,13 @@ export async function loadQuickBooksMigrationPageState(companyId: string, realmI
   const CHUNK = 200
   for (let index = 0; index < unique.length; index += CHUNK) {
     const slice = unique.slice(index, index + CHUNK)
-    const records = await db.from('quickbooks_migration_records').select('source_id,payload_hash,local_id,local_table,imported_at,entity_type').eq('company_id', companyId).eq('realm_id', realmId).in('source_id', slice)
+    let recordQuery = db.from('quickbooks_migration_records').select('source_id,payload_hash,local_id,local_table,imported_at,entity_type').eq('company_id', companyId).eq('realm_id', realmId).in('source_id', slice)
+    if (entityType) recordQuery = recordQuery.eq('entity_type', entityType)
+    const records = await recordQuery
     if (records.error) throw records.error
     for (const row of records.data ?? []) {
-      state.records.set(String(row.source_id), {
+      // Keyed by (entity_type, source_id): QuickBooks reuses ids across entities.
+      state.records.set(pageStateKey(String(row.entity_type ?? ''), String(row.source_id)), {
         payloadHash: row.payload_hash === null || row.payload_hash === undefined ? null : String(row.payload_hash),
         localId: row.local_id ? String(row.local_id) : null,
         localTable: row.local_table ? String(row.local_table) : null,
@@ -187,10 +208,12 @@ export async function loadQuickBooksMigrationPageState(companyId: string, realmI
         entityType: String(row.entity_type ?? ''),
       })
     }
-    const links = await db.from('quickbooks_migration_local_links').select('source_id,local_table,local_id').eq('company_id', companyId).eq('realm_id', realmId).in('source_id', slice)
+    let linkQuery = db.from('quickbooks_migration_local_links').select('source_id,local_table,local_id,entity_type').eq('company_id', companyId).eq('realm_id', realmId).in('source_id', slice)
+    if (entityType) linkQuery = linkQuery.eq('entity_type', entityType)
+    const links = await linkQuery
     if (links.error) throw links.error
     for (const row of links.data ?? []) {
-      const key = String(row.source_id)
+      const key = pageStateKey(String(row.entity_type ?? ''), String(row.source_id))
       const list = state.links.get(key) ?? []
       list.push({ localTable: String(row.local_table), localId: String(row.local_id) })
       state.links.set(key, list)
@@ -240,10 +263,11 @@ export function verifyQuickBooksRecordLinked(row: Row, expectedLocalId: string, 
   const entityType = String(row._quickbooksEntity ?? '')
   const sourceId = quickBooksSourceIdOf(row)
   if (!entityType || !sourceId) return null
-  const record = state.records.get(sourceId)
+  const key = pageStateKey(entityType, sourceId)
+  const record = state.records.get(key)
   if (!record?.localId || !record.localTable || !record.importedAt) return `QuickBooks ${entityType} ${sourceId} was preserved but did not complete native materialization.`
   if (record.localId !== expectedLocalId) return `QuickBooks ${entityType} ${sourceId} linked to an unexpected native record.`
-  const links = state.links.get(sourceId) ?? []
+  const links = state.links.get(key) ?? []
   if (!links.some((link) => link.localTable === record.localTable && link.localId === expectedLocalId)) return `QuickBooks ${entityType} ${sourceId} has no durable native migration link.`
   return null
 }
@@ -253,7 +277,7 @@ export function isQuickBooksRecordUnchangedInState(row: Row, state: QuickBooksMi
   const entityType = String(row._quickbooksEntity ?? '')
   const sourceId = quickBooksSourceIdOf(row)
   if (!entityType || !sourceId) return false
-  const record = state.records.get(sourceId)
+  const record = state.records.get(pageStateKey(entityType, sourceId))
   if (!record?.localId || !record.importedAt) return false
   return record.payloadHash === sourcePayloadHash(parseQuickBooksRaw(row), entityType)
 }
