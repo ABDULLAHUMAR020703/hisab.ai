@@ -13,13 +13,27 @@ import { TAX_RATE_OFFICIAL_TEMPLATES } from './tax-rates.official-templates'
 export { TAX_RATE_FIELDS } from './tax-rates.fields'
 
 function parseTaxRateImportRow(mapped: Record<string, unknown>) {
-  return {
+  const parsed: {
+    name: string
+    rate: number
+    type: string
+    isDefault: boolean
+    isActive: boolean
+    isReverseCharge?: boolean
+  } = {
     name: String(mapped.name ?? '').trim(),
     rate: parseNumberField(mapped.rate, 0),
     type: parseOptionalString(mapped.type)?.toUpperCase() ?? 'VAT',
     isDefault: parseBooleanField(mapped.isDefault, false),
     isActive: parseBooleanField(mapped.isActive, true),
   }
+  // Only carried through when the source row set it (QuickBooks
+  // SpecialTaxType = REVERSE_CHARGE). Absent → repository leaves the column at
+  // its default (false), so CSV / official-template imports are unaffected.
+  if (mapped.isReverseCharge !== undefined) {
+    parsed.isReverseCharge = parseBooleanField(mapped.isReverseCharge, false)
+  }
+  return parsed
 }
 
 export const taxRatesModule: ModuleDefinition = {
@@ -80,6 +94,7 @@ export const taxRatesModule: ModuleDefinition = {
       rate: taxRate.rate,
       type: taxRate.type,
       isDefault: taxRate.isDefault,
+      isReverseCharge: taxRate.isReverseCharge,
       isActive: taxRate.isActive,
     }
   },

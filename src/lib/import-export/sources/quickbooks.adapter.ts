@@ -352,12 +352,22 @@ export class QuickBooksImportAdapter implements ImportSourceAdapter {
         minQuantity: '0',
         isActive: value(row.Active ?? true),
       }
-      case 'tax-codes': return {
-        name: value(row.Name),
-        rate: value(row.RateValue ?? 0),
-        type: 'VAT',
-        isDefault: 'false',
-        isActive: value(row.Active ?? true),
+      case 'tax-codes': {
+        // QuickBooks encodes reverse charge as a code pair — a positive rate
+        // that adds output VAT and a negative "N-" counterpart that reverses
+        // it. hisab.ai's `tax_rates` model requires a non-negative percentage
+        // and carries the mechanism on `is_reverse_charge`, so the magnitude of
+        // RateValue is the rate and SpecialTaxType drives the flag. Non
+        // reverse-charge codes (NONE / ZERO_RATE / …) are unaffected.
+        const rawRate = Number(value(row.RateValue ?? 0))
+        return {
+          name: value(row.Name),
+          rate: value(Number.isFinite(rawRate) ? Math.abs(rawRate) : 0),
+          type: 'VAT',
+          isDefault: 'false',
+          isReverseCharge: value(row.SpecialTaxType).toUpperCase() === 'REVERSE_CHARGE' ? 'true' : 'false',
+          isActive: value(row.Active ?? true),
+        }
       }
       case 'invoices':
       case 'bills':

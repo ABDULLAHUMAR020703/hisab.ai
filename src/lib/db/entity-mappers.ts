@@ -247,6 +247,7 @@ export function mapTaxRateRow(row: Record<string, unknown>): TaxRateRecord {
     category: String(row.category ?? row.type ?? 'VAT'),
     zatcaMapping: String(row.zatca_mapping ?? 'STANDARD_RATED'),
     isDefault: Boolean(row.is_default ?? false),
+    isReverseCharge: Boolean(row.is_reverse_charge ?? false),
     isActive: Boolean(row.is_active ?? true),
     createdAt: requireDate(String(row.created_at)),
   }

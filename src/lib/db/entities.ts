@@ -211,6 +211,7 @@ export interface TaxRateRecord {
   category: string
   zatcaMapping: string
   isDefault: boolean
+  isReverseCharge: boolean
   isActive: boolean
   createdAt: Date
 }

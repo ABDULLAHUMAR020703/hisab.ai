@@ -125,6 +125,7 @@ export const supabaseTaxRateRepository: TaxRateRepository = {
         rate: input.rate,
         type: input.type ?? 'VAT',
         is_default: input.isDefault ?? false,
+        is_reverse_charge: input.isReverseCharge ?? false,
         is_active: input.isActive ?? true,
       })
       .select('*')
@@ -153,6 +154,7 @@ export const supabaseTaxRateRepository: TaxRateRepository = {
     if (input.rate !== undefined) patch.rate = input.rate
     if (input.type !== undefined) patch.type = input.type
     if (input.isDefault !== undefined) patch.is_default = input.isDefault
+    if (input.isReverseCharge !== undefined) patch.is_reverse_charge = input.isReverseCharge
     if (input.isActive !== undefined) patch.is_active = input.isActive
 
     const { data, error } = await db

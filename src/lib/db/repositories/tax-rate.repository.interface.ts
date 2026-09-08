@@ -24,6 +24,7 @@ export interface TaxRateCreateInput {
   rate: number
   type?: string
   isDefault?: boolean
+  isReverseCharge?: boolean
   isActive?: boolean
 }
 
@@ -32,6 +33,7 @@ export interface TaxRateUpdateInput {
   rate?: number
   type?: string
   isDefault?: boolean
+  isReverseCharge?: boolean
   isActive?: boolean
 }
 
