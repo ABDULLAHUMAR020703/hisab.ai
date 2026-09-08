@@ -7,11 +7,15 @@
  */
 import { randomUUID } from 'node:crypto'
 
+/** PostgREST's default `max-rows` — an unbounded select never returns more than this. */
+export const POSTGREST_MAX_ROWS = 1000
+
 type Row = Record<string, unknown>
 
 interface Result {
   data: unknown
   error: { message: string; code?: string } | null
+  count?: number
 }
 
 /** A partial unique index: rows where `where` holds must have a unique `key`. */
@@ -31,11 +35,15 @@ class FakeQuery implements PromiseLike<Result> {
   private onConflict: string[] = []
   private singleRow = false
   private maybe = false
+  private rangeFromTo: [number, number] | null = null
+  private countMode: 'exact' | null = null
+  private headOnly = false
 
   constructor(
     private readonly store: Map<string, Row[]>,
     private readonly table: string,
     private readonly indexes: FakeUniqueIndex[] = [],
+    private readonly countDelta: Record<string, number> = {},
   ) {}
 
   private violatesUniqueIndex(candidate: Row, ignore?: Row): { message: string } | null {
@@ -53,7 +61,12 @@ class FakeQuery implements PromiseLike<Result> {
     return this.store.get(this.table)!
   }
 
-  select() { this.selecting = true; return this }
+  select(_cols?: string, opts?: { count?: 'exact'; head?: boolean }) {
+    this.selecting = true
+    if (opts?.count) this.countMode = opts.count
+    if (opts?.head) this.headOnly = true
+    return this
+  }
   eq(column: string, value: unknown) { this.filters.push([column, 'eq', value]); return this }
   neq(column: string, value: unknown) { this.filters.push([column, 'neq', value]); return this }
   lt(column: string, value: unknown) { this.filters.push([column, 'lt', value]); return this }
@@ -72,7 +85,7 @@ class FakeQuery implements PromiseLike<Result> {
   }
   order(column: string, opts?: { ascending?: boolean }) { this.orderBy = { column, ascending: opts?.ascending ?? true }; return this }
   limit(n: number) { this.limitN = n; return this }
-  range() { return this }
+  range(from: number, to: number) { this.rangeFromTo = [from, to]; return this }
   abortSignal() { return this }
   maybeSingle() { this.maybe = true; return this }
   single() { this.singleRow = true; return this }
@@ -168,6 +181,7 @@ class FakeQuery implements PromiseLike<Result> {
 
     // select
     let result = rows.filter((row) => this.matches(row))
+    const matchedCount = result.length
     if (this.orderBy) {
       const { column, ascending } = this.orderBy
       result = [...result].sort((a, b) => {
@@ -176,11 +190,22 @@ class FakeQuery implements PromiseLike<Result> {
         return (av < bv ? -1 : av > bv ? 1 : 0) * (ascending ? 1 : -1)
       })
     }
-    if (this.limitN != null) result = result.slice(0, this.limitN)
+    if (this.headOnly) {
+      const fudged = matchedCount + (this.countDelta[this.table] ?? 0)
+      return { data: null, error: null, ...(this.countMode ? { count: fudged } : {}) } as Result
+    }
+    if (this.rangeFromTo) {
+      result = result.slice(this.rangeFromTo[0], this.rangeFromTo[1] + 1)
+    } else if (this.limitN != null) {
+      result = result.slice(0, this.limitN)
+    } else if (!this.singleRow && !this.maybe) {
+      // Simulate PostgREST's default max-rows cap on an unbounded select.
+      result = result.slice(0, POSTGREST_MAX_ROWS)
+    }
     if (this.singleRow || this.maybe) {
       return { data: result[0] ?? null, error: null }
     }
-    return { data: result, error: null }
+    return { data: result, error: null, ...(this.countMode ? { count: matchedCount } : {}) } as Result
   }
 
   then<TResult1 = Result, TResult2 = never>(
@@ -261,6 +286,8 @@ class FakeBucket {
 export interface FakeSupabase {
   db: Map<string, Row[]>
   objects: Map<string, FakeStorageObject>
+  /** Mutable: adds N to a table's head `count` result, to simulate a pagination anomaly. */
+  countDelta: Record<string, number>
   client: {
     from(table: string): FakeQuery
     storage: {
@@ -274,12 +301,15 @@ export function createFakeSupabase(options?: {
   failUpload?: (path: string) => boolean
   failList?: (path: string) => boolean
   uniqueIndexes?: FakeUniqueIndex[]
+  /** Adds N to a table's head `count` result, to simulate a pagination anomaly. */
+  countDelta?: Record<string, number>
 }): FakeSupabase {
   const db = new Map<string, Row[]>()
   const objects = new Map<string, FakeStorageObject>()
   const indexes = options?.uniqueIndexes ?? []
+  const countDelta = options?.countDelta ?? {}
   const client = {
-    from: (table: string) => new FakeQuery(db, table, indexes),
+    from: (table: string) => new FakeQuery(db, table, indexes, countDelta),
     storage: {
       from: () => new FakeBucket(objects, options?.failUpload, options?.failList),
       // The fake models one object store; report a single quota bucket so the
@@ -287,7 +317,7 @@ export function createFakeSupabase(options?: {
       listBuckets: async () => ({ data: [{ id: 'quickbooks-migration' }], error: null }),
     },
   }
-  return { db, objects, client }
+  return { db, objects, countDelta, client }
 }
 
 /** The "one active step per snapshot" guard from migration 069 (PENDING + RUNNING). */

@@ -17,6 +17,15 @@ import type {
 
 const TABLE = 'quickbooks_snapshot_attachments'
 
+/**
+ * Rows fetched per page. PostgREST caps a single response at its configured
+ * `max-rows` (1000 by default), so the ledger MUST be paged — a snapshot can
+ * have tens of thousands of Attachables.
+ */
+export const LEDGER_PAGE_SIZE = 1000
+/** Refuse to build an absurdly large in-memory ledger (guards a pagination loop bug). */
+const LEDGER_SANE_MAX = 5_000_000
+
 function mapRow(row: Record<string, unknown>): SnapshotAttachmentLedgerEntry {
   return {
     attachableId: String(row.attachable_id),
@@ -32,14 +41,57 @@ function mapRow(row: Record<string, unknown>): SnapshotAttachmentLedgerEntry {
   }
 }
 
-export async function listAttachmentLedger(snapshotId: string): Promise<SnapshotAttachmentLedgerEntry[]> {
-  const { data, error } = await createAdminClient()
+/** Exact row count for a snapshot's ledger (does not transfer any rows). */
+export async function countAttachmentLedger(snapshotId: string): Promise<number> {
+  const { count, error } = await createAdminClient()
     .from(TABLE)
-    .select('*')
+    .select('*', { count: 'exact', head: true })
     .eq('snapshot_id', snapshotId)
-    .order('attachable_id')
   if (error) throw error
-  return (data ?? []).map(mapRow)
+  return count ?? 0
+}
+
+/**
+ * The COMPLETE attachment ledger for a snapshot.
+ *
+ * Deterministically paged by `attachable_id` until a short page is returned,
+ * then cross-checked against `count: 'exact'` — a mismatch throws rather than
+ * silently truncating. Duplicate ids across page boundaries are de-duplicated
+ * defensively. Safe for tens of thousands of rows.
+ */
+export async function listAttachmentLedger(snapshotId: string): Promise<SnapshotAttachmentLedgerEntry[]> {
+  const db = createAdminClient()
+  const expected = await countAttachmentLedger(snapshotId)
+
+  const out: SnapshotAttachmentLedgerEntry[] = []
+  const seen = new Set<string>()
+  for (let offset = 0; ; offset += LEDGER_PAGE_SIZE) {
+    const { data, error } = await db
+      .from(TABLE)
+      .select('*')
+      .eq('snapshot_id', snapshotId)
+      .order('attachable_id', { ascending: true })
+      .range(offset, offset + LEDGER_PAGE_SIZE - 1)
+    if (error) throw error
+    const rows = data ?? []
+    for (const row of rows) {
+      const id = String(row.attachable_id)
+      if (seen.has(id)) continue
+      seen.add(id)
+      out.push(mapRow(row))
+    }
+    if (out.length > LEDGER_SANE_MAX) {
+      throw new Error(`attachment ledger for ${snapshotId} exceeds the sane maximum (${out.length} rows)`)
+    }
+    if (rows.length < LEDGER_PAGE_SIZE) break
+  }
+
+  if (out.length !== expected) {
+    throw new Error(
+      `attachment ledger pagination anomaly for ${snapshotId}: count says ${expected} rows, retrieved ${out.length}`,
+    )
+  }
+  return out
 }
 
 export async function upsertAttachmentLedgerEntry(

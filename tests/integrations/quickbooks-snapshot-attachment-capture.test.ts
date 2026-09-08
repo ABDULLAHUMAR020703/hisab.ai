@@ -345,6 +345,60 @@ test('Phase 2: runAttachmentExtraction rethrows an OAuth failure; a refresh+repl
   assert.equal(h.writes.length, 3, 'three distinct Storage writes, none duplicated')
 })
 
+test('INVARIANT A/B/D: replay after OAuth refresh with 8000+ prior ledger rows — budget honoured, nothing re-captured', async () => {
+  // Simulate run 1 having captured ~800 MB across 8000 attachables, ledger fully loaded.
+  const seed: SnapshotAttachmentLedgerEntry[] = []
+  for (let i = 0; i < 8000; i += 1) {
+    const captured = i < 800 // 800 captured @ 1 MB = 800 MB, rest skipped
+    seed.push({
+      attachableId: `a${String(i).padStart(5, '0')}`, entityRef: null, fileName: `f${i}.pdf`,
+      contentType: 'application/pdf', sourceSize: 1_000_000,
+      storagePath: captured ? `attachments/a${i}/f.pdf` : null,
+      status: captured ? 'captured' : 'skipped_budget',
+      reason: captured ? null : 'over budget', capturedBytes: captured ? 1_000_000 : null,
+      checksum: captured ? 'x' : null,
+    })
+  }
+  const h = harness({ seed, binary: () => ({ bytes: bytesOf(1_000_000), contentType: null }) })
+
+  // The replayed step re-processes the SAME 3 metadata pages (a00000..a07999).
+  const pages = Array.from({ length: 8 }, (_, p) =>
+    Array.from({ length: 1000 }, (_, k) => {
+      const i = p * 1000 + k
+      return { Id: `a${String(i).padStart(5, '0')}`, FileName: `f${i}.pdf`, Size: 1_000_000 }
+    }),
+  )
+  const result = await run(h, pages, 804_775_443, { pagesWritten: 8, recordsWritten: 8000, nextStartPosition: 1 })
+
+  assert.equal(result.status, 'completed')
+  assert.equal(h.downloads.length, 0, 'A: not one already-captured attachment is re-downloaded')
+  assert.equal(h.writes.length, 0, 'no Storage writes on the replay')
+  const captured = [...h.ledger.values()].filter((e) => e.status === 'captured')
+  assert.equal(captured.length, 800, 'B/D: still exactly 800 captured — budget was not inflated by the replay')
+  assert.equal(captured.reduce((s, e) => s + (e.capturedBytes ?? 0), 0), 800_000_000)
+})
+
+test('INVARIANT E: the step summary reconciles exactly with the full ledger', async () => {
+  const h = harness({ binary: () => ({ bytes: bytesOf(100), contentType: null }) })
+  await run(h, [[
+    { Id: 'a1', FileName: 'a1.pdf', Size: 100 },
+    { Id: 'a2', FileName: 'a2.pdf', Size: 100 },
+    { Id: 'a3', FileName: 'a3.pdf', Size: 100 },
+    { Id: 'a4', FileName: '' }, // unavailable
+  ]], 250) // fits 2
+
+  const entries = [...h.ledger.values()]
+  const { summariseAttachmentLedger } = requireModule(
+    '../../src/lib/import-export/quickbooks/snapshot/snapshot-attachment-ledger',
+  ) as typeof import('../../src/lib/import-export/quickbooks/snapshot/snapshot-attachment-ledger')
+  const s = summariseAttachmentLedger(entries)
+  assert.equal(s.captured, entries.filter((e) => e.status === 'captured').length)
+  assert.equal(s.skippedBudget, entries.filter((e) => e.status === 'skipped_budget').length)
+  assert.equal(s.unavailable, entries.filter((e) => e.status === 'unavailable').length)
+  assert.equal(s.totalCandidates, entries.length)
+  assert.equal((s.captured ?? 0) + (s.skippedBudget ?? 0) + (s.failed ?? 0) + (s.unavailable ?? 0), entries.length)
+})
+
 test('captureOneAttachment: no FileName -> UNAVAILABLE, never downloaded', async () => {
   const calls: string[] = []
   const entry = await captureOneAttachment({

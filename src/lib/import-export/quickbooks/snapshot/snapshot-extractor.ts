@@ -548,7 +548,13 @@ export async function runAttachmentExtraction(input: {
           const id = String(meta.Id ?? '')
           if (!id) continue
           const existing = ledger.get(id)
-          if (existing && existing.status === 'captured') continue // resume: never re-download
+          // `captured` and `skipped_budget` are terminal for the snapshot's
+          // lifetime: a plain resume / OAuth-refresh replay must NOT re-download
+          // a captured binary or re-evaluate a budget-skipped one against a
+          // (now different) running total. Only `failed` / `unavailable` /
+          // `pending` are re-attempted. A fresh snapshot is the only way to
+          // reconsider a budget skip.
+          if (existing && (existing.status === 'captured' || existing.status === 'skipped_budget')) continue
           const entry = await captureOneAttachment({ meta, id, budgetBytes, capturedBytes, ports })
           ledger.set(id, entry)
           await ports.upsertLedger(entry)
