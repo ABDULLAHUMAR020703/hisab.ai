@@ -63,7 +63,15 @@ export interface ProcessImportInput {
   trace?: MigrationTrace
 }
 
-function dependencyOrderedRows(moduleKey:string,rows:MappedRow[]):MappedRow[]{
+/**
+ * Orders `accounts` rows so a parent account always precedes its children
+ * (QuickBooks `parentNo` -> `accountNo`). Every other module is returned
+ * unchanged. Exported so the snapshot reader can apply the SAME global
+ * ordering across a whole Storage page file BEFORE it is sliced into
+ * 100-record import windows — otherwise a child could land in an earlier
+ * window than its parent. Pure and idempotent on an already-valid ordering.
+ */
+export function dependencyOrderedRows(moduleKey:string,rows:MappedRow[]):MappedRow[]{
   if(moduleKey!=='accounts')return rows
   const pending=[...rows],ordered:MappedRow[]=[],available=new Set<string>()
   while(pending.length){

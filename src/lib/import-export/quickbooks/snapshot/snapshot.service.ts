@@ -352,7 +352,10 @@ export interface SnapshotReadCursor {
   companyId: string
   snapshotId: string
   resourceKey: string
+  /** 1-based index into the resource's ordered Storage page files. */
   nextPage: number
+  /** Records of the page file at `nextPage` already consumed by earlier batches. */
+  pageOffset: number
   recordsRead: number
   exhausted: boolean
 }
@@ -372,6 +375,7 @@ export async function getReadCursor(importJobId: string, resourceKey: string): P
     snapshotId: String(data.snapshot_id),
     resourceKey: String(data.resource_key),
     nextPage: Number(data.next_page ?? 1),
+    pageOffset: Number(data.page_offset ?? 0),
     recordsRead: Number(data.records_read ?? 0),
     exhausted: Boolean(data.exhausted),
   }
@@ -383,6 +387,7 @@ export async function upsertReadCursor(input: {
   snapshotId: string
   resourceKey: string
   nextPage: number
+  pageOffset: number
   recordsRead: number
   exhausted: boolean
 }): Promise<void> {
@@ -395,6 +400,7 @@ export async function upsertReadCursor(input: {
         snapshot_id: input.snapshotId,
         resource_key: input.resourceKey,
         next_page: input.nextPage,
+        page_offset: input.pageOffset,
         records_read: input.recordsRead,
         exhausted: input.exhausted,
         updated_at: new Date().toISOString(),
